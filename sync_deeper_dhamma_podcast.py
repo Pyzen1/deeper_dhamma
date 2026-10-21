@@ -17,6 +17,7 @@ import re
 import shutil
 import sys
 import time
+import logging
 import unicodedata
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +31,47 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+# Standard application logger
+logger = logging.getLogger("deeper_dhamma")
+
+
+def setup_logging(log_file: Path) -> None:
+    """Configures dual logging: clean output for console, full detailed log for file."""
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+
+    # File handler: full timestamps, log levels, detailed diagnostics
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)-7s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(fh)
+
+    # Console handler: clean, human-readable terminal output
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(ch)
+
+
+class YTDLPLogAdapter:
+    """Adapts yt-dlp messages: writes all debug output to log file, keeps console clean."""
+
+    def __init__(self, target_logger: logging.Logger):
+        self.target_logger = target_logger
+
+    def debug(self, msg: str) -> None:
+        self.target_logger.debug(f"[yt-dlp] {msg}")
+
+    def info(self, msg: str) -> None:
+        self.target_logger.info(f"[yt-dlp] {msg}")
+
+    def warning(self, msg: str) -> None:
+        self.target_logger.warning(f"[yt-dlp warning] {msg}")
+
+    def error(self, msg: str) -> None:
+        self.target_logger.error(f"[yt-dlp error] {msg}")
 
 # Resilient os.replace to resolve Windows file-locking race conditions during EmbedThumbnail.
 # When ffmpeg finishes writing a media file, Windows Defender / Search Indexer can momentarily
@@ -255,16 +297,16 @@ def fetch_podbean_page(page_num: int, include_store: bool = False):
 
 def crawl_full_catalog(workers: int = 8) -> list[dict]:
     """Dynamically discovers archive page count from Page 1 and crawls all pages in parallel (~4-6s)."""
-    print("[*] Fetching Page 1 to discover archive size...")
+    logger.info("[*] Fetching Page 1 to discover archive size...")
     store_p1, p1_eps = fetch_podbean_page(1, include_store=True)
     if not p1_eps:
-        print("[-] Error: Failed to fetch Page 1 from deeperdhamma.podbean.com.", file=sys.stderr)
+        logger.error("[-] Error: Failed to fetch Page 1 from deeperdhamma.podbean.com.")
         return []
 
     total_pages = store_p1.get("listTotalPage", 166)
     total_count = store_p1.get("listTotalCount", len(p1_eps))
-    print(f"[*] Discovered {total_count} total episodes across {total_pages} pages.")
-    print(f"[*] Crawling remaining pages (2 to {total_pages}) using {workers} parallel workers...")
+    logger.info(f"[*] Discovered {total_count} total episodes across {total_pages} pages.")
+    logger.info(f"[*] Crawling remaining pages (2 to {total_pages}) using {workers} parallel workers...")
 
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -275,7 +317,7 @@ def crawl_full_catalog(workers: int = 8) -> list[dict]:
         all_episodes.extend(eps)
 
     elapsed = time.time() - t0
-    print(f"[+] Crawl finished in {elapsed:.2f}s: {len(all_episodes)} total episodes indexed.")
+    logger.info(f"[+] Crawl finished in {elapsed:.2f}s: {len(all_episodes)} total episodes indexed.")
     return all_episodes
 
 
@@ -290,12 +332,12 @@ def get_or_update_catalog(catalog_file: Path, refresh: bool = False) -> list[dic
         try:
             with open(catalog_file, "r", encoding="utf-8") as f:
                 catalog = json.load(f)
-            print(f"[+] Loaded local catalog: {len(catalog)} episodes from {catalog_file.name}")
+            logger.info(f"[+] Loaded local catalog: {len(catalog)} episodes from {catalog_file.name}")
 
             # Query Page 1 to verify whether Podbean state changed
             store_p1, page1_eps = fetch_podbean_page(1, include_store=True)
             if not store_p1 and not page1_eps:
-                print("[!] Warning: Could not reach deeperdhamma.podbean.com to verify latest changes. Using cached catalog.")
+                logger.warning("[!] Warning: Could not reach deeperdhamma.podbean.com to verify latest changes. Using cached catalog.")
                 return catalog
 
             remote_total = store_p1.get("listTotalCount", len(catalog))
@@ -304,10 +346,10 @@ def get_or_update_catalog(catalog_file: Path, refresh: bool = False) -> list[dic
 
             # 1. Perfectly in sync
             if top_remote_id == top_local_id and len(catalog) == remote_total:
-                print(f"[✓] Catalog is up to date ({len(catalog)} episodes indexed).")
+                logger.info(f"[✓] Catalog is up to date ({len(catalog)} episodes indexed).")
                 return catalog
 
-            print(f"[*] Catalog update detected: local has {len(catalog)} eps, remote reports {remote_total} eps.")
+            logger.info(f"[*] Catalog update detected: local has {len(catalog)} eps, remote reports {remote_total} eps.")
 
             # 2. Check if new episodes were published at the top
             existing_ids = {ep["id"] for ep in catalog}
@@ -327,12 +369,12 @@ def get_or_update_catalog(catalog_file: Path, refresh: bool = False) -> list[dic
                 cur_page_eps = fetch_podbean_page(page_idx)
 
             if new_top_eps:
-                print(f"[+] Found {len(new_top_eps)} new episode(s) released on Podbean.")
+                logger.info(f"[+] Found {len(new_top_eps)} new episode(s) released on Podbean.")
                 catalog = new_top_eps + catalog
 
             # 3. If there are still missing older releases or count discrepancies anywhere in the archive
             if len(catalog) < remote_total:
-                print(f"[*] Discovered missing older release(s) ({len(catalog)} vs remote {remote_total}). Crawling full archive...")
+                logger.info(f"[*] Discovered missing older release(s) ({len(catalog)} vs remote {remote_total}). Crawling full archive...")
                 full_archive = crawl_full_catalog()
                 if full_archive:
                     seen = set()
@@ -346,19 +388,19 @@ def get_or_update_catalog(catalog_file: Path, refresh: bool = False) -> list[dic
             # Save the refreshed/updated catalog
             with open(catalog_file, "w", encoding="utf-8") as f:
                 json.dump(catalog, f, indent=2, ensure_ascii=False)
-            print(f"[+] Catalog updated and saved to {catalog_file.name} ({len(catalog)} total episodes).")
+            logger.info(f"[+] Catalog updated and saved to {catalog_file.name} ({len(catalog)} total episodes).")
 
             return catalog
         except Exception as e:
-            print(f"[!] Warning reading/updating local catalog ({e}). Re-generating...")
+            logger.warning(f"[!] Warning reading/updating local catalog ({e}). Re-generating...")
 
-    print(f"[*] Local catalog '{catalog_file.name}' not found or refresh requested.")
-    print(f"[*] Generating local catalog '{catalog_file.name}' from Podbean...")
+    logger.info(f"[*] Local catalog '{catalog_file.name}' not found or refresh requested.")
+    logger.info(f"[*] Generating local catalog '{catalog_file.name}' from Podbean...")
     catalog = crawl_full_catalog()
     if catalog:
         with open(catalog_file, "w", encoding="utf-8") as f:
             json.dump(catalog, f, indent=2, ensure_ascii=False)
-        print(f"[+] Saved local copy to {catalog_file.name}")
+        logger.info(f"[+] Saved local copy to {catalog_file.name}")
     return catalog
 
 
@@ -391,10 +433,10 @@ def reorganize_existing_files(target_dir: Path, catalog: list[dict], allow_non_e
             dest.parent.mkdir(parents=True, exist_ok=True)
             try:
                 shutil.move(str(p), str(dest))
-                print(f"[↻] Reorganized existing file:\n    {rel} -> {matched_target}")
+                logger.info(f"[↻] Reorganized existing file:\n    {rel} -> {matched_target}")
                 moved_count += 1
             except Exception as e:
-                print(f"[!] Could not move {rel} to {matched_target}: {e}")
+                logger.warning(f"[!] Could not move {rel} to {matched_target}: {e}")
 
     # Clean up empty parent directories if any
     for y_dir in list(target_dir.glob("????")):
@@ -412,7 +454,7 @@ def reorganize_existing_files(target_dir: Path, catalog: list[dict], allow_non_e
                     pass
 
     if moved_count > 0:
-        print(f"[+] Reorganized {moved_count} existing file(s) into their true date/year folders.")
+        logger.info(f"[+] Reorganized {moved_count} existing file(s) into their true date/year folders.")
     return moved_count
 
 
@@ -514,16 +556,27 @@ def main():
         default=False,
         help="Include non-English talks (e.g. Thai language, Sinhalese translation). Default is English only.",
     )
+    parser.add_argument(
+        "--log-file",
+        default="sync_deeper_dhamma.log",
+        help="Script log file path (default: sync_deeper_dhamma.log in repo root)",
+    )
 
     args = parser.parse_args()
+
+    script_dir = Path(__file__).resolve().parent
+    log_path = script_dir / args.log_file
+    setup_logging(log_path)
+
+    logger.debug(f"=== Sync Session Initialized ===")
+    logger.debug(f"Command line arguments: {args}")
 
     # Ensure required external binaries (auto-detect in WinGet if not in PATH)
     for binary in ("aria2c", "ffmpeg"):
         if not ensure_binary(binary):
-            print(f"[-] Error: Required dependency '{binary}' was not found.", file=sys.stderr)
+            logger.error(f"[-] Error: Required dependency '{binary}' was not found.")
             sys.exit(1)
 
-    script_dir = Path(__file__).resolve().parent
     target_dir = args.target_dir.resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
     os.chdir(target_dir)
@@ -538,11 +591,11 @@ def main():
     reorganize_existing_files(target_dir, catalog, allow_non_english=args.allow_non_english)
 
     if args.reorganize:
-        print("[✓] Reorganization finished.")
+        logger.info("[✓] Reorganization finished.")
         return
 
     if args.catalog_only or (args.limit is not None and args.limit <= 0):
-        print(f"[+] Catalog '{args.catalog_file}' is ready ({len(catalog)} episodes indexed). Exiting as requested.")
+        logger.info(f"[+] Catalog '{args.catalog_file}' is ready ({len(catalog)} episodes indexed). Exiting as requested.")
         return
 
     # Read archive.log into memory
@@ -605,37 +658,47 @@ def main():
     pending_episodes = all_pending[: args.limit] if args.limit is not None else all_pending
 
     lang_desc = "English Only" if not args.allow_non_english else "All Languages"
-    print(f"[*] Target Directory:    {target_dir}")
-    print(f"[*] Language Filter:     {lang_desc}")
-    print(f"[*] Episodes in Scope:   {total_in_scope}" + (f" (Year: {args.year})" if args.year else ""))
-    print(f"[*] Already Synced:      {completed}")
-    print(f"[*] Pending Download:    {len(all_pending)}" + (f" (Capped to first {len(pending_episodes)} this run)" if args.limit is not None else ""))
-    print(f"[*] Speed Cap:           {args.rate_limit_mb} MB/s")
-    print(f"[*] Connections / File:  {args.connections}")
-    print(f"[*] Inter-Episode Delay: {args.sleep_seconds}s")
-    print("[*] Cover Art:           Embedded directly into audio (ID3v2 APIC)")
-    print("[*] Press Ctrl+C at any time to pause. Rerunning will resume safely.\n")
+    logger.info(f"[*] Target Directory:    {target_dir}")
+    logger.info(f"[*] Script Log File:     {log_path}")
+    logger.info(f"[*] Language Filter:     {lang_desc}")
+    logger.info(f"[*] Episodes in Scope:   {total_in_scope}" + (f" (Year: {args.year})" if args.year else ""))
+    logger.info(f"[*] Already Synced:      {completed}")
+    logger.info(f"[*] Pending Download:    {len(all_pending)}" + (f" (Capped to first {len(pending_episodes)} this run)" if args.limit is not None else ""))
+    logger.info(f"[*] Speed Cap:           {args.rate_limit_mb} MB/s")
+    logger.info(f"[*] Connections / File:  {args.connections}")
+    logger.info(f"[*] Inter-Episode Delay: {args.sleep_seconds}s")
+    logger.info("[*] Cover Art:           Embedded directly into audio (ID3v2 APIC)")
+    logger.info("[*] Press Ctrl+C at any time to pause. Rerunning will resume safely.\n")
 
     if not pending_episodes:
-        print("[✓] All episodes in scope are already downloaded and up to date!")
+        logger.info("[✓] All episodes in scope are already downloaded and up to date!")
         return
 
     rate_limit_arg = f"--max-overall-download-limit={max(1, args.rate_limit_mb)}M"
-    aria2_args = f"-x {max(1, args.connections)} -s {max(1, args.connections)} -k 1M -c {rate_limit_arg}"
+    aria2_args = [
+        f"-x{max(1, args.connections)}",
+        f"-s{max(1, args.connections)}",
+        "-k1M",
+        "-c",
+        rate_limit_arg,
+        "--console-log-level=warn",
+        "--summary-interval=0",
+    ]
 
     success_count = 0
     for idx, ep in enumerate(pending_episodes, start=1):
         current_num = completed + idx
-        print(f"\n[{current_num}/{total_in_scope}] Ingesting: {ep['title']}")
-        print(f"   -> Folder: {ep['year']}/{ep['series']}/")
-        print(f"   -> File:   {ep['filename']}.mp3")
+        logger.info(f"[{current_num}/{total_in_scope}] Ingesting: {ep['title']}")
+        logger.info(f"   -> Folder: {ep['year']}/{ep['series']}/")
+        logger.info(f"   -> File:   {ep['filename']}.mp3")
 
         ydl_opts = {
             "downloader": "aria2c",
-            "downloader_args": {"aria2c": aria2_args.split()},
+            "downloader_args": {"aria2c": aria2_args},
             "download_archive": str(archive_file),
             "add_metadata": True,
             "writethumbnail": True,
+            "logger": YTDLPLogAdapter(logger),
             "postprocessors": [
                 {
                     "key": "FFmpegMetadata",
@@ -650,28 +713,35 @@ def main():
             "retries": 10,
             "fragment_retries": 10,
             "outtmpl": "%(custom_year)s/%(custom_series)s/%(custom_filename)s.%(ext)s",
-            "quiet": False,
+            "quiet": True,
+            "no_warnings": False,
         }
 
+        t0 = time.time()
         try:
             ydl = yt_dlp.YoutubeDL(ydl_opts)
             ydl.add_post_processor(CatalogEpisodePP(ydl, ep), when="pre_process")
             ret = ydl.download([ep["media_url"]])
             if ret == 0:
                 success_count += 1
-                # Also log ID to archive.log for redundancy
+                elapsed = time.time() - t0
+                dest_mp3 = target_dir / ep["year"] / ep["series"] / f"{ep['filename']}.mp3"
+                dest_m4a = target_dir / ep["year"] / ep["series"] / f"{ep['filename']}.m4a"
+                dest_file = dest_mp3 if dest_mp3.exists() else dest_m4a
+                size_str = f" ({dest_file.stat().st_size / (1024 * 1024):.1f} MB)" if dest_file.exists() else ""
+                logger.info(f"   [✓] Completed in {elapsed:.1f}s{size_str} - tagged with cover art\n")
                 if ep.get("id"):
                     with open(archive_file, "a", encoding="utf-8") as af:
                         af.write(f"generic {ep['id']}\n")
             if args.sleep_seconds > 0 and idx < len(pending_episodes):
                 time.sleep(args.sleep_seconds)
         except KeyboardInterrupt:
-            print("\n[*] Interrupted by user. Run again to resume downloads.")
+            logger.info("\n[*] Interrupted by user. Run again to resume downloads.")
             sys.exit(130)
         except Exception as e:
-            print(f"[!] Error downloading '{ep['title']}': {e}")
+            logger.error(f"[!] Error downloading '{ep['title']}': {e}", exc_info=True)
 
-    print(f"\n[✓] Sync finished: {success_count} episode(s) downloaded.")
+    logger.info(f"[✓] Sync finished: {success_count} episode(s) downloaded.")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,10 @@ archive/
 *.part
 *.jpg
 
+# Logs (keep download tracker archive.log)
+*.log
+!archive.log
+
 # Python cache and environments
 __pycache__/
 *.py[cod]
