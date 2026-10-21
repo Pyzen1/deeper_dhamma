@@ -685,7 +685,8 @@ def main():
 
         ep_id = ep.get("id") or ""
         media_url = ep.get("media_url") or ""
-        guid_match = any(e in archive_entries for e in [ep_id, media_url, filename] if e)
+        url_stem = Path(media_url.split("?")[0]).stem if media_url else ""
+        guid_match = any(e in archive_entries for e in [ep_id, media_url, url_stem, filename] if e)
 
         if file_exists or guid_match:
             continue
@@ -785,9 +786,6 @@ def main():
                 dest_file = dest_mp3 if dest_mp3.exists() else dest_m4a
                 size_str = f" ({dest_file.stat().st_size / (1024 * 1024):.1f} MB)" if dest_file.exists() else ""
                 logger.info(f"   [✓] Completed in {elapsed:.1f}s{size_str} - tagged with cover art\n")
-                if ep.get("id"):
-                    with open(archive_file, "a", encoding="utf-8") as af:
-                        af.write(f"generic {ep['id']}\n")
             if args.sleep_seconds > 0 and idx < len(pending_episodes):
                 time.sleep(args.sleep_seconds)
         except KeyboardInterrupt:
