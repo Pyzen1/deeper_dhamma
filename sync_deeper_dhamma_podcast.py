@@ -529,7 +529,7 @@ def main():
     os.chdir(target_dir)
 
     catalog_path = (script_dir / args.catalog_file) if (script_dir / args.catalog_file).exists() else (target_dir / args.catalog_file)
-    archive_file = (target_dir / args.archive_file) if (target_dir / args.archive_file).exists() else (script_dir / args.archive_file)
+    archive_file = (script_dir / args.archive_file) if (script_dir / args.archive_file).exists() else (target_dir / args.archive_file)
 
     # Load or crawl catalog
     catalog = get_or_update_catalog(catalog_path, refresh=args.refresh_catalog)
