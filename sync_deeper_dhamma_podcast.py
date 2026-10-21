@@ -18,6 +18,7 @@ import shutil
 import sys
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 import unicodedata
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -37,16 +38,16 @@ logger = logging.getLogger("deeper_dhamma")
 
 
 def setup_logging(log_file: Path) -> None:
-    """Configures dual logging: clean output for console, full detailed log for file."""
+    """Configures dual logging: clean output for console, compact rotating log for file."""
     logger.setLevel(logging.DEBUG)
     logger.handlers.clear()
 
-    # File handler: full timestamps, log levels, detailed diagnostics
+    # Rotating file handler: 5MB per file, max 3 backups to prevent unbounded disk usage
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    fh = logging.FileHandler(log_file, encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)-7s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-    logger.addHandler(fh)
+    rfh = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+    rfh.setLevel(logging.DEBUG)
+    rfh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)-7s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(rfh)
 
     # Console handler: clean, human-readable terminal output
     ch = logging.StreamHandler(sys.stdout)
@@ -56,22 +57,44 @@ def setup_logging(log_file: Path) -> None:
 
 
 class YTDLPLogAdapter:
-    """Adapts yt-dlp messages: writes all debug output to log file, keeps console clean."""
+    """Adapts yt-dlp messages: retains actionable diagnostics while filtering noisy progress ticks."""
+
+    # Substrings that represent high-frequency progress ticks or repetitive downloader noise
+    NOISY_PATTERNS = (
+        "Downloading webpage",
+        "Following redirect to",
+        "Resuming download at byte",
+        "Deleting existing file",
+    )
 
     def __init__(self, target_logger: logging.Logger):
         self.target_logger = target_logger
 
+    def _should_ignore(self, msg: str) -> bool:
+        # Ignore frequent download progress ticks (e.g. "[download]  28.9% of ...")
+        if "[download]" in msg and "%" in msg and "100%" not in msg:
+            return True
+        for pattern in self.NOISY_PATTERNS:
+            if pattern in msg:
+                return True
+        return False
+
     def debug(self, msg: str) -> None:
-        self.target_logger.debug(f"[yt-dlp] {msg}")
+        if self._should_ignore(msg):
+            return
+        self.target_logger.debug(f"[yt-dlp] {msg.strip()}")
 
     def info(self, msg: str) -> None:
-        self.target_logger.info(f"[yt-dlp] {msg}")
+        if self._should_ignore(msg):
+            return
+        self.target_logger.debug(f"[yt-dlp] {msg.strip()}")
 
     def warning(self, msg: str) -> None:
-        self.target_logger.warning(f"[yt-dlp warning] {msg}")
+        self.target_logger.warning(f"[yt-dlp warning] {msg.strip()}")
 
     def error(self, msg: str) -> None:
-        self.target_logger.error(f"[yt-dlp error] {msg}")
+        self.target_logger.error(f"[yt-dlp error] {msg.strip()}")
+
 
 # Resilient os.replace to resolve Windows file-locking race conditions during EmbedThumbnail.
 # When ffmpeg finishes writing a media file, Windows Defender / Search Indexer can momentarily
