@@ -625,7 +625,8 @@ def main():
 
     success_count = 0
     for idx, ep in enumerate(pending_episodes, start=1):
-        print(f"\n[{idx}/{len(pending_episodes)}] Ingesting: {ep['title']}")
+        current_num = completed + idx
+        print(f"\n[{current_num}/{total_in_scope}] Ingesting: {ep['title']}")
         print(f"   -> Folder: {ep['year']}/{ep['series']}/")
         print(f"   -> File:   {ep['filename']}.mp3")
 
