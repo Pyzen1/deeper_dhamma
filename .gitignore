@@ -1,0 +1,20 @@
+# Media archive (downloaded audio and thumbnails)
+archive/
+*.mp3
+*.m4a
+*.part
+*.jpg
+
+# Python cache and environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# System and IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
