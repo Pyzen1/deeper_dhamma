@@ -22,3 +22,11 @@ env/
 Thumbs.db
 .idea/
 .vscode/
+
+# AI and Model weights (in case any local caches occur)
+*.pt
+*.bin
+*.safetensors
+*.onnx
+*.npy
+*.npz
