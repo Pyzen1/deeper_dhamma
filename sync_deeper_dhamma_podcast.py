@@ -57,9 +57,13 @@ def setup_logging(log_file: Path) -> None:
 
 
 class YTDLPLogAdapter:
-    """Adapts yt-dlp messages: retains actionable diagnostics while filtering noisy progress ticks."""
+    """
+    Adapts yt-dlp messages:
+    - Renders active download progress (speed, percent, ETA) dynamically to the live shell.
+    - Excludes high-frequency progress ticks from the log file to prevent log bloat.
+    - Captures actionable debugging diagnostics into the rotating log file.
+    """
 
-    # Substrings that represent high-frequency progress ticks or repetitive downloader noise
     NOISY_PATTERNS = (
         "Downloading webpage",
         "Following redirect to",
@@ -69,9 +73,15 @@ class YTDLPLogAdapter:
 
     def __init__(self, target_logger: logging.Logger):
         self.target_logger = target_logger
+        self.has_active_progress = False
 
-    def _should_ignore(self, msg: str) -> bool:
-        # Ignore frequent download progress ticks (e.g. "[download]  28.9% of ...")
+    def clear_active_progress(self) -> None:
+        if self.has_active_progress:
+            sys.stdout.write("\r" + " " * 80 + "\r")
+            sys.stdout.flush()
+            self.has_active_progress = False
+
+    def _should_ignore_for_log(self, msg: str) -> bool:
         if "[download]" in msg and "%" in msg and "100%" not in msg:
             return True
         for pattern in self.NOISY_PATTERNS:
@@ -80,20 +90,40 @@ class YTDLPLogAdapter:
         return False
 
     def debug(self, msg: str) -> None:
-        if self._should_ignore(msg):
+        clean_msg = msg.strip()
+
+        # Active in-flight download progress: print live to terminal on a single in-place line
+        if "[download]" in clean_msg and "%" in clean_msg and "100%" not in clean_msg:
+            sys.stdout.write(f"\r   -> {clean_msg:<75}")
+            sys.stdout.flush()
+            self.has_active_progress = True
+            return  # Exclude from log file
+
+        if self.has_active_progress:
+            self.clear_active_progress()
+
+        if self._should_ignore_for_log(clean_msg):
             return
-        self.target_logger.debug(f"[yt-dlp] {msg.strip()}")
+
+        self.target_logger.debug(f"[yt-dlp] {clean_msg}")
 
     def info(self, msg: str) -> None:
-        if self._should_ignore(msg):
+        if self.has_active_progress:
+            self.clear_active_progress()
+        if self._should_ignore_for_log(msg):
             return
         self.target_logger.debug(f"[yt-dlp] {msg.strip()}")
 
     def warning(self, msg: str) -> None:
+        if self.has_active_progress:
+            self.clear_active_progress()
         self.target_logger.warning(f"[yt-dlp warning] {msg.strip()}")
 
     def error(self, msg: str) -> None:
+        if self.has_active_progress:
+            self.clear_active_progress()
         self.target_logger.error(f"[yt-dlp error] {msg.strip()}")
+
 
 
 # Resilient os.replace to resolve Windows file-locking race conditions during EmbedThumbnail.
@@ -715,13 +745,14 @@ def main():
         logger.info(f"   -> Folder: {ep['year']}/{ep['series']}/")
         logger.info(f"   -> File:   {ep['filename']}.mp3")
 
+        ydl_adapter = YTDLPLogAdapter(logger)
         ydl_opts = {
             "downloader": "aria2c",
             "downloader_args": {"aria2c": aria2_args},
             "download_archive": str(archive_file),
             "add_metadata": True,
             "writethumbnail": True,
-            "logger": YTDLPLogAdapter(logger),
+            "logger": ydl_adapter,
             "postprocessors": [
                 {
                     "key": "FFmpegMetadata",
@@ -736,8 +767,8 @@ def main():
             "retries": 10,
             "fragment_retries": 10,
             "outtmpl": "%(custom_year)s/%(custom_series)s/%(custom_filename)s.%(ext)s",
-            "quiet": True,
-            "no_warnings": False,
+            "quiet": False,
+            "no_warnings": True,
         }
 
         t0 = time.time()
@@ -745,6 +776,7 @@ def main():
             ydl = yt_dlp.YoutubeDL(ydl_opts)
             ydl.add_post_processor(CatalogEpisodePP(ydl, ep), when="pre_process")
             ret = ydl.download([ep["media_url"]])
+            ydl_adapter.clear_active_progress()
             if ret == 0:
                 success_count += 1
                 elapsed = time.time() - t0
@@ -759,10 +791,13 @@ def main():
             if args.sleep_seconds > 0 and idx < len(pending_episodes):
                 time.sleep(args.sleep_seconds)
         except KeyboardInterrupt:
+            ydl_adapter.clear_active_progress()
             logger.info("\n[*] Interrupted by user. Run again to resume downloads.")
             sys.exit(130)
         except Exception as e:
+            ydl_adapter.clear_active_progress()
             logger.error(f"[!] Error downloading '{ep['title']}': {e}", exc_info=True)
+
 
     logger.info(f"[✓] Sync finished: {success_count} episode(s) downloaded.")
 
