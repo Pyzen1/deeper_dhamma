@@ -34,7 +34,7 @@ class BuddhismLexiconDatabase:
     """
     SQLite-backed Buddhist lexicon providing contextual lookups and disambiguation
     for transcribing and self-correcting Buddhist Dhamma talks.
-    Single master database: data/buddhism_lexicon.db
+    Single master database: databases/buddhism_lexicon.db
     """
 
     def __init__(self, db_path: Optional[Path | str] = None):

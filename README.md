@@ -4,9 +4,10 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
 
 ## Architecture & Features
 
-- **Single Canonical Database (`transcripts/dhamma_transcripts.db`)**: 
-  - Zero filesystem clutter: eliminates loose Markdown/JSON files.
-  - Zero-copy full-text search with SQLite FTS5 external content tables and synchronization triggers.
+- **Centralized Database Storage (`databases/`)**: 
+  - `databases/dhamma_transcripts.db`: Canonical transcripts warehouse & zero-copy FTS5 search index.
+  - `databases/voiceprints.db`: Era-tagged speaker embeddings gallery.
+  - `databases/buddhism_lexicon.db`: Master Pali terminology, translation matrix, and phonetic rule definitions.
 - **High-Accuracy Speech-to-Text (`faster-whisper-large-v3`)**:
   - Float16 on NVIDIA CUDA (RTX 5070 Ti) running **7.0x–13.6x faster than real-time**.
   - Silero VAD speech filtering and Pali doctrinal prompt conditioning.
@@ -67,8 +68,11 @@ python main.py sync --year 2026
 deeper_dhamma/
 ├── main.py                     # Unified CLI entry point
 ├── pyproject.toml              # Modern Python package configuration
-├── data/
-│   └── buddhism_lexicon.db     # Master SQLite Lexicon (SuttaCentral Bodhi/Sujato & BSWA Brahm/Brahmali)
+├── databases/                  # Centralized SQLite databases directory
+│   ├── README.md               # Architecture & lifecycle documentation
+│   ├── buddhism_lexicon.db     # Master SQLite Lexicon (SuttaCentral Bodhi/Sujato & BSWA Brahm/Brahmali)
+│   ├── dhamma_transcripts.db   # Canonical SQLite database & FTS5 search index
+│   └── voiceprints.db          # Reference speaker embeddings gallery
 ├── deeper_dhamma/              # Consolidated Python package
 │   ├── config.py               # C:\ai-models env vars & Windows DLL loading
 │   ├── cli.py                  # Subcommand router
@@ -87,11 +91,7 @@ deeper_dhamma/
 │   ├── downloader.py           # Podbean RSS feed sync
 │   ├── curation.py             # Reference transcript curation & audit review
 │   └── benchmark.py            # Gold-standard accuracy benchmarks
-├── benchmarks/
-│   └── reference_transcripts/  # Verified word-for-word human reference transcripts
-├── transcripts/
-│   └── dhamma_transcripts.db   # Canonical SQLite database & FTS5 search index
-└── voiceprints/
-    └── voiceprints.db          # Reference speaker embeddings gallery
+└── benchmarks/
+    └── reference_transcripts/  # Verified word-for-word human reference transcripts
 ```
 

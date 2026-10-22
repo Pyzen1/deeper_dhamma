@@ -41,14 +41,16 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
 ARCHIVE_DIR = PROJECT_ROOT / "archive"
-DATA_DIR = PROJECT_ROOT / "data"
+DATABASES_DIR = PROJECT_ROOT / "databases"
 CATALOG_PATH = PROJECT_ROOT / "catalog.json"
 ARCHIVE_LOG_PATH = PROJECT_ROOT / "archive.log"
-BUDDHISM_LEXICON_DB_PATH = DATA_DIR / "buddhism_lexicon.db"
+
+BUDDHISM_LEXICON_DB_PATH = DATABASES_DIR / "buddhism_lexicon.db"
 LEXICON_DB_PATH = BUDDHISM_LEXICON_DB_PATH
+VOICEPRINTS_DB_PATH = DATABASES_DIR / "voiceprints.db"
+TRANSCRIPTS_DB_PATH = DATABASES_DIR / "dhamma_transcripts.db"
 
-VOICEPRINTS_DIR = PROJECT_ROOT / "voiceprints"
-VOICEPRINTS_DB_PATH = VOICEPRINTS_DIR / "voiceprints.db"
-
-TRANSCRIPTS_DIR = PROJECT_ROOT / "transcripts"
-TRANSCRIPTS_DB_PATH = TRANSCRIPTS_DIR / "dhamma_transcripts.db"
+# Legacy directory aliases for backward compatibility
+DATA_DIR = DATABASES_DIR
+VOICEPRINTS_DIR = DATABASES_DIR
+TRANSCRIPTS_DIR = DATABASES_DIR

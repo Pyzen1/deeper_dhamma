@@ -27,7 +27,7 @@ logger = logging.getLogger("build_lexicon")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "data" / "buddhism_lexicon.db"
+DB_PATH = PROJECT_ROOT / "databases" / "buddhism_lexicon.db"
 SC_DISCOURSE_CACHE = Path(r"C:\Users\rabailey\.gemini\antigravity-ide\brain\46bf0e61-f894-44dc-8aba-402d7b809ca1\.system_generated\steps\954\content.md")
 
 # Canonical Document Source URLs

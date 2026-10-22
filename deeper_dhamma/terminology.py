@@ -1,7 +1,7 @@
 """
 Buddhist Terminology Editor & Context-Aware Disambiguation Engine.
 
-Backed by the comprehensive SQLite database: data/buddhism_lexicon.db
+Backed by the comprehensive SQLite database: databases/buddhism_lexicon.db
 (sourced from SuttaCentral Bodhi/Sujato translations & BSWA Brahm/Brahmali teachings).
 """
 

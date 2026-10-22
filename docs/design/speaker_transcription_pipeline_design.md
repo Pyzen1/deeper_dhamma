@@ -90,7 +90,7 @@ Speaker embeddings extracted via ECAPA-TDNN consist of 512-dimensional float32 v
 | **Speech-to-Text (ASR)** | `faster-whisper` (`Systran/faster-whisper-large-v3`) | NVIDIA RTX 5070 Ti (16GB VRAM, float16) | `C:\ai-models\cache\huggingface` |
 | **Voice Activity & Segmentation** | `silero-vad` + energy-based chunker | CUDA / CPU | `C:\ai-models\cache\torch` |
 | **Speaker Embeddings** | `speechbrain/spkrec-ecapa-voxceleb` (ECAPA-TDNN) | CUDA (float32, 512-d) | `C:\ai-models\cache\huggingface` |
-| **Voiceprint Database** | SQLite (`voiceprints.db`) | Local Disk (~5 MB) | `voiceprints/voiceprints.db` |
+| **Voiceprint Database** | SQLite (`voiceprints.db`) | Local Disk (~5 MB) | `databases/voiceprints.db` |
 | **Search & Indexing** | SQLite FTS5 / Tantivy | Local Disk / Web CDN | `index/search_index.db` |
 
 ---

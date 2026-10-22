@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import numpy as np
+import torch
 
 from deeper_dhamma.config import ARCHIVE_DIR, VOICEPRINTS_DB_PATH
 from deeper_dhamma.catalog import KNOWN_TEACHERS, determine_era, identify_primary_teacher
@@ -112,30 +113,55 @@ class VoiceprintDatabase:
                 "role": "guest_or_qa",
             }
 
-        # Calculate cosine similarities
-        scores = []
+        q_norm = np.linalg.norm(query_embedding)
+        q_vec = query_embedding / q_norm if q_norm > 0 else query_embedding
+
+        # Group gallery entries by teacher
+        teacher_sims: Dict[str, Dict] = {}
         for entry in gallery:
-            sim = float(np.dot(query_embedding, entry["embedding"]))
-            scores.append((sim, entry))
+            vec = entry["embedding"]
+            v_norm = np.linalg.norm(vec)
+            v_normed = vec / v_norm if v_norm > 0 else vec
+            sim = float(np.dot(q_vec, v_normed))
+            slug = entry["teacher_slug"]
+            if slug not in teacher_sims:
+                teacher_sims[slug] = {
+                    "slug": slug,
+                    "display_name": entry["display_name"],
+                    "role": entry["role"],
+                    "era": entry["era"],
+                    "sims": [],
+                }
+            teacher_sims[slug]["sims"].append(sim)
 
-        scores.sort(key=lambda x: x[0], reverse=True)
-        best_sim, best_entry = scores[0]
+        # Score teachers by composite: 0.70 * max_sim + 0.30 * top_k_avg
+        ranked = []
+        for slug, tinfo in teacher_sims.items():
+            s_list = sorted(tinfo["sims"], reverse=True)
+            max_s = s_list[0]
+            k_eff = min(len(s_list), top_k)
+            avg_top_k = float(np.mean(s_list[:k_eff]))
+            composite_score = 0.70 * max_s + 0.30 * avg_top_k
+            ranked.append((composite_score, max_s, tinfo))
 
-        if best_sim >= threshold:
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        best_composite, best_max, best_tinfo = ranked[0]
+
+        if best_composite >= threshold:
             return {
                 "identified": True,
-                "teacher_slug": best_entry["teacher_slug"],
-                "display_name": best_entry["display_name"],
-                "confidence": round(best_sim, 4),
-                "role": best_entry["role"],
-                "era": best_entry["era"],
+                "teacher_slug": best_tinfo["slug"],
+                "display_name": best_tinfo["display_name"],
+                "confidence": round(best_composite, 4),
+                "role": best_tinfo["role"],
+                "era": best_tinfo["era"],
             }
 
         return {
             "identified": False,
             "teacher_slug": "unregistered_speaker",
             "display_name": "Unregistered Speaker",
-            "confidence": round(best_sim, 4),
+            "confidence": round(best_composite, 4),
             "role": "guest_or_qa",
         }
 
@@ -146,10 +172,19 @@ def bootstrap_voiceprints(
     samples_per_teacher_era: int = 6,
     sample_duration_sec: float = 6.0,
     device: str = "cuda:0",
+    clear_existing: bool = True,
 ) -> int:
     """Populates the reference gallery from standalone audio talks."""
     archive_p = Path(archive_dir)
     db = VoiceprintDatabase(db_path)
+
+    if clear_existing:
+        with sqlite3.connect(str(db.db_path)) as conn:
+            conn.execute("DELETE FROM voiceprints;")
+            conn.execute("DROP TABLE IF EXISTS speaker_gallery;")
+            conn.commit()
+        logger.info("Cleared previous voiceprints before bootstrapping clean gallery.")
+
     encoder = SpeakerEncoder(device=device)
 
     all_files = sorted(list(archive_p.rglob("*.mp3")))
@@ -183,11 +218,41 @@ def bootstrap_voiceprints(
             if dur < 180:
                 continue
 
-            start_t = 120.0
-            end_t = start_t + sample_duration_sec
+            # Candidate time offsets across the talk to find active voiced speech
+            candidate_times = [60.0, 120.0, 180.0, 240.0, 300.0, 420.0, 600.0]
+            best_waveform = None
+            best_energy = -1.0
+            best_start_t = 120.0
 
-            waveform_16k, _ = load_audio_segment(audio_f, start_sec=start_t, end_sec=end_t)
-            emb = encoder.encode_waveform(waveform_16k)
+            for cand_t in candidate_times:
+                if cand_t + sample_duration_sec > dur - 10.0:
+                    continue
+                seg_wave, _ = load_audio_segment(
+                    audio_f,
+                    start_sec=cand_t,
+                    end_sec=cand_t + sample_duration_sec,
+                )
+                mean_energy = float(torch.mean(torch.abs(seg_wave)).item())
+                max_energy = float(torch.max(torch.abs(seg_wave)).item())
+
+                # If this segment has strong speech energy, accept immediately
+                if mean_energy >= 0.012 and max_energy >= 0.08:
+                    best_waveform = seg_wave
+                    best_start_t = cand_t
+                    best_energy = mean_energy
+                    break
+
+                if mean_energy > best_energy:
+                    best_energy = mean_energy
+                    best_waveform = seg_wave
+                    best_start_t = cand_t
+
+            # Skip file if no candidate has minimum speech energy
+            if best_waveform is None or best_energy < 0.005:
+                continue
+
+            end_t = best_start_t + sample_duration_sec
+            emb = encoder.encode_waveform(best_waveform)
 
             db.insert_voiceprint(
                 teacher_slug=teacher_slug,
@@ -195,7 +260,7 @@ def bootstrap_voiceprints(
                 era=era,
                 role="monastic_primary",
                 source_file=audio_f.name,
-                start_sec=start_t,
+                start_sec=best_start_t,
                 end_sec=end_t,
                 embedding=emb,
             )

@@ -192,7 +192,7 @@ def curate_audio_talk(
         "## Pipeline & Self-Correction Metadata",
         f"- **Audio File**: `{audio_path.name}`",
         f"- **Convergence Status**: `{status}`",
-        f"- **Lexicon DB**: `data/buddhism_lexicon.db` (SuttaCentral Bodhi/Sujato & BSWA Brahm/Brahmali)",
+        f"- **Lexicon DB**: `databases/buddhism_lexicon.db` (SuttaCentral Bodhi/Sujato & BSWA Brahm/Brahmali)",
         f"- **Self-Correction Active**: `{self_correct}`",
         f"- **Status**: `{'APPROVED GOLD STANDARD' if auto_approve else 'PENDING HUMAN REVIEW'}`",
         "",

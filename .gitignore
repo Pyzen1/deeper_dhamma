@@ -40,4 +40,4 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
-!data/buddhism_lexicon.db
+!databases/buddhism_lexicon.db

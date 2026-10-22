@@ -1,0 +1,101 @@
+# Deeper Dhamma Centralized Databases (`databases/`)
+
+This directory centralizes all SQLite databases utilized by the BSWA Deeper Dhamma AI Speech Transcription, Diarization, and Search Suite.
+
+```text
+databases/
+├── buddhism_lexicon.db     # Master Pali terminology, translations & phonetic rules
+├── dhamma_transcripts.db   # Canonical transcripts archive & FTS5 search index
+├── voiceprints.db          # Reference speaker embeddings gallery (ECAPA-TDNN)
+└── readme.md               # Architecture, lifecycle & separation rationale
+```
+
+---
+
+## Why Separate Database Files? (Architecture & Rationale)
+
+While consolidating these files under a single `databases/` folder makes discovery, backup, and inspection intuitive, keeping them as **three distinct SQLite database files** is a deliberate architectural decision based on the following factors:
+
+```text
++-----------------------------------------------------------------------------------------+
+|                                    LIFECYCLE SEPARATION                                 |
++-----------------------------------------------------------------------------------------+
+|                                                                                         |
+|  [buddhism_lexicon.db]           [voiceprints.db]             [dhamma_transcripts.db]   |
+|  - Role: Code Reference Asset    - Role: Model Gallery Cache  - Role: Operational Store |
+|  - Mutability: Static / Read     - Mutability: Model Rebuilds - Mutability: High Writes |
+|  - Git: TRACKED IN GIT           - Git: IGNORED               - Git: IGNORED            |
+|  - Size: ~550 KB                 - Size: <5 MB                - Size: Scales to GBs     |
+|                                                                                         |
++-----------------------------------------------------------------------------------------+
+```
+
+### 1. Version Control & Distribution Boundary
+* **`buddhism_lexicon.db`** represents verified doctrinal reference data (SuttaCentral Bodhi/Sujato translations and BSWA teaching terminology). It is **tracked directly in Git** (explicitly allowed in `.gitignore`) so that any clone of the repository immediately possesses the full Buddhist terminology engine without needing external setup.
+* **`dhamma_transcripts.db`** and **`voiceprints.db`** are local generated runtime artifacts. Merging them into a single file would either bloat Git history with hundreds of megabytes of binary transcription churn or force the lexicon out of version control.
+
+### 2. Acoustic Model Coupling
+* **`voiceprints.db`** stores 192-dimensional floating-point embeddings produced by `speechbrain/spkrec-ecapa-voxceleb`.
+* If the underlying embedding encoder is upgraded or swapped in the future, the gallery can be cleared and rebuilt (`python main.py voiceprints --rebuild`) without migrating or risking the transcribed text in `dhamma_transcripts.db`.
+
+### 3. Write Contention & Lock Isolation
+* SQLite uses database-level write locks (even in WAL mode, there is only one concurrent writer).
+* During long-running batch transcription runs, `dhamma_transcripts.db` is continuously writing segments and synchronizing FTS5 index tables.
+* Keeping `buddhism_lexicon.db` and `voiceprints.db` separate guarantees that term lookups, phonetic regex checks, and speaker verification queries never block or wait on transcription write transactions.
+
+### 4. Blast Radius & Fault Tolerance
+* A crash, WAL recovery event, or corrupt index rebuild on `dhamma_transcripts.db` leaves the reference lexicon and speaker gallery completely intact.
+* Users can purge, reset, or export the transcript archive independently.
+
+---
+
+## Database Overview & Schemas
+
+### 1. `buddhism_lexicon.db`
+* **File:** `databases/buddhism_lexicon.db` (~557 KB)
+* **Status:** Tracked in Git
+* **Python Interface:** `deeper_dhamma.lexicon.BuddhismLexiconDatabase`, `deeper_dhamma.terminology.TerminologyEditor`
+* **Key Tables:**
+  * `terms`: 1,071 doctrinal entries with diacritics, plain Romanization, categories, and translation columns (`translation_bodhi`, `translation_sujato`, `translation_brahm`, `translation_brahmali`).
+  * `phrase_rules`: 14 contextual phonetic correction rules that intercept Whisper ASR misrecognitions.
+  * `source_documents`: 3 raw source documents with compression and SHA-256 integrity hashes.
+  * `fts_terms`: SQLite FTS5 virtual table for fast full-text lexical search.
+
+### 2. `voiceprints.db`
+* **File:** `databases/voiceprints.db` (~324 KB)
+* **Status:** Ignored by Git (rebuildable via `python main.py voiceprints --rebuild`)
+* **Python Interface:** `deeper_dhamma.voiceprints.VoiceprintDatabase`, `deeper_dhamma.profiler.AcousticProfiler`
+* **Key Tables:**
+  * `speaker_gallery`: 155 acoustic reference segments. Stores 192-d ECAPA-TDNN embedding vectors (`BLOB`), teacher slug, display name, era (`1997_2003`, `2004_2014`, `2015_2026`), role, and time offsets.
+  * `voiceprints`: Consolidated speaker embeddings table.
+
+### 3. `dhamma_transcripts.db`
+* **File:** `databases/dhamma_transcripts.db` (~168 KB initial)
+* **Status:** Ignored by Git (primary operational store)
+* **Python Interface:** `deeper_dhamma.storage.TranscriptDatabase`
+* **Key Tables:**
+  * `episodes`: High-level talk metadata (id, title, date, year, primary teacher, media URL, audio duration, multi-speaker flags, speaker shares, and JSON terminology changelogs).
+  * `speech_segments`: Granular timestamped dialogue turns (`start_sec`, `end_sec`, `speaker_slug`, `speaker_display`, `text`).
+  * `transcripts_fts`: SQLite FTS5 external content table with synchronization triggers on `speech_segments` enabling sub-5ms full-text search.
+
+---
+
+## Cross-Database Querying via SQLite `ATTACH`
+
+If relational joins across the separated databases are required (e.g., cross-referencing transcribed speech turns with speaker gallery profiles or lexicon terms), SQLite natively attaches multiple databases to a single session:
+
+```sql
+-- Open connection to dhamma_transcripts.db, then attach companion databases:
+ATTACH DATABASE 'databases/voiceprints.db' AS vp;
+ATTACH DATABASE 'databases/buddhism_lexicon.db' AS lex;
+
+-- Query speaker turn counts with profile display names across databases:
+SELECT 
+    s.speaker_slug,
+    g.display_name,
+    COUNT(s.id) AS turn_count
+FROM speech_segments s
+LEFT JOIN vp.speaker_gallery g ON s.speaker_slug = g.speaker_name
+GROUP BY s.speaker_slug, g.display_name
+ORDER BY turn_count DESC;
+```

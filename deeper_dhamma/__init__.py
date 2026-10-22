@@ -5,6 +5,7 @@ BSWA Deeper Dhamma: AI Speech Transcription, Diarization & Search Suite.
 from deeper_dhamma.config import (
     ARCHIVE_DIR,
     CATALOG_PATH,
+    DATABASES_DIR,
     TRANSCRIPTS_DB_PATH,
     VOICEPRINTS_DB_PATH,
     BUDDHISM_LEXICON_DB_PATH,
@@ -34,6 +35,7 @@ __all__ = [
     "KNOWN_TEACHERS",
     "ARCHIVE_DIR",
     "CATALOG_PATH",
+    "DATABASES_DIR",
     "TRANSCRIPTS_DB_PATH",
     "VOICEPRINTS_DB_PATH",
     "BUDDHISM_LEXICON_DB_PATH",
