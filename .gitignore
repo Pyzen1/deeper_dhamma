@@ -7,7 +7,12 @@ archive/
 
 # Logs (keep download tracker archive.log)
 *.log
+*.log.*
 !archive.log
+
+# Scratch directory
+scratch/
+
 
 # Python cache and environments
 __pycache__/
@@ -30,3 +35,9 @@ Thumbs.db
 *.onnx
 *.npy
 *.npz
+
+# Local database outputs
+*.db
+*.sqlite
+*.sqlite3
+!data/buddhism_lexicon.db

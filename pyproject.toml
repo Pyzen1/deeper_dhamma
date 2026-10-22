@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deeper-dhamma"
+version = "1.0.0"
+description = "High-accuracy AI speech transcription, speaker diarization, and search index for the BSWA Deeper Dhamma audio archive"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "speechbrain>=1.0.0",
+    "faster-whisper>=1.0.0",
+    "ctranslate2>=4.0.0",
+    "soundfile>=0.12.0",
+    "scikit-learn>=1.3.0",
+    "pypdf>=4.0.0",
+    "mutagen>=1.47.0",
+    "feedparser>=6.0.0",
+    "requests>=2.31.0"
+]
+
+[project.scripts]
+deeper-dhamma = "deeper_dhamma.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["deeper_dhamma*"]
