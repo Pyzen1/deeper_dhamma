@@ -495,6 +495,8 @@ class TranscriptDatabase:
 
     def search_fts(self, query: str, limit: int = 25) -> List[Dict]:
         with self._get_connection() as conn:
+            # Clean up shell escaped quotes if passed literally (e.g. \"term\" -> "term")
+            clean_query = query.replace('\\"', '"').strip()
             sql = """
                 SELECT
                     e.id as episode_id,
@@ -511,7 +513,15 @@ class TranscriptDatabase:
                 ORDER BY rank
                 LIMIT ?;
             """
-            rows = conn.execute(sql, (query, limit)).fetchall()
+            try:
+                rows = conn.execute(sql, (clean_query, limit)).fetchall()
+            except sqlite3.OperationalError:
+                # Fall back to exact literal phrase if FTS syntax error occurred
+                escaped = '"' + clean_query.replace('"', '""') + '"'
+                try:
+                    rows = conn.execute(sql, (escaped, limit)).fetchall()
+                except sqlite3.OperationalError:
+                    return []
             return [dict(r) for r in rows]
 
     def record_error(
