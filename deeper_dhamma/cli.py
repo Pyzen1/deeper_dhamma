@@ -216,16 +216,29 @@ def cmd_transcribe(args):
 
 
 def cmd_search(args):
-    """Runs instant full-text search across transcripts."""
+    """Runs instant full-text search across transcripts with tiered query expansion."""
     db = TranscriptDatabase(args.db)
-    print(f"\n[*] Searching FTS5 index for: \"{args.query}\" ...\n")
-    results = db.search_fts(args.query, limit=args.limit)
+    results, meta = db.search_fts(args.query, limit=args.limit, return_meta=True)
     if not results:
+        print(f"\n[*] Searching transcripts for: \"{args.query}\" ...\n")
         print("[-] No matching speech segments found.")
         suggestions = db.suggest_terms(args.query)
         if suggestions:
             print(f"    Did you mean: {', '.join(suggestions)}?\n")
         return
+
+    tier = meta.get("tier", "exact")
+    if meta.get("corrected"):
+        print(f"\n[*] Searching transcripts for: \"{args.query}\" ...")
+        print(f"[!] Typo detected: Showing matches for \"{meta['effective_query']}\" (auto-corrected)\n")
+    elif tier == "proximity":
+        print(f"\n[*] Searching transcripts for: \"{args.query}\" ...")
+        print(f"[+] Proximity match: Found segments with words in close proximity\n")
+    elif tier == "prefix":
+        print(f"\n[*] Searching transcripts for: \"{args.query}\" ...")
+        print(f"[+] Prefix match: Found segments with matching word stems\n")
+    else:
+        print(f"\n[*] Searching transcripts for: \"{args.query}\" ...\n")
 
     print(f"[+] Found {len(results)} matching speech segments:\n")
     for i, r in enumerate(results, start=1):

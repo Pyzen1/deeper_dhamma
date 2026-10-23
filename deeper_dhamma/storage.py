@@ -493,10 +493,29 @@ class TranscriptDatabase:
                 rows = conn.execute("SELECT * FROM episodes ORDER BY date ASC;").fetchall()
             return [dict(r) for r in rows]
 
-    def search_fts(self, query: str, limit: int = 25) -> List[Dict]:
+    def search_fts(
+        self,
+        query: str,
+        limit: int = 25,
+        return_meta: bool = False,
+    ) -> Union[List[Dict], Tuple[List[Dict], Dict]]:
+        """
+        Executes full-text search with automatic tiered query expansion:
+          Tier 1: Explicit syntax (if AND, OR, NOT, NEAR used) or Exact phrase
+          Tier 2: Proximity match (NEAR - words within 15 words of each other)
+          Tier 3: Prefix / stem matching (word*)
+          Tier 4: Typo auto-correction (Levenshtein / difflib against transcript vocabulary)
+          Tier 5: BM25 ranked 'any word' match (word1 OR word2)
+        """
+        import difflib
+        import re
+
+        clean_query = query.replace('\\"', '"').strip()
+        words = re.findall(r"[a-zA-Z0-9]+", clean_query.lower())
+        if not words:
+            return ([], {"tier": "none", "effective_query": query, "corrected": False}) if return_meta else []
+
         with self._get_connection() as conn:
-            # Clean up shell escaped quotes if passed literally (e.g. \"term\" -> "term")
-            clean_query = query.replace('\\"', '"').strip()
             sql = """
                 SELECT
                     e.id as episode_id,
@@ -513,16 +532,97 @@ class TranscriptDatabase:
                 ORDER BY rank
                 LIMIT ?;
             """
-            try:
-                rows = conn.execute(sql, (clean_query, limit)).fetchall()
-            except sqlite3.OperationalError:
-                # Fall back to exact literal phrase if FTS syntax error occurred
-                escaped = '"' + clean_query.replace('"', '""') + '"'
+
+            def _try_query(q_str: str) -> List[Dict]:
                 try:
-                    rows = conn.execute(sql, (escaped, limit)).fetchall()
+                    res = conn.execute(sql, (q_str, limit)).fetchall()
+                    return [dict(r) for r in res]
                 except sqlite3.OperationalError:
                     return []
-            return [dict(r) for r in rows]
+
+            meta = {
+                "tier": "exact",
+                "original_query": query,
+                "effective_query": query,
+                "corrected": False,
+            }
+
+            # 0. Check for explicit boolean/operator syntax
+            has_explicit_syntax = any(op in clean_query for op in [" AND ", " OR ", " NOT ", "NEAR("]) or (
+                clean_query.startswith('"') and clean_query.endswith('"') and len(clean_query) > 2
+            )
+            if has_explicit_syntax:
+                rows = _try_query(clean_query)
+                if not rows:
+                    escaped = '"' + clean_query.replace('"', '""') + '"'
+                    rows = _try_query(escaped)
+                meta["tier"] = "explicit"
+                if return_meta:
+                    return rows, meta
+                return rows
+
+            # Tier 1: Exact phrase (if >1 word) or exact word
+            t1_q = f'"{clean_query}"' if len(words) > 1 else words[0]
+            rows = _try_query(t1_q)
+            if rows:
+                meta["tier"] = "exact_phrase" if len(words) > 1 else "exact_word"
+                meta["effective_query"] = t1_q
+                return (rows, meta) if return_meta else rows
+
+            # Tier 2: Proximity match (NEAR - words in reasonable proximity)
+            if len(words) > 1:
+                t2_q = f"NEAR({' '.join(words)}, 15)"
+                rows = _try_query(t2_q)
+                if rows:
+                    meta["tier"] = "proximity"
+                    meta["effective_query"] = t2_q
+                    return (rows, meta) if return_meta else rows
+
+            # Tier 3: Prefix / Stem matching (word1* AND word2*)
+            t3_q = " AND ".join(f"{w}*" for w in words)
+            rows = _try_query(t3_q)
+            if rows:
+                meta["tier"] = "prefix"
+                meta["effective_query"] = t3_q
+                return (rows, meta) if return_meta else rows
+
+            # Tier 4: Typo auto-correction (against transcript vocabulary)
+            vocab_rows = conn.execute("SELECT text FROM speech_segments LIMIT 1000;").fetchall()
+            vocab = set(re.findall(r"[a-zA-Z]{3,}", " ".join(r[0] for r in vocab_rows).lower()))
+            corrected = []
+            for w in words:
+                if w not in vocab and len(w) >= 4:
+                    matches = difflib.get_close_matches(w, vocab, n=1, cutoff=0.72)
+                    corrected.append(matches[0] if matches else w)
+                else:
+                    corrected.append(w)
+
+            if corrected != words:
+                corr_phrase = " ".join(corrected)
+                # Try exact corrected
+                t4_exact = f'"{corr_phrase}"' if len(corrected) > 1 else corrected[0]
+                rows = _try_query(t4_exact)
+                if not rows and len(corrected) > 1:
+                    # Try proximity corrected
+                    t4_near = f"NEAR({' '.join(corrected)}, 15)"
+                    rows = _try_query(t4_near)
+                if rows:
+                    meta["tier"] = "auto_corrected"
+                    meta["effective_query"] = corr_phrase
+                    meta["corrected"] = True
+                    return (rows, meta) if return_meta else rows
+
+            # Tier 5: Ranked BM25 'any word' match
+            if len(words) > 1:
+                t5_q = " OR ".join(words)
+                rows = _try_query(t5_q)
+                if rows:
+                    meta["tier"] = "any_word"
+                    meta["effective_query"] = t5_q
+                    return (rows, meta) if return_meta else rows
+
+            meta["tier"] = "none"
+            return ([], meta) if return_meta else []
 
     def suggest_terms(self, query: str, n: int = 3) -> List[str]:
         """Suggests closest matching terms from the transcript vocabulary for typos."""
