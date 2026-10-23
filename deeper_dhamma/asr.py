@@ -57,6 +57,7 @@ class Transcriber:
         prompt: Optional[str] = None,
         hotwords: Optional[str] = None,
         hallucination_silence_threshold: Optional[float] = 2.0,
+        condition_on_previous_text: bool = False,
     ) -> List[Dict]:
         """
         Transcribes 16kHz mono float32 numpy audio.
@@ -73,6 +74,7 @@ class Transcriber:
                 vad_filter=vad_filter,
                 word_timestamps=word_timestamps,
                 hallucination_silence_threshold=hallucination_silence_threshold,
+                condition_on_previous_text=condition_on_previous_text,
             )
         else:
             segments_gen, _ = self.model.transcribe(
@@ -84,6 +86,7 @@ class Transcriber:
                 vad_parameters=dict(min_silence_duration_ms=500),
                 word_timestamps=word_timestamps,
                 hallucination_silence_threshold=hallucination_silence_threshold,
+                condition_on_previous_text=condition_on_previous_text,
             )
 
         segments = []

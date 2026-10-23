@@ -127,9 +127,10 @@ class TranscriptionPipeline:
             waveform_16k=waveform_16k,
         )
         if profile["is_multi_speaker"] and profile.get("ranked_speakers"):
-            names = [s["display_name"] for s in profile["ranked_speakers"] if s["share"] >= 0.08 and s.get("confidence", 0) >= 0.40]
-            if primary_display not in names and meta_teacher_slug != "unknown_teacher":
-                names.insert(0, primary_display)
+            raw_names = [s["display_name"] for s in profile["ranked_speakers"] if s["share"] >= 0.08 and s.get("confidence", 0) >= 0.40]
+            if primary_display not in raw_names and meta_teacher_slug != "unknown_teacher":
+                raw_names.insert(0, primary_display)
+            names = list(dict.fromkeys(raw_names))
             if len(names) > 1:
                 primary_display = " & ".join(names[:2])
             elif names:
@@ -160,7 +161,7 @@ class TranscriptionPipeline:
         }
 
         # 3. Speech-to-Text with Teacher-Specific Prompt Steering & Continuous Hotwords
-        talk_prompt = f"Dhamma talk by {primary_display}. Buddhist terms: " + self.lexicon_db.get_prompt_steering_terms(teacher_slugs=active_slugs, limit=35)
+        talk_prompt = self.lexicon_db.get_prompt_steering_terms(teacher_slugs=active_slugs, limit=30)
         talk_hotwords = self.lexicon_db.get_hotwords_for_teachers(teacher_slugs=active_slugs, limit=50)
         logger.info(f"    Transcribing with faster-whisper (batched, float16, Silero VAD, {len(active_slugs)} teacher profile(s))...")
         t_asr0 = time.time()
@@ -207,6 +208,7 @@ class TranscriptionPipeline:
             "duration_sec": process_dur,
             "elapsed_sec": round(elapsed, 2),
             "primary_teacher": primary_slug,
+            "primary_display": primary_display,
             "is_multi_speaker": profile.get("is_multi_speaker", False),
             "speaker_shares": profile.get("shares", {}),
             "era": era,
