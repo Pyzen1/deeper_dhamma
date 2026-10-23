@@ -222,6 +222,9 @@ def cmd_search(args):
     results = db.search_fts(args.query, limit=args.limit)
     if not results:
         print("[-] No matching speech segments found.")
+        suggestions = db.suggest_terms(args.query)
+        if suggestions:
+            print(f"    Did you mean: {', '.join(suggestions)}?\n")
         return
 
     print(f"[+] Found {len(results)} matching speech segments:\n")

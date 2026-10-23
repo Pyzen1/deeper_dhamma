@@ -524,6 +524,21 @@ class TranscriptDatabase:
                     return []
             return [dict(r) for r in rows]
 
+    def suggest_terms(self, query: str, n: int = 3) -> List[str]:
+        """Suggests closest matching terms from the transcript vocabulary for typos."""
+        import difflib
+        import re
+        clean_words = re.findall(r"[a-zA-Z]{3,}", query.lower())
+        if not clean_words:
+            return []
+        target = clean_words[0]
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT text FROM speech_segments LIMIT 1000;").fetchall()
+            if not rows:
+                return []
+            vocab = set(re.findall(r"[a-zA-Z]{3,}", " ".join(r[0] for r in rows).lower()))
+            return difflib.get_close_matches(target, vocab, n=n, cutoff=0.70)
+
     def record_error(
         self,
         episode_id: str,
