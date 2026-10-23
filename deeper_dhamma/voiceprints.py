@@ -360,6 +360,20 @@ def inspect_unknown_audio(
                     share = float(spk["share"])
                     break
 
+        detection_source = "voiceprint"
+        if not identified_speaker:
+            fn_slug, fn_display = identify_primary_teacher(file_path.name)
+            if fn_slug != "unknown_teacher":
+                identified_speaker = {
+                    "slug": fn_slug,
+                    "display_name": fn_display,
+                    "confidence": 1.0,
+                    "share": 1.0,
+                }
+                confidence = 1.0
+                share = 1.0
+                detection_source = "filename_pattern"
+
         item_result = {
             "episode_id": ep_id,
             "filename": file_path.name,
@@ -371,6 +385,7 @@ def inspect_unknown_audio(
             "share": share,
             "is_multi_speaker": profile.get("is_multi_speaker", False),
             "all_speakers": ranked,
+            "detection_source": detection_source,
         }
         results.append(item_result)
 
@@ -378,7 +393,7 @@ def inspect_unknown_audio(
             trans_db.associate_teacher(
                 episode_id=ep_id,
                 teacher_slug=identified_speaker["slug"],
-                detection_source="voiceprint",
+                detection_source=detection_source,
                 confidence=confidence,
                 share=share,
             )

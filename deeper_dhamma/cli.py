@@ -86,21 +86,22 @@ def cmd_voiceprints(args):
             return
 
         print(f"\nScanned {len(results)} unknown audio file(s):\n")
-        print(f"{'Filename':<55} | {'Year':<4} | {'Detected Teacher':<20} | {'Confidence':<10} | {'Status'}")
-        print("-" * 115)
+        print(f"{'Filename':<75} | {'Year':<4} | {'Detected Teacher':<20} | {'Confidence':<10} | {'Source':<16} | {'Status'}")
+        print("-" * 140)
         resolved = 0
         for r in results:
-            fname = r["filename"][:54]
+            fname = r["filename"][:74]
             yr = str(r.get("year", ""))
             teacher = r["display_name"]
             conf = f"{r['confidence']:.4f}" if r["identified"] else "N/A"
+            src = r.get("detection_source", "voiceprint")
             status = "RESOLVED" if r["identified"] else "Unidentified"
             if r["identified"]:
                 resolved += 1
-            print(f"{fname:<55} | {yr:<4} | {teacher:<20} | {conf:<10} | {status}")
+            print(f"{fname:<75} | {yr:<4} | {teacher:<20} | {conf:<10} | {src:<16} | {status}")
 
-        print("=" * 115)
-        print(f"[✓] Complete: {resolved} / {len(results)} audio files resolved by voiceprint.")
+        print("=" * 140)
+        print(f"[✓] Complete: {resolved} / {len(results)} audio files resolved.")
         if not getattr(args, "dry_run", False) and resolved > 0:
             print("[+] Associations and identified_teachers column successfully updated in dhamma_transcripts.db.")
         return
