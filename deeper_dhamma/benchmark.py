@@ -111,7 +111,7 @@ def run_benchmarks(
     duration_sec: float = 300.0,
     device: str = "cuda:0",
     model_size: str = "large-v3",
-    batch_size: int = 8,
+    batch_size: int = 16,
 ) -> None:
     """
     Runs evaluation against all active, verified gold-standard reference transcripts.

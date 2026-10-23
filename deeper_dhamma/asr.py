@@ -28,7 +28,7 @@ class Transcriber:
         device: str = "cuda",
         compute_type: str = "float16",
         initial_prompt: Optional[str] = PALI_PROMPT,
-        batch_size: int = 8,
+        batch_size: int = 16,
     ):
         self.device = device
         self.compute_type = compute_type
@@ -55,6 +55,8 @@ class Transcriber:
         vad_filter: bool = True,
         word_timestamps: bool = False,
         prompt: Optional[str] = None,
+        hotwords: Optional[str] = None,
+        hallucination_silence_threshold: Optional[float] = 2.0,
     ) -> List[Dict]:
         """
         Transcribes 16kHz mono float32 numpy audio.
@@ -67,17 +69,21 @@ class Transcriber:
                 batch_size=self.batch_size,
                 language="en",
                 initial_prompt=active_prompt,
+                hotwords=hotwords,
                 vad_filter=vad_filter,
                 word_timestamps=word_timestamps,
+                hallucination_silence_threshold=hallucination_silence_threshold,
             )
         else:
             segments_gen, _ = self.model.transcribe(
                 audio_16k_mono,
                 language="en",
                 initial_prompt=active_prompt,
+                hotwords=hotwords,
                 vad_filter=vad_filter,
                 vad_parameters=dict(min_silence_duration_ms=500),
                 word_timestamps=word_timestamps,
+                hallucination_silence_threshold=hallucination_silence_threshold,
             )
 
         segments = []

@@ -195,17 +195,81 @@ class BuddhismLexiconDatabase:
                 d["content"] = ""
             return d
 
-    def get_prompt_steering_terms(self, limit: int = 35) -> str:
+    def get_prompt_steering_terms(
+        self,
+        teacher_slugs: Optional[List[str] | str] = None,
+        limit: int = 35,
+    ) -> str:
         """
-        Generates a concise, high-signal comma-separated prompt string for Whisper's
-        `initial_prompt` to bias first-pass decoding toward correct Pali and monastic terminology.
+        Generates a tailored comma-separated prompt string for Whisper's `initial_prompt`,
+        customizing doctrinal vocabulary to the identified speaker(s).
         """
-        high_priority = [
-            "Ajahn Brahm", "Ajahn Brahmali", "Bodhinyana", "Dhammasara", "Jhana Grove",
-            "Dhammaloka", "Rains Retreat", "anapanasati", "jhana", "samadhi", "nimitta",
-            "piti", "sukha", "ekaggata", "anatta", "anicca", "dukkha", "kamma", "Dhamma",
-            "Sangha", "patimokkha", "vinaya", "sutta", "thina middha", "uddhacca kukkucca",
-            "vicikiccha", "kamacchanda", "vyapada", "five hindrances", "letting go",
+        if isinstance(teacher_slugs, str):
+            slugs = [teacher_slugs.lower()]
+        elif teacher_slugs:
+            slugs = [s.lower() for s in teacher_slugs]
+        else:
+            slugs = []
+
+        # Shared BSWA monastic baseline
+        terms = [
+            "Ajahn Brahm", "Ajahn Brahmali", "Bodhinyana", "Dhammaloka", "Dhammasara",
+            "Jhana Grove", "Rains Retreat", "Dhamma", "Sangha", "Buddha", "kamma", "sila", "panna",
         ]
-        return ", ".join(high_priority[:limit])
+
+        is_brahm = any("brahm" in s and "brahmali" not in s for s in slugs) or not slugs
+        is_brahmali = any("brahmali" in s for s in slugs)
+        is_nun = any("vayama" in s or "hasapanna" in s or "nun" in s for s in slugs)
+
+        if is_brahm:
+            terms.extend([
+                "jhana", "samadhi", "anapanasati", "nimitta", "piti", "sukha",
+                "ekaggata", "anatta", "anicca", "dukkha", "letting go", "stillness",
+                "kamacchanda", "byapada", "thina middha", "uddhacca kukkucca",
+                "vicikiccha", "five hindrances", "peaceful", "mindfulness", "bhavana",
+            ])
+
+        if is_brahmali:
+            terms.extend([
+                "vinaya", "patimokkha", "parajika", "sanghadisesa", "suttas",
+                "Majjhima Nikaya", "Digha Nikaya", "Samyutta Nikaya", "Anguttara Nikaya",
+                "bhikkhu", "bhikkhuni", "Theravada", "SuttaCentral", "pali", "vassa",
+                "pavarana", "uposatha", "ariya sacca", "paticcasamuppada",
+            ])
+
+        if is_nun:
+            terms.extend([
+                "bhikkhuni", "upasika", "Dhammasara", "ordination", "Therigatha",
+                "siladhara", "garudhamma", "Ayya Vayama", "Ajahn Hasapanna",
+            ])
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduped = []
+        for t in terms:
+            tl = t.lower()
+            if tl not in seen:
+                seen.add(tl)
+                deduped.append(t)
+
+        return ", ".join(deduped[:limit])
+
+    def get_hotwords_for_teachers(
+        self,
+        teacher_slugs: Optional[List[str] | str] = None,
+        limit: int = 50,
+    ) -> str:
+        """
+        Generates a space-separated hotword string for CTranslate2 beam search logit biasing,
+        boosting recognition of specialized Pali vocabulary continuously across the talk.
+        """
+        prompt_str = self.get_prompt_steering_terms(teacher_slugs=teacher_slugs, limit=limit)
+        # Hotwords format: space-delimited words or multi-word tokens
+        clean_words = []
+        for chunk in prompt_str.split(","):
+            chunk = chunk.strip()
+            if chunk:
+                clean_words.append(chunk)
+        return " ".join(clean_words[:limit])
+
 

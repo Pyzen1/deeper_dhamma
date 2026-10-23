@@ -41,7 +41,7 @@ class TranscriptionPipeline:
         catalog_path: Optional[Path | str] = CATALOG_PATH,
         device: str = "cuda:0",
         model_size: str = "large-v3",
-        batch_size: int = 8,
+        batch_size: int = 16,
     ):
         logger.info(f"[*] Initializing TranscriptionPipeline components (model={model_size}, batch_size={batch_size})...")
         self.voiceprints_db = VoiceprintDatabase(voiceprints_db_path)
@@ -140,6 +140,13 @@ class TranscriptionPipeline:
                 primary_slug = top["slug"]
                 primary_display = top["display_name"]
 
+        # Collect all active teacher slugs for tailored vocabulary steering
+        active_slugs = [primary_slug]
+        if profile.get("is_multi_speaker") and profile.get("ranked_speakers"):
+            for s in profile["ranked_speakers"]:
+                if s.get("share", 0) >= 0.08 and s["slug"] not in active_slugs and not s["slug"].startswith("unregistered"):
+                    active_slugs.append(s["slug"])
+
         meta = {
             "id": ep_id,
             "title": ep_title,
@@ -152,11 +159,12 @@ class TranscriptionPipeline:
             "speaker_shares": profile.get("shares", {}),
         }
 
-        # 3. Speech-to-Text Transcription with Batched Inference & Lexicon Prompt Steering
-        talk_prompt = f"Dhamma talk by {primary_display}. Buddhist terms: " + self.lexicon_db.get_prompt_steering_terms(limit=30)
-        logger.info(f"    Transcribing with faster-whisper (batched, float16, Silero VAD)...")
+        # 3. Speech-to-Text with Teacher-Specific Prompt Steering & Continuous Hotwords
+        talk_prompt = f"Dhamma talk by {primary_display}. Buddhist terms: " + self.lexicon_db.get_prompt_steering_terms(teacher_slugs=active_slugs, limit=35)
+        talk_hotwords = self.lexicon_db.get_hotwords_for_teachers(teacher_slugs=active_slugs, limit=50)
+        logger.info(f"    Transcribing with faster-whisper (batched, float16, Silero VAD, {len(active_slugs)} teacher profile(s))...")
         t_asr0 = time.time()
-        asr_segments = self.transcriber.transcribe(audio_np, prompt=talk_prompt)
+        asr_segments = self.transcriber.transcribe(audio_np, prompt=talk_prompt, hotwords=talk_hotwords)
         logger.info(f"    ASR complete in {time.time() - t_asr0:.2f}s ({len(asr_segments)} segments).")
 
         # 4. Speaker Alignment & Identification (in-memory slice attribution)

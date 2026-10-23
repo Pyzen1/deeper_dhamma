@@ -79,7 +79,7 @@ def cmd_transcribe(args):
     pipeline = TranscriptionPipeline(
         device=args.device,
         model_size=getattr(args, "model_size", "large-v3"),
-        batch_size=getattr(args, "batch_size", 8),
+        batch_size=getattr(args, "batch_size", 16),
     )
 
     # Collect target files
@@ -381,7 +381,7 @@ def cmd_test(args):
     pipeline = TranscriptionPipeline(
         device=args.device,
         model_size=getattr(args, "model_size", "large-v3"),
-        batch_size=getattr(args, "batch_size", 8),
+        batch_size=getattr(args, "batch_size", 16),
     )
 
     result = pipeline.process_file(
@@ -444,7 +444,7 @@ def main():
     p_trans.add_argument("--max-duration", "-d", type=float, help="Cap processing duration in seconds")
     p_trans.add_argument("--limit", "-n", type=int, help="Limit number of files to process")
     p_trans.add_argument("--force", action="store_true", help="Re-transcribe files even if already in DB")
-    p_trans.add_argument("--batch-size", "-b", type=int, default=8, help="Batch size for parallel inference (default: 8)")
+    p_trans.add_argument("--batch-size", "-b", type=int, default=16, help="Batch size for parallel inference (default: 16)")
     p_trans.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
     p_trans.add_argument("--archive-dir", default=ARCHIVE_DIR, help="Audio archive directory")
     p_trans.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
@@ -491,7 +491,7 @@ def main():
     # 8. Benchmark
     p_bench = subparsers.add_parser("benchmark", help="Evaluate accuracy against gold-standard references")
     p_bench.add_argument("--duration", "-d", type=float, default=300.0, help="Benchmark duration in seconds (default: 300)")
-    p_bench.add_argument("--batch-size", "-b", type=int, default=8, help="Batch size for parallel inference (default: 8)")
+    p_bench.add_argument("--batch-size", "-b", type=int, default=16, help="Batch size for parallel inference (default: 16)")
     p_bench.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
     p_bench.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
     p_bench.set_defaults(func=cmd_benchmark)
@@ -500,7 +500,7 @@ def main():
     p_test = subparsers.add_parser("test", help="Run end-to-end sanity verification test")
     p_test.add_argument("--file", "-f", type=str, help="Specific audio file to test")
     p_test.add_argument("--duration", "-d", type=float, default=120.0, help="Test duration in seconds (default: 120)")
-    p_test.add_argument("--batch-size", "-b", type=int, default=8, help="Batch size for parallel inference (default: 8)")
+    p_test.add_argument("--batch-size", "-b", type=int, default=16, help="Batch size for parallel inference (default: 16)")
     p_test.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
     p_test.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
     p_test.set_defaults(func=cmd_test)
