@@ -422,8 +422,8 @@ def print_year_breakdown(data: Dict[str, Any]) -> None:
     print("\n" + "=" * 80)
     print("Year-by-Year Sync, Transcription & Error Health")
     print("=" * 80)
-    print(f"{'Year':<6} | {'In Scope':<8} | {'Synced':<8} | {'Pending DL':<10} | {'Transcribed':<11} | {'Errors':<6} | {'Status':<14}")
-    print("-" * 6 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 10 + "-+-" + "-" * 11 + "-+-" + "-" * 6 + "-+-" + "-" * 14)
+    print(f"{'Year':<6} | {'In Scope':<8} | {'Synced':<8} | {'Pending DL':<10} | {'Transcribed':<11} | {'Errors':<6} | {'Status':<10}")
+    print("-" * 6 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 10 + "-+-" + "-" * 11 + "-+-" + "-" * 6 + "-+-" + "-" * 10)
 
     tot_cat = 0
     tot_synced = 0
@@ -444,22 +444,58 @@ def print_year_breakdown(data: Dict[str, Any]) -> None:
         tot_tr += c_tr
         tot_err += c_err
 
-        if c_err > 0:
-            status = f"{c_err} error(s)"
+        # Multi-status flags
+        flags = []
+        if c_pdl > 0:
+            flags.append("P")
+        elif c_cat > 0 and c_synced >= c_cat:
+            flags.append("D")
+        elif c_synced > 0:
+            flags.append("D")
+
+        if c_cat > 0 and c_tr >= c_cat:
+            flags.append("C")
         elif c_tr > 0:
-            status = f"Active ({c_tr} tr)"
-        elif c_pdl > 0:
-            status = f"Pending ({c_pdl} dl)"
+            flags.append("T")
         else:
-            status = "Synced"
+            flags.append("U")
 
+        if c_err > 0:
+            flags.append("E")
+
+        status_str = ", ".join(flags)
         err_str = str(c_err) if c_err > 0 else "-"
-        print(f"{y:<6} | {c_cat:>8,} | {c_synced:>8,} | {c_pdl:>10,} | {c_tr:>11,} | {err_str:>6} | {status:<14}")
+        print(f"{y:<6} | {c_cat:>8,} | {c_synced:>8,} | {c_pdl:>10,} | {c_tr:>11,} | {err_str:>6} | {status_str:<10}")
 
-    print("-" * 6 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 10 + "-+-" + "-" * 11 + "-+-" + "-" * 6 + "-+-" + "-" * 14)
-    sync_pct = (tot_synced / tot_cat * 100) if tot_cat else 0
+    print("-" * 6 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 10 + "-+-" + "-" * 11 + "-+-" + "-" * 6 + "-+-" + "-" * 10)
+
+    tot_flags = []
+    if tot_p_dl > 0:
+        tot_flags.append("P")
+    elif tot_cat > 0 and tot_synced >= tot_cat:
+        tot_flags.append("D")
+
+    if tot_cat > 0 and tot_tr >= tot_cat:
+        tot_flags.append("C")
+    elif tot_tr > 0:
+        tot_flags.append("T")
+    else:
+        tot_flags.append("U")
+
+    if tot_err > 0:
+        tot_flags.append("E")
+
+    tot_status_str = ", ".join(tot_flags)
     tot_err_str = str(tot_err) if tot_err > 0 else "-"
-    print(f"{'Total':<6} | {tot_cat:>8,} | {tot_synced:>8,} | {tot_p_dl:>10,} | {tot_tr:>11,} | {tot_err_str:>6} | {sync_pct:5.1f}% synced")
+    print(f"{'Total':<6} | {tot_cat:>8,} | {tot_synced:>8,} | {tot_p_dl:>10,} | {tot_tr:>11,} | {tot_err_str:>6} | {tot_status_str:<10}")
+    print("=" * 80)
+    print("Status Key:")
+    print("  D = Downloaded (100% in-scope audio files on disk)")
+    print("  P = Pending Download (audio files awaiting download)")
+    print("  C = Complete (100% of talks transcribed)")
+    print("  T = Partially Transcribed (transcription underway)")
+    print("  U = Untranscribed (no talks transcribed yet)")
+    print("  E = Error (one or more active file errors recorded)")
     print("=" * 80)
 
 
