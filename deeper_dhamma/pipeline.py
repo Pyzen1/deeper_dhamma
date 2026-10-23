@@ -40,11 +40,13 @@ class TranscriptionPipeline:
         transcripts_db_path: Path | str = TRANSCRIPTS_DB_PATH,
         catalog_path: Optional[Path | str] = CATALOG_PATH,
         device: str = "cuda:0",
+        model_size: str = "large-v3",
+        batch_size: int = 8,
     ):
-        logger.info("[*] Initializing TranscriptionPipeline components...")
+        logger.info(f"[*] Initializing TranscriptionPipeline components (model={model_size}, batch_size={batch_size})...")
         self.voiceprints_db = VoiceprintDatabase(voiceprints_db_path)
         self.encoder = SpeakerEncoder(device=device)
-        self.transcriber = Transcriber(model_size="large-v3", device="cuda", compute_type="float16")
+        self.transcriber = Transcriber(model_size=model_size, device="cuda", compute_type="float16", batch_size=batch_size)
         self.aligner = SpeakerAligner(voiceprint_db=self.voiceprints_db, encoder=self.encoder)
         self.profiler = SpeakerProfiler(voiceprint_db=self.voiceprints_db, encoder=self.encoder)
         self.lexicon_db = BuddhismLexiconDatabase()
@@ -110,9 +112,20 @@ class TranscriptionPipeline:
             permalink = ""
             upload_date = f"{year_val}0101"
 
-        # 1. Fast Acoustic Pre-Profiling
-        logger.info(f"    Running acoustic pre-profiling across {process_dur:.1f}s...")
-        profile = self.profiler.profile_audio(audio_path, stride_sec=30.0, window_sec=3.0, era=era)
+        # 1. Single In-Memory Audio Loading & Resample (zero repeated disk I/O)
+        logger.info(f"    Loading {process_dur:.1f}s audio at 16kHz mono into RAM...")
+        waveform_16k, _ = load_audio_segment(audio_path, start_sec=0.0, end_sec=process_dur, target_sr=16000)
+        audio_np = waveform_16k.squeeze(0).numpy()
+
+        # 2. Fast Acoustic Pre-Profiling (in-memory slice evaluation)
+        logger.info(f"    Running fast acoustic pre-profiling across {process_dur:.1f}s...")
+        profile = self.profiler.profile_audio(
+            audio_path,
+            stride_sec=30.0,
+            window_sec=3.0,
+            era=era,
+            waveform_16k=waveform_16k,
+        )
         if profile["is_multi_speaker"] and profile.get("ranked_speakers"):
             names = [s["display_name"] for s in profile["ranked_speakers"] if s["share"] >= 0.08 and s.get("confidence", 0) >= 0.40]
             if primary_display not in names and meta_teacher_slug != "unknown_teacher":
@@ -139,19 +152,14 @@ class TranscriptionPipeline:
             "speaker_shares": profile.get("shares", {}),
         }
 
-        # 2. Audio Loading & Resample
-        logger.info(f"    Loading {process_dur:.1f}s audio at 16kHz mono...")
-        waveform_16k, _ = load_audio_segment(audio_path, start_sec=0.0, end_sec=process_dur, target_sr=16000)
-        audio_np = waveform_16k.squeeze(0).numpy()
-
-        # 3. Speech-to-Text Transcription with Context-Aware Lexicon Prompt Steering
+        # 3. Speech-to-Text Transcription with Batched Inference & Lexicon Prompt Steering
         talk_prompt = f"Dhamma talk by {primary_display}. Buddhist terms: " + self.lexicon_db.get_prompt_steering_terms(limit=30)
-        logger.info(f"    Transcribing with faster-whisper (large-v3, float16, Silero VAD)...")
+        logger.info(f"    Transcribing with faster-whisper (batched, float16, Silero VAD)...")
         t_asr0 = time.time()
         asr_segments = self.transcriber.transcribe(audio_np, prompt=talk_prompt)
         logger.info(f"    ASR complete in {time.time() - t_asr0:.2f}s ({len(asr_segments)} segments).")
 
-        # 4. Speaker Alignment & Identification
+        # 4. Speaker Alignment & Identification (in-memory slice attribution)
         logger.info("    Aligning speakers with voiceprints & pre-analyzed profile...")
         t_spk0 = time.time()
         attributed = self.aligner.align_segments(
@@ -161,6 +169,7 @@ class TranscriptionPipeline:
             primary_display=primary_display,
             era=era,
             profile=profile,
+            waveform_16k=waveform_16k,
         )
         logger.info(f"    Speaker alignment complete in {time.time() - t_spk0:.2f}s ({len(attributed)} turns).")
 

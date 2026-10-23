@@ -31,10 +31,18 @@ class SpeakerProfiler:
         window_sec: float = 3.0,
         era: Optional[str] = None,
         max_scan_duration_sec: Optional[float] = None,
+        waveform_16k: Optional[torch.Tensor] = None,
+        sample_rate: int = 16000,
     ) -> Dict:
         t0 = time.time()
-        info = get_audio_info(audio_path)
-        total_duration = info["duration"]
+        if waveform_16k is not None:
+            total_samples = waveform_16k.shape[-1]
+            total_duration = total_samples / sample_rate
+        else:
+            info = get_audio_info(audio_path)
+            total_duration = info["duration"]
+            total_samples = None
+
         scan_duration = min(total_duration, max_scan_duration_sec) if max_scan_duration_sec else total_duration
 
         # Compute sample time points (skip the first 10s of bell ringing/silence)
@@ -47,7 +55,13 @@ class SpeakerProfiler:
 
         for t in sample_times:
             try:
-                waveform, _ = load_audio_segment(audio_path, start_sec=t, end_sec=t + window_sec)
+                if waveform_16k is not None:
+                    start_frame = int(t * sample_rate)
+                    end_frame = min(total_samples, int((t + window_sec) * sample_rate))
+                    waveform = waveform_16k[:, start_frame:end_frame]
+                else:
+                    waveform, _ = load_audio_segment(audio_path, start_sec=t, end_sec=t + window_sec)
+
                 # Check for minimum audio energy (skip silence)
                 if torch.mean(torch.abs(waveform)).item() < 0.005:
                     continue

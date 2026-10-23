@@ -107,7 +107,12 @@ def discover_active_benchmarks() -> List[Dict]:
     return pairs
 
 
-def run_benchmarks(duration_sec: float = 300.0, device: str = "cuda:0") -> None:
+def run_benchmarks(
+    duration_sec: float = 300.0,
+    device: str = "cuda:0",
+    model_size: str = "large-v3",
+    batch_size: int = 8,
+) -> None:
     """
     Runs evaluation against all active, verified gold-standard reference transcripts.
     """
@@ -128,7 +133,7 @@ def run_benchmarks(duration_sec: float = 300.0, device: str = "cuda:0") -> None:
         print(f"     Ref:   {p['ref_text'].name} ({p['ref_text'].stat().st_size:,} bytes)")
         print(f"     Audio: {p['audio'].name}")
 
-    pipeline = TranscriptionPipeline(device=device)
+    pipeline = TranscriptionPipeline(device=device, model_size=model_size, batch_size=batch_size)
 
     for item in pairs:
         audio_p = item["audio"]

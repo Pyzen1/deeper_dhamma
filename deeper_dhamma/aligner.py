@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
+import torch
 
 from deeper_dhamma.audio import load_audio_segment
 from deeper_dhamma.voiceprints import VoiceprintDatabase
@@ -30,6 +31,8 @@ class SpeakerAligner:
         era: Optional[str] = None,
         profile: Optional[Dict] = None,
         merge_gap_sec: float = 2.0,
+        waveform_16k: Optional[torch.Tensor] = None,
+        sample_rate: int = 16000,
     ) -> List[Dict]:
         if not asr_segments:
             return []
@@ -59,11 +62,17 @@ class SpeakerAligner:
                 continue
 
             try:
-                waveform, _ = load_audio_segment(
-                    audio_file,
-                    start_sec=seg["start"],
-                    end_sec=min(seg["end"], seg["start"] + 6.0),
-                )
+                if waveform_16k is not None:
+                    start_frame = int(seg["start"] * sample_rate)
+                    end_sec = min(seg["end"], seg["start"] + 6.0)
+                    end_frame = min(waveform_16k.shape[-1], int(end_sec * sample_rate))
+                    waveform = waveform_16k[:, start_frame:end_frame]
+                else:
+                    waveform, _ = load_audio_segment(
+                        audio_file,
+                        start_sec=seg["start"],
+                        end_sec=min(seg["end"], seg["start"] + 6.0),
+                    )
                 emb = self.encoder.encode_waveform(waveform)
 
                 # First test against candidate roster if available

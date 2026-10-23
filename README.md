@@ -9,7 +9,8 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - `databases/voiceprints.db`: Era-tagged speaker embeddings gallery.
   - `databases/buddhism_lexicon.db`: Master Pali terminology, translation matrix, and phonetic rule definitions.
 - **High-Accuracy Speech-to-Text (`faster-whisper-large-v3`)**:
-  - Float16 on NVIDIA CUDA (RTX 5070 Ti) running **7.0x–13.6x faster than real-time**.
+  - Float16 on NVIDIA CUDA (RTX 5070 Ti) with BatchedInferencePipeline running **50x–70x faster than real-time**.
+  - In-memory waveform caching for zero-disk acoustic profiling and speaker attribution.
   - Silero VAD speech filtering and Pali doctrinal prompt conditioning.
 - **Era-Tagged Voiceprint Gallery (`speechbrain/spkrec-ecapa-voxceleb`)**:
   - 192-d ECAPA-TDNN embeddings cataloging monastics across eras (`1997_2003`, `2004_2014`, `2015_2026`).

@@ -28,17 +28,25 @@ class Transcriber:
         device: str = "cuda",
         compute_type: str = "float16",
         initial_prompt: Optional[str] = PALI_PROMPT,
+        batch_size: int = 8,
     ):
         self.device = device
         self.compute_type = compute_type
         self.initial_prompt = initial_prompt
+        self.batch_size = batch_size
 
-        logger.info(f"Loading faster-whisper '{model_size}' on {device} ({compute_type})...")
+        logger.info(f"Loading faster-whisper '{model_size}' on {device} ({compute_type}, batch_size={batch_size})...")
         self.model = WhisperModel(
             model_size_or_path=model_size,
             device=self.device,
             compute_type=self.compute_type,
         )
+        if self.batch_size > 1:
+            from faster_whisper import BatchedInferencePipeline
+            self.batched_pipeline = BatchedInferencePipeline(model=self.model)
+            logger.info("BatchedInferencePipeline active.")
+        else:
+            self.batched_pipeline = None
         logger.info("Whisper model ready.")
 
     def transcribe(
@@ -53,14 +61,24 @@ class Transcriber:
         Returns list of segment dictionaries with start, end, text, and acoustic confidence metrics.
         """
         active_prompt = prompt or self.initial_prompt
-        segments_gen, _ = self.model.transcribe(
-            audio_16k_mono,
-            language="en",
-            initial_prompt=active_prompt,
-            vad_filter=vad_filter,
-            vad_parameters=dict(min_silence_duration_ms=500),
-            word_timestamps=word_timestamps,
-        )
+        if self.batched_pipeline is not None:
+            segments_gen, _ = self.batched_pipeline.transcribe(
+                audio_16k_mono,
+                batch_size=self.batch_size,
+                language="en",
+                initial_prompt=active_prompt,
+                vad_filter=vad_filter,
+                word_timestamps=word_timestamps,
+            )
+        else:
+            segments_gen, _ = self.model.transcribe(
+                audio_16k_mono,
+                language="en",
+                initial_prompt=active_prompt,
+                vad_filter=vad_filter,
+                vad_parameters=dict(min_silence_duration_ms=500),
+                word_timestamps=word_timestamps,
+            )
 
         segments = []
         for s in segments_gen:
