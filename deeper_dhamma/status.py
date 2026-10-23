@@ -87,6 +87,8 @@ def collect_status(
     transcribed_eras = Counter()
 
     db_resolved_teachers: Dict[str, str] = {}
+    db_errors: List[Dict[str, Any]] = []
+    error_years = Counter()
 
     if db_path.exists():
         try:
@@ -111,6 +113,24 @@ def collect_status(
             seg_row = cur.fetchone()
             if seg_row:
                 total_db_segments = seg_row[0]
+
+            err_cur = conn.execute(
+                "SELECT id, title, filepath, year, last_error, last_error_at, last_error_op FROM episodes WHERE last_error IS NOT NULL AND last_error != '' ORDER BY last_error_at DESC;"
+            )
+            error_years = Counter()
+            for r in err_cur.fetchall():
+                ed = dict(r)
+                ey = ed.get("year", 0)
+                if not ey and ed.get("filepath"):
+                    for part in Path(ed["filepath"]).parts:
+                        if part.isdigit() and len(part) == 4:
+                            ey = int(part)
+                            ed["year"] = ey
+                            break
+                if year_filter is None or ey == year_filter:
+                    db_errors.append(ed)
+                    if ey:
+                        error_years[ey] += 1
             conn.close()
 
             for ep in db_episodes:
@@ -333,6 +353,9 @@ def collect_status(
         "all_years": all_years,
         "all_teachers": all_teachers,
         "year_filter": year_filter,
+        "errors": db_errors,
+        "errors_count": len(db_errors),
+        "errors_by_year": dict(error_years),
     }
 
 
@@ -359,12 +382,17 @@ def print_summary(data: Dict[str, Any]) -> None:
     print(f"  - Pending Audio Downloads:  {cat['pending_download_count']:,} talks (fetch with: python main.py sync --all)")
     print(f"  - Audio Files on Disk:      {arch['total_files']:,} files ({arch['mp3_files']:,} MP3, {arch['m4a_files']:,} M4A | {arch_gb:.2f} GB)")
 
-    print("\nTranscription Progress:")
+    print("\nTranscription & Processing Health:")
     print(f"  - Database Episode Records: {tr['records_count']:,} cataloged in dhamma_transcripts.db")
     print(f"  - Total Transcribed Audio:  {dur_str} ({tr['total_duration_sec']:.1f}s)")
     print(f"  - Indexed Speech Segments:  {tr['total_segments']:,} turns (zero-copy SQLite FTS5 index)")
     print(f"  - Disk Archive Coverage:    {arch['transcribed_on_disk']:,} / {arch['total_files']:,} talks transcribed {tr_bar}")
     print(f"  - Ready for Transcription:  {arch['pending_transcription_on_disk']:,} audio talks available on disk")
+    err_count = data.get("errors_count", len(data.get("errors", [])))
+    if err_count > 0:
+        print(f"  - Files with Active Errors: {err_count:,} file(s) with recorded errors (inspect: python main.py status -e)")
+    else:
+        print("  - Files with Active Errors: 0 files with errors (all clean)")
 
     print("-" * 80)
     print("Acoustic Era Distribution (In-Scope Catalog):")
@@ -382,48 +410,56 @@ def print_summary(data: Dict[str, Any]) -> None:
 
 
 def print_year_breakdown(data: Dict[str, Any]) -> None:
-    """Prints a structured table of year-by-year transcription and sync progress."""
+    """Prints a structured table of year-by-year transcription, sync progress, and error counts."""
     cat = data["catalog"]
     cat_years = cat["by_year"]
     synced_years = cat["synced_by_year"]
     pending_dl_years = cat["pending_by_year"]
     tr_years = data["transcripts"]["by_year"]
+    err_years = data.get("errors_by_year", {})
     years = data["all_years"]
 
     print("\n" + "=" * 80)
-    print("Year-by-Year Sync & Transcription Coverage")
+    print("Year-by-Year Sync, Transcription & Error Health")
     print("=" * 80)
-    print(f"{'Year':<6} | {'In Scope':<8} | {'Synced':<8} | {'Pending DL':<10} | {'Transcribed':<11} | {'Status':<16}")
-    print("-" * 6 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 10 + "-+-" + "-" * 11 + "-+-" + "-" * 16)
+    print(f"{'Year':<6} | {'In Scope':<8} | {'Synced':<8} | {'Pending DL':<10} | {'Transcribed':<11} | {'Errors':<6} | {'Status':<14}")
+    print("-" * 6 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 10 + "-+-" + "-" * 11 + "-+-" + "-" * 6 + "-+-" + "-" * 14)
 
     tot_cat = 0
     tot_synced = 0
     tot_p_dl = 0
     tot_tr = 0
+    tot_err = 0
 
     for y in years:
         c_cat = cat_years.get(y, 0)
         c_synced = synced_years.get(y, 0)
         c_pdl = pending_dl_years.get(y, 0)
         c_tr = tr_years.get(y, 0)
+        c_err = err_years.get(y, 0)
 
         tot_cat += c_cat
         tot_synced += c_synced
         tot_p_dl += c_pdl
         tot_tr += c_tr
+        tot_err += c_err
 
-        if c_tr > 0:
+        if c_err > 0:
+            status = f"{c_err} error(s)"
+        elif c_tr > 0:
             status = f"Active ({c_tr} tr)"
         elif c_pdl > 0:
             status = f"Pending ({c_pdl} dl)"
         else:
             status = "Synced"
 
-        print(f"{y:<6} | {c_cat:>8,} | {c_synced:>8,} | {c_pdl:>10,} | {c_tr:>11,} | {status:<16}")
+        err_str = str(c_err) if c_err > 0 else "-"
+        print(f"{y:<6} | {c_cat:>8,} | {c_synced:>8,} | {c_pdl:>10,} | {c_tr:>11,} | {err_str:>6} | {status:<14}")
 
-    print("-" * 6 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 10 + "-+-" + "-" * 11 + "-+-" + "-" * 16)
+    print("-" * 6 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 10 + "-+-" + "-" * 11 + "-+-" + "-" * 6 + "-+-" + "-" * 14)
     sync_pct = (tot_synced / tot_cat * 100) if tot_cat else 0
-    print(f"{'Total':<6} | {tot_cat:>8,} | {tot_synced:>8,} | {tot_p_dl:>10,} | {tot_tr:>11,} | {sync_pct:5.1f}% synced")
+    tot_err_str = str(tot_err) if tot_err > 0 else "-"
+    print(f"{'Total':<6} | {tot_cat:>8,} | {tot_synced:>8,} | {tot_p_dl:>10,} | {tot_tr:>11,} | {tot_err_str:>6} | {sync_pct:5.1f}% synced")
     print("=" * 80)
 
 
@@ -506,3 +542,40 @@ def print_completed_episodes(data: Dict[str, Any], limit: int = 25) -> None:
 
     print(f"\n  -> Export any episode: python main.py export --id <episode_id> --format md")
     print("=" * 80)
+
+
+def print_errors(data: Dict[str, Any], limit: int = 25) -> None:
+    """Lists archive files with active recorded errors in the database."""
+    errors = data.get("errors", [])
+    yf = data.get("year_filter")
+    year_str = f" for Year {yf}" if yf else ""
+
+    print("\n" + "=" * 80)
+    print(f"Active Recorded File / Archive Errors{year_str} ({len(errors):,} total)")
+    print("=" * 80)
+
+    if not errors:
+        print("  [✓] Clean Health: No errors currently recorded for any archive files!")
+        print("=" * 80)
+        return
+
+    sample = errors[:limit]
+    for idx, err in enumerate(sample, 1):
+        op = err.get("last_error_op") or "unknown"
+        at = (err.get("last_error_at") or "")[:19]
+        title = err.get("title") or err.get("id") or "Untitled"
+        msg = err.get("last_error") or "Unknown error"
+        # Truncate msg if too long for display
+        if len(msg) > 90:
+            msg = msg[:87] + "..."
+        print(f"  {idx:>2}. [{at}] Operation: {op.upper():<12} | ID: {err['id']}")
+        print(f"      Title: {title[:70]}")
+        print(f"      Error: {msg}")
+
+    if len(errors) > limit:
+        print(f"\n  ... and {len(errors) - limit:,} more recorded errors.")
+
+    print("\n  -> To retry failed operations: python main.py sync --retry-errors")
+    print("  -> Or for transcription:      python main.py transcribe --all --retry-errors")
+    print("=" * 80)
+

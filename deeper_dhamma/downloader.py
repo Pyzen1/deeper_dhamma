@@ -485,6 +485,7 @@ def run_sync(
     allow_non_english: bool = False,
     log_file: Optional[Path | str] = None,
     auto_index_db: bool = True,
+    retry_errors: bool = False,
 ) -> Dict[str, Any]:
     """
     Main orchestration entry point for feed syncing, catalog updating, and episode downloading.
@@ -636,9 +637,18 @@ def run_sync(
             "--summary-interval=0",
         ]
 
+        tdb = None
+        if auto_index_db:
+            try:
+                from deeper_dhamma.storage import TranscriptDatabase
+                tdb = TranscriptDatabase()
+            except Exception as e:
+                l.debug(f"Database initialization notice: {e}")
+
         success_count = 0
         for idx, ep in enumerate(pending_episodes, start=1):
             current_num = completed + idx
+            ep_id = ep.get("id") or ep["filename"]
             l.info(f"[{current_num}/{total_in_scope}] Ingesting: {ep['title']}")
             l.info(f"   -> Folder: {ep['year']}/{ep['series']}/")
             l.info(f"   -> File:   {ep['filename']}.mp3")
@@ -656,6 +666,29 @@ def run_sync(
                         ghost.unlink()
                     except OSError:
                         pass
+
+            # Pre-flight error check: inspect previous error for this episode, resolve or skip
+            if tdb:
+                def _dl_auto_resolver(err_info: dict) -> bool:
+                    err_msg = (err_info.get("last_error") or "").lower()
+                    if "invalid data" in err_msg or "postprocessing" in err_msg:
+                        ghost_exists = any(
+                            p.exists() and p.stat().st_size == 0
+                            for p in (dest_mp3, dest_m4a, dest_jpg)
+                        )
+                        if not ghost_exists:
+                            return "0-byte ghost files purged"
+                    return False
+
+                can_proceed, reason = tdb.check_preflight(
+                    episode_id=ep_id,
+                    operation="download",
+                    retry_errors=retry_errors,
+                    auto_resolver=_dl_auto_resolver,
+                )
+                if not can_proceed:
+                    l.warning(f"   [-] Pre-flight skip: '{ep['title']}' ({reason}). Pass --retry-errors to force retry.\n")
+                    continue
 
             ydl_adapter = YTDLPLogAdapter(l)
             ydl_opts = {
@@ -680,6 +713,8 @@ def run_sync(
                 ydl_adapter.clear_active_progress()
                 if ret == 0:
                     success_count += 1
+                    if tdb:
+                        tdb.clear_error(ep_id)
                     elapsed = time.time() - t0
                     dest_file = dest_mp3 if dest_mp3.exists() else dest_m4a
                     if dest_file.exists() and dest_jpg.exists():
@@ -710,9 +745,8 @@ def run_sync(
                 # Guarantee that any episodes successfully completed earlier in this session are preserved and indexed
                 if auto_index_db and success_count > 0:
                     try:
-                        from deeper_dhamma.storage import TranscriptDatabase
-                        tdb = TranscriptDatabase()
-                        idx_res = tdb.index_archive_audio_files(target_dir)
+                        tdb_inst = tdb or TranscriptDatabase()
+                        idx_res = tdb_inst.index_archive_audio_files(target_dir)
                         l.info(f"[+] Audio database catalog refreshed: {idx_res.get('new_episodes_indexed', 0)} new file(s) indexed.")
                     except Exception as e:
                         l.debug(f"Audio database auto-index notice: {e}")
@@ -731,6 +765,14 @@ def run_sync(
                 err_str = str(e)
                 if "user-site-page-not-found" in err_str or "HTTP Error 404" in err_str:
                     l.warning(f"[!] Podbean 404 Notice: Talk '{ep['title']}' was removed from CDN by host. Skipping.\n")
+                    if tdb:
+                        tdb.record_error(
+                            episode_id=ep_id,
+                            error_message="HTTP Error 404: Removed from CDN by host",
+                            operation="download",
+                            filepath=str(dest_mp3),
+                            title=ep.get("title", ""),
+                        )
                     if ep.get("id"):
                         try:
                             with open(archive_path, "a", encoding="utf-8") as af:
@@ -739,6 +781,14 @@ def run_sync(
                             pass
                 else:
                     l.error(f"[!] Error downloading '{ep['title']}': {e}\n")
+                    if tdb:
+                        tdb.record_error(
+                            episode_id=ep_id,
+                            error_message=err_str,
+                            operation="download",
+                            filepath=str(dest_mp3),
+                            title=ep.get("title", ""),
+                        )
 
         l.info(f"[✓] Sync finished: {success_count} episode(s) downloaded.")
 

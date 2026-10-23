@@ -48,6 +48,7 @@ def cmd_sync(args):
         catalog_only=getattr(args, "catalog_only", False),
         reorganize=getattr(args, "reorganize", False),
         allow_non_english=getattr(args, "allow_non_english", False),
+        retry_errors=getattr(args, "retry_errors", False),
     )
 
 
@@ -197,9 +198,13 @@ def cmd_transcribe(args):
             result = pipeline.process_file(
                 audio_path=f,
                 max_duration_sec=args.max_duration,
+                retry_errors=getattr(args, "retry_errors", False),
             )
-            completed += 1
-            print(f"    [✓] Finished in {result['elapsed_sec']}s: {result['episode_id']} ({result['turns_count']} turns)")
+            if result.get("status") == "skipped":
+                print(f"    [-] Skipped by pre-flight check: {result.get('reason')}")
+            else:
+                completed += 1
+                print(f"    [✓] Finished in {result['elapsed_sec']}s: {result['episode_id']} ({result['turns_count']} turns)")
         except Exception as e:
             failed += 1
             logger.error(f"    [!] Error transcribing {f.name}: {e}")
@@ -480,6 +485,7 @@ def cmd_status(args):
         print_teacher_breakdown,
         print_pending_files,
         print_completed_episodes,
+        print_errors,
     )
 
     data = collect_status(year_filter=args.year)
@@ -495,6 +501,10 @@ def cmd_status(args):
         return
 
     # Specific sub-reports requested
+    if getattr(args, "errors", False):
+        print_errors(data, limit=args.limit)
+        return
+
     if args.pending:
         print_pending_files(data, limit=args.limit)
         return
@@ -592,6 +602,7 @@ def main(argv=None):
     p_sync.add_argument("--catalog-only", action="store_true", help="Only generate/update catalog.json without downloading")
     p_sync.add_argument("--reorganize", action="store_true", help="Reorganize existing audio files into their true date/year folders")
     p_sync.add_argument("--allow-non-english", action="store_true", help="Include non-English talks in sync")
+    p_sync.add_argument("--retry-errors", action="store_true", help="Retry downloading episodes with previous recorded errors")
     p_sync.set_defaults(func=cmd_sync, subparser=p_sync)
 
     # 2. Voiceprints
@@ -625,6 +636,7 @@ def main(argv=None):
     p_trans.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
     p_trans.add_argument("--archive-dir", default=ARCHIVE_DIR, help="Audio archive directory")
     p_trans.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
+    p_trans.add_argument("--retry-errors", action="store_true", help="Retry transcribing episodes with previous recorded errors")
     p_trans.set_defaults(func=cmd_transcribe, subparser=p_trans)
 
     # 4. Search
@@ -697,6 +709,7 @@ def main(argv=None):
     p_status.add_argument("--completed", "-c", action="store_true", help="List already transcribed episodes")
     p_status.add_argument("--year", type=int, help="Filter statistics or listings by specific year")
     p_status.add_argument("--limit", "-n", type=int, default=25, help="Max items to show in listings (default: 25)")
+    p_status.add_argument("--errors", "-e", action="store_true", help="List archive files with active recorded errors")
     p_status.add_argument("--json", action="store_true", help="Output raw metrics as JSON")
     p_status.set_defaults(func=cmd_status, subparser=p_status)
 

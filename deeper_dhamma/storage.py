@@ -6,7 +6,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from deeper_dhamma.config import ARCHIVE_DIR, TRANSCRIPTS_DB_PATH
 
@@ -74,6 +74,9 @@ class TranscriptDatabase:
                     is_multi_speaker INTEGER DEFAULT 0,
                     speaker_shares TEXT,
                     terminology_changelog TEXT,
+                    last_error TEXT,
+                    last_error_at TEXT,
+                    last_error_op TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -163,6 +166,12 @@ class TranscriptDatabase:
             if "is_transcribed" not in cols:
                 conn.execute("ALTER TABLE episodes ADD COLUMN is_transcribed INTEGER DEFAULT 0;")
                 conn.execute("UPDATE episodes SET is_transcribed = 1 WHERE duration_sec > 0;")
+            if "last_error" not in cols:
+                conn.execute("ALTER TABLE episodes ADD COLUMN last_error TEXT;")
+            if "last_error_at" not in cols:
+                conn.execute("ALTER TABLE episodes ADD COLUMN last_error_at TEXT;")
+            if "last_error_op" not in cols:
+                conn.execute("ALTER TABLE episodes ADD COLUMN last_error_op TEXT;")
 
         self.seed_teachers()
 
@@ -217,7 +226,10 @@ class TranscriptDatabase:
                         duration_sec = excluded.duration_sec,
                         is_multi_speaker = excluded.is_multi_speaker,
                         speaker_shares = excluded.speaker_shares,
-                        terminology_changelog = excluded.terminology_changelog;
+                        terminology_changelog = excluded.terminology_changelog,
+                        last_error = NULL,
+                        last_error_at = NULL,
+                        last_error_op = NULL;
                     """,
                     (
                         ep_id, title, date_display, year_int, primary_slug, primary_display,
@@ -501,6 +513,154 @@ class TranscriptDatabase:
             """
             rows = conn.execute(sql, (query, limit)).fetchall()
             return [dict(r) for r in rows]
+
+    def record_error(
+        self,
+        episode_id: str,
+        error_message: str,
+        operation: Optional[str] = None,
+        filepath: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> None:
+        """
+        Records or updates the most recent error associated with an episode/archive file.
+        Inserts a tracking record if the episode is not yet cataloged.
+        """
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        clean_err = str(error_message).strip()
+
+        with self._get_connection() as conn:
+            with conn:
+                cur = conn.execute("SELECT id FROM episodes WHERE id = ?;", (episode_id,))
+                if cur.fetchone():
+                    conn.execute(
+                        """
+                        UPDATE episodes
+                        SET last_error = ?,
+                            last_error_at = ?,
+                            last_error_op = ?
+                        WHERE id = ?;
+                        """,
+                        (clean_err, now_iso, operation, episode_id),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO episodes (
+                            id, title, filepath, duration_sec, is_transcribed,
+                            last_error, last_error_at, last_error_op
+                        ) VALUES (?, ?, ?, 0.0, 0, ?, ?, ?);
+                        """,
+                        (
+                            episode_id,
+                            title or episode_id,
+                            filepath,
+                            clean_err,
+                            now_iso,
+                            operation,
+                        ),
+                    )
+
+    def get_error(self, episode_id: str) -> Optional[Dict[str, Any]]:
+        """Returns error metadata for an episode if an active error is recorded, else None."""
+        with self._get_connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT id, title, filepath, last_error, last_error_at, last_error_op
+                FROM episodes
+                WHERE id = ? AND last_error IS NOT NULL AND last_error != ''
+                LIMIT 1;
+                """,
+                (episode_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def check_preflight(
+        self,
+        episode_id: str,
+        operation: str,
+        retry_errors: bool = False,
+        auto_resolver: Optional[Any] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Pre-flight check before performing an operation on an episode/file.
+        Checks for previous errors. Returns (should_proceed, message_or_reason).
+
+        If an active error exists:
+        - If retry_errors is True: clears error and permits operation.
+        - If auto_resolver callable is supplied: attempts to resolve the error. If resolved,
+          clears the error and permits operation.
+        - Otherwise: blocks operation and returns (False, reason).
+        """
+        err_info = self.get_error(episode_id)
+        if not err_info:
+            return True, None
+
+        last_op = err_info.get("last_error_op") or "unknown"
+        last_msg = err_info.get("last_error") or ""
+        last_at = err_info.get("last_error_at") or ""
+
+        # 1. User requested retry
+        if retry_errors:
+            self.clear_error(episode_id)
+            return True, f"cleared_for_retry (was {last_op}: {last_msg})"
+
+        # 2. Automated resolution check (e.g. ghost file was deleted, file repaired)
+        if auto_resolver and callable(auto_resolver):
+            try:
+                resolved = auto_resolver(err_info)
+                if resolved:
+                    self.clear_error(episode_id)
+                    return True, f"resolved_automatically ({resolved})"
+            except Exception as e:
+                logger.debug(f"Resolver failed for {episode_id}: {e}")
+
+        # 3. Known permanent dead links (e.g. 404 removed from CDN)
+        if "404" in last_msg or "removed from cdn" in last_msg.lower():
+            return False, f"Permanent 404 (removed from CDN on {last_at[:10]}): {last_msg}"
+
+        return False, f"Active error recorded ({last_op} on {last_at[:10]}): {last_msg}"
+
+    def clear_error(self, episode_id: str) -> None:
+        """Clears the last_error tracking fields when an operation succeeds for an episode."""
+        with self._get_connection() as conn:
+            with conn:
+                conn.execute(
+                    """
+                    UPDATE episodes
+                    SET last_error = NULL,
+                        last_error_at = NULL,
+                        last_error_op = NULL
+                    WHERE id = ?;
+                    """,
+                    (episode_id,),
+                )
+
+    def list_errors(self, operation: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Returns all episodes that currently have recorded errors."""
+        with self._get_connection() as conn:
+            if operation:
+                cur = conn.execute(
+                    """
+                    SELECT id, title, filepath, last_error, last_error_at, last_error_op
+                    FROM episodes
+                    WHERE last_error IS NOT NULL AND last_error != '' AND last_error_op = ?
+                    ORDER BY last_error_at DESC;
+                    """,
+                    (operation,),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    SELECT id, title, filepath, last_error, last_error_at, last_error_op
+                    FROM episodes
+                    WHERE last_error IS NOT NULL AND last_error != ''
+                    ORDER BY last_error_at DESC;
+                    """
+                )
+            return [dict(r) for r in cur.fetchall()]
 
     def generate_markdown(self, episode_id: str) -> str:
         data = self.get_episode(episode_id)

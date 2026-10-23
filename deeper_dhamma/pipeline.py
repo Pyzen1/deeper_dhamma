@@ -73,15 +73,11 @@ class TranscriptionPipeline:
         audio_path: Path | str,
         catalog_entry: Optional[Dict] = None,
         max_duration_sec: Optional[float] = None,
+        retry_errors: bool = False,
     ) -> Dict:
         audio_path = Path(audio_path)
         t0 = time.time()
         logger.info(f"[*] Processing audio: {audio_path.name}")
-
-        info = get_audio_info(audio_path)
-        total_dur = info["duration"]
-        process_dur = min(total_dur, max_duration_sec) if max_duration_sec else total_dur
-        logger.info(f"    Total duration: {total_dur:.1f}s | Processing: {process_dur:.1f}s")
 
         year_val = None
         for part in audio_path.parts:
@@ -112,107 +108,145 @@ class TranscriptionPipeline:
             permalink = ""
             upload_date = f"{year_val}0101"
 
-        # 1. Single In-Memory Audio Loading & Resample (zero repeated disk I/O)
-        logger.info(f"    Loading {process_dur:.1f}s audio at 16kHz mono into RAM...")
-        waveform_16k, _ = load_audio_segment(audio_path, start_sec=0.0, end_sec=process_dur, target_sr=16000)
-        audio_np = waveform_16k.squeeze(0).numpy()
+        # Pre-flight error check: inspect previous error for this episode, resolve or skip
+        def _transcribe_auto_resolver(err_info: dict) -> bool:
+            err_msg = (err_info.get("last_error") or "").lower()
+            if "not found" in err_msg or "0-byte" in err_msg or "corrupt" in err_msg:
+                if audio_path.exists() and audio_path.stat().st_size > 1024 * 1024:
+                    return "valid audio file present on disk"
+            return False
 
-        # 2. Fast Acoustic Pre-Profiling (in-memory slice evaluation)
-        logger.info(f"    Running fast acoustic pre-profiling across {process_dur:.1f}s...")
-        profile = self.profiler.profile_audio(
-            audio_path,
-            stride_sec=30.0,
-            window_sec=3.0,
-            era=era,
-            waveform_16k=waveform_16k,
+        can_proceed, reason = self.db.check_preflight(
+            episode_id=ep_id,
+            operation="transcribe",
+            retry_errors=retry_errors,
+            auto_resolver=_transcribe_auto_resolver,
         )
-        if profile["is_multi_speaker"] and profile.get("ranked_speakers"):
-            raw_names = [s["display_name"] for s in profile["ranked_speakers"] if s["share"] >= 0.08 and s.get("confidence", 0) >= 0.40]
-            if primary_display not in raw_names and meta_teacher_slug != "unknown_teacher":
-                raw_names.insert(0, primary_display)
-            names = list(dict.fromkeys(raw_names))
-            if len(names) > 1:
-                primary_display = " & ".join(names[:2])
-            elif names:
-                primary_display = names[0]
-        elif meta_teacher_slug == "unknown_teacher" and profile.get("ranked_speakers"):
-            top = profile["ranked_speakers"][0]
-            if top.get("confidence", 0) >= 0.42:
-                primary_slug = top["slug"]
-                primary_display = top["display_name"]
+        if not can_proceed:
+            logger.warning(f"[-] Pre-flight skip: '{ep_id}' ({reason}). Pass --retry-errors to force retry.")
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "episode_id": ep_id,
+                "audio_file": str(audio_path),
+            }
 
-        # Collect all active teacher slugs for tailored vocabulary steering
-        active_slugs = [primary_slug]
-        if profile.get("is_multi_speaker") and profile.get("ranked_speakers"):
-            for s in profile["ranked_speakers"]:
-                if s.get("share", 0) >= 0.08 and s["slug"] not in active_slugs and not s["slug"].startswith("unregistered"):
-                    active_slugs.append(s["slug"])
+        try:
+            info = get_audio_info(audio_path)
+            total_dur = info["duration"]
+            process_dur = min(total_dur, max_duration_sec) if max_duration_sec else total_dur
+            logger.info(f"    Total duration: {total_dur:.1f}s | Processing: {process_dur:.1f}s")
 
-        meta = {
-            "id": ep_id,
-            "title": ep_title,
-            "primary_teacher": primary_slug,
-            "primary_display": primary_display,
-            "media_url": media_url,
-            "permalink": permalink,
-            "upload_date": upload_date,
-            "is_multi_speaker": profile.get("is_multi_speaker", False),
-            "speaker_shares": profile.get("shares", {}),
-        }
+            # 1. Single In-Memory Audio Loading & Resample (zero repeated disk I/O)
+            logger.info(f"    Loading {process_dur:.1f}s audio at 16kHz mono into RAM...")
+            waveform_16k, _ = load_audio_segment(audio_path, start_sec=0.0, end_sec=process_dur, target_sr=16000)
+            audio_np = waveform_16k.squeeze(0).numpy()
 
-        # 3. Speech-to-Text with Teacher-Specific Prompt Steering & Continuous Hotwords
-        talk_prompt = self.lexicon_db.get_prompt_steering_terms(teacher_slugs=active_slugs, limit=30)
-        talk_hotwords = self.lexicon_db.get_hotwords_for_teachers(teacher_slugs=active_slugs, limit=50)
-        logger.info(f"    Transcribing with faster-whisper (batched, float16, Silero VAD, {len(active_slugs)} teacher profile(s))...")
-        t_asr0 = time.time()
-        asr_segments = self.transcriber.transcribe(audio_np, prompt=talk_prompt, hotwords=talk_hotwords)
-        logger.info(f"    ASR complete in {time.time() - t_asr0:.2f}s ({len(asr_segments)} segments).")
+            # 2. Fast Acoustic Pre-Profiling (in-memory slice evaluation)
+            logger.info(f"    Running fast acoustic pre-profiling across {process_dur:.1f}s...")
+            profile = self.profiler.profile_audio(
+                audio_path,
+                stride_sec=30.0,
+                window_sec=3.0,
+                era=era,
+                waveform_16k=waveform_16k,
+            )
+            if profile["is_multi_speaker"] and profile.get("ranked_speakers"):
+                raw_names = [s["display_name"] for s in profile["ranked_speakers"] if s["share"] >= 0.08 and s.get("confidence", 0) >= 0.40]
+                if primary_display not in raw_names and meta_teacher_slug != "unknown_teacher":
+                    raw_names.insert(0, primary_display)
+                names = list(dict.fromkeys(raw_names))
+                if len(names) > 1:
+                    primary_display = " & ".join(names[:2])
+                elif names:
+                    primary_display = names[0]
+            elif meta_teacher_slug == "unknown_teacher" and profile.get("ranked_speakers"):
+                top = profile["ranked_speakers"][0]
+                if top.get("confidence", 0) >= 0.42:
+                    primary_slug = top["slug"]
+                    primary_display = top["display_name"]
 
-        # 4. Speaker Alignment & Identification (in-memory slice attribution)
-        logger.info("    Aligning speakers with voiceprints & pre-analyzed profile...")
-        t_spk0 = time.time()
-        attributed = self.aligner.align_segments(
-            audio_file=audio_path,
-            asr_segments=asr_segments,
-            primary_slug=primary_slug,
-            primary_display=primary_display,
-            era=era,
-            profile=profile,
-            waveform_16k=waveform_16k,
-        )
-        logger.info(f"    Speaker alignment complete in {time.time() - t_spk0:.2f}s ({len(attributed)} turns).")
+            # Collect all active teacher slugs for tailored vocabulary steering
+            active_slugs = [primary_slug]
+            if profile.get("is_multi_speaker") and profile.get("ranked_speakers"):
+                for s in profile["ranked_speakers"]:
+                    if s.get("share", 0) >= 0.08 and s["slug"] not in active_slugs and not s["slug"].startswith("unregistered"):
+                        active_slugs.append(s["slug"])
 
-        # 5. Buddhist Terminology Normalization & Audit Pass
-        logger.info("    Applying final Buddhist reference terminology normalization...")
-        attributed, term_changelog = self.terminology_editor.edit_segments(attributed)
-        if term_changelog:
-            logger.info(f"    [+] Terminology editor applied {len(term_changelog)} standardization rule(s).")
+            meta = {
+                "id": ep_id,
+                "title": ep_title,
+                "primary_teacher": primary_slug,
+                "primary_display": primary_display,
+                "media_url": media_url,
+                "permalink": permalink,
+                "upload_date": upload_date,
+                "is_multi_speaker": profile.get("is_multi_speaker", False),
+                "speaker_shares": profile.get("shares", {}),
+            }
 
-        # 6. Commit to Unified SQLite Database
-        logger.info("    Committing to unified SQLite database & updating FTS5 index...")
-        self.db.save_episode(
-            episode_metadata=meta,
-            attributed_segments=attributed,
-            duration_sec=process_dur,
-            year=str(year_val),
-            filename_stem=audio_path.stem,
-            terminology_changelog=term_changelog,
-        )
+            # 3. Speech-to-Text with Teacher-Specific Prompt Steering & Continuous Hotwords
+            talk_prompt = self.lexicon_db.get_prompt_steering_terms(teacher_slugs=active_slugs, limit=30)
+            talk_hotwords = self.lexicon_db.get_hotwords_for_teachers(teacher_slugs=active_slugs, limit=50)
+            logger.info(f"    Transcribing with faster-whisper (batched, float16, Silero VAD, {len(active_slugs)} teacher profile(s))...")
+            t_asr0 = time.time()
+            asr_segments = self.transcriber.transcribe(audio_np, prompt=talk_prompt, hotwords=talk_hotwords)
+            logger.info(f"    ASR complete in {time.time() - t_asr0:.2f}s ({len(asr_segments)} segments).")
 
-        elapsed = time.time() - t0
-        logger.info(f"[✓] Episode committed in {elapsed:.2f}s: {meta['id']}")
+            # 4. Speaker Alignment & Identification (in-memory slice attribution)
+            logger.info("    Aligning speakers with voiceprints & pre-analyzed profile...")
+            t_spk0 = time.time()
+            attributed = self.aligner.align_segments(
+                audio_file=audio_path,
+                asr_segments=asr_segments,
+                primary_slug=primary_slug,
+                primary_display=primary_display,
+                era=era,
+                profile=profile,
+                waveform_16k=waveform_16k,
+            )
+            logger.info(f"    Speaker alignment complete in {time.time() - t_spk0:.2f}s ({len(attributed)} turns).")
 
-        return {
-            "audio_file": str(audio_path),
-            "episode_id": meta["id"],
-            "duration_sec": process_dur,
-            "elapsed_sec": round(elapsed, 2),
-            "primary_teacher": primary_slug,
-            "primary_display": primary_display,
-            "is_multi_speaker": profile.get("is_multi_speaker", False),
-            "speaker_shares": profile.get("shares", {}),
-            "era": era,
-            "turns_count": len(attributed),
-            "db_path": str(self.db.db_path),
-            "turns_sample": attributed[:3],
-        }
+            # 5. Buddhist Terminology Normalization & Audit Pass
+            logger.info("    Applying final Buddhist reference terminology normalization...")
+            attributed, term_changelog = self.terminology_editor.edit_segments(attributed)
+            if term_changelog:
+                logger.info(f"    [+] Terminology editor applied {len(term_changelog)} standardization rule(s).")
+
+            # 6. Commit to Unified SQLite Database
+            logger.info("    Committing to unified SQLite database & updating FTS5 index...")
+            self.db.save_episode(
+                episode_metadata=meta,
+                attributed_segments=attributed,
+                duration_sec=process_dur,
+                year=str(year_val),
+                filename_stem=audio_path.stem,
+                terminology_changelog=term_changelog,
+            )
+
+            elapsed = time.time() - t0
+            logger.info(f"[✓] Episode committed in {elapsed:.2f}s: {meta['id']}")
+
+            return {
+                "audio_file": str(audio_path),
+                "episode_id": meta["id"],
+                "duration_sec": process_dur,
+                "elapsed_sec": round(elapsed, 2),
+                "primary_teacher": primary_slug,
+                "primary_display": primary_display,
+                "is_multi_speaker": profile.get("is_multi_speaker", False),
+                "speaker_shares": profile.get("shares", {}),
+                "era": era,
+                "turns_count": len(attributed),
+                "db_path": str(self.db.db_path),
+                "turns_sample": attributed[:3],
+            }
+        except Exception as e:
+            self.db.record_error(
+                episode_id=ep_id,
+                error_message=str(e),
+                operation="transcribe",
+                filepath=str(audio_path),
+                title=ep_title,
+            )
+            raise

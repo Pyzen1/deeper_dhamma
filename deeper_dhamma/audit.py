@@ -254,6 +254,14 @@ def clean_archive(
                         counts["deleted_html_errors"] += 1
                     if log:
                         log.info(f"[✓] Deleted {issue_type}: {issue['path']}")
+                    # If this file had a recorded failure in the database, clear it since the defect is now resolved
+                    try:
+                        from deeper_dhamma.storage import TranscriptDatabase
+                        tdb = TranscriptDatabase()
+                        if tdb.get_error(fp.stem):
+                            tdb.clear_error(fp.stem)
+                    except Exception:
+                        pass
                 except OSError as e:
                     if log:
                         log.error(f"[!] Could not delete {issue['path']}: {e}")
