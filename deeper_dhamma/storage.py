@@ -498,6 +498,7 @@ class TranscriptDatabase:
         query: str,
         limit: int = 25,
         return_meta: bool = False,
+        exact: bool = False,
     ) -> Union[List[Dict], Tuple[List[Dict], Dict]]:
         """
         Executes full-text search with automatic tiered query expansion:
@@ -506,6 +507,8 @@ class TranscriptDatabase:
           Tier 3: Prefix / stem matching (word*)
           Tier 4: Typo auto-correction (Levenshtein / difflib against transcript vocabulary)
           Tier 5: BM25 ranked 'any word' match (word1 OR word2)
+
+        If `exact=True`, bypasses Tiers 2-5 and performs strict literal matching only.
         """
         import difflib
         import re
@@ -564,7 +567,7 @@ class TranscriptDatabase:
             # Tier 1: Exact phrase (if >1 word) or exact word
             t1_q = f'"{clean_query}"' if len(words) > 1 else words[0]
             rows = _try_query(t1_q)
-            if rows:
+            if rows or exact:
                 meta["tier"] = "exact_phrase" if len(words) > 1 else "exact_word"
                 meta["effective_query"] = t1_q
                 return (rows, meta) if return_meta else rows

@@ -218,19 +218,24 @@ def cmd_transcribe(args):
 def cmd_search(args):
     """Runs instant full-text search across transcripts with tiered query expansion."""
     db = TranscriptDatabase(args.db)
-    results, meta = db.search_fts(args.query, limit=args.limit, return_meta=True)
+    exact = getattr(args, "exact", False)
+    results, meta = db.search_fts(args.query, limit=args.limit, return_meta=True, exact=exact)
     if not results:
         print(f"\n[*] Searching transcripts for: \"{args.query}\" ...\n")
         print("[-] No matching speech segments found.")
-        suggestions = db.suggest_terms(args.query)
-        if suggestions:
-            print(f"    Did you mean: {', '.join(suggestions)}?\n")
+        if exact:
+            print(f"    (Strict exact mode enabled: No literal occurrences of \"{args.query}\" exist in transcribed talks)\n")
+        else:
+            suggestions = db.suggest_terms(args.query)
+            if suggestions:
+                print(f"    Did you mean: {', '.join(suggestions)}?\n")
         return
 
     tier = meta.get("tier", "exact")
     if meta.get("corrected"):
         print(f"\n[*] Searching transcripts for: \"{args.query}\" ...")
-        print(f"[!] Typo detected: Showing matches for \"{meta['effective_query']}\" (auto-corrected)\n")
+        print(f"[!] Typo detected: Showing matches for \"{meta['effective_query']}\" (auto-corrected)")
+        print(f"    (To search strictly for \"{args.query}\", use: python main.py search \"{args.query}\" --exact)\n")
     elif tier == "proximity":
         print(f"\n[*] Searching transcripts for: \"{args.query}\" ...")
         print(f"[+] Proximity match: Found segments with words in close proximity\n")
@@ -662,6 +667,7 @@ def main(argv=None):
     p_search = subparsers.add_parser("search", help="Full-text search across transcripts")
     p_search.add_argument("query", type=str, help="Search query (supports boolean operators like AND, OR, NOT)")
     p_search.add_argument("--limit", "-n", type=int, default=20, help="Max results (default: 20)")
+    p_search.add_argument("--exact", "-x", action="store_true", help="Strict literal match only (disables auto-correction and proximity expansion)")
     p_search.add_argument("--db", default=TRANSCRIPTS_DB_PATH, help="Path to SQLite transcripts database")
     p_search.set_defaults(func=cmd_search, subparser=p_search)
 
