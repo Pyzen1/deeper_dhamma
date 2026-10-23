@@ -500,17 +500,19 @@ def cmd_status(args):
         print(json.dumps(data, indent=2, default=json_default, ensure_ascii=False))
         return
 
+    lim = args.limit or 25
+
     # Specific sub-reports requested
     if getattr(args, "errors", False):
-        print_errors(data, limit=args.limit)
+        print_errors(data, limit=lim)
         return
 
     if args.pending:
-        print_pending_files(data, limit=args.limit)
+        print_pending_files(data, limit=lim)
         return
 
     if args.completed:
-        print_completed_episodes(data, limit=args.limit)
+        print_completed_episodes(data, limit=lim)
         return
 
     if args.years:
@@ -528,7 +530,7 @@ def cmd_status(args):
     # Default view for --all or if a filter (--year) was provided
     print_summary(data)
     print_year_breakdown(data)
-    print_teacher_breakdown(data, limit=12)
+    print_teacher_breakdown(data, limit=args.limit)
 
 
 def cmd_audit(args):
@@ -708,7 +710,7 @@ def main(argv=None):
     p_status.add_argument("--pending", "-p", action="store_true", help="List audio files awaiting transcription")
     p_status.add_argument("--completed", "-c", action="store_true", help="List already transcribed episodes")
     p_status.add_argument("--year", type=int, help="Filter statistics or listings by specific year")
-    p_status.add_argument("--limit", "-n", type=int, default=25, help="Max items to show in listings (default: 25)")
+    p_status.add_argument("--limit", "-n", type=int, help="Limit number of items to show in listings (e.g. --pending, --completed, --teachers)")
     p_status.add_argument("--errors", "-e", action="store_true", help="List archive files with active recorded errors")
     p_status.add_argument("--json", action="store_true", help="Output raw metrics as JSON")
     p_status.set_defaults(func=cmd_status, subparser=p_status)

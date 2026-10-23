@@ -463,27 +463,37 @@ def print_year_breakdown(data: Dict[str, Any]) -> None:
     print("=" * 80)
 
 
-def print_teacher_breakdown(data: Dict[str, Any], limit: int = 15) -> None:
+def print_teacher_breakdown(data: Dict[str, Any], limit: Optional[int] = None) -> None:
     """Prints a breakdown of talks by monastic teacher."""
     cat = data["catalog"]
     cat_t = cat["by_teacher"]
     synced_t = cat["synced_by_teacher"]
     tr_t = data["transcripts"]["by_teacher"]
-    teachers = data["all_teachers"][:limit]
+    teachers = data["all_teachers"][:limit] if limit is not None else data["all_teachers"]
 
     print("\n" + "=" * 80)
-    print(f"Catalog & Archive Coverage by Teacher (Top {len(teachers)})")
+    print(f"Catalog & Archive Coverage by Teacher ({len(teachers)} Monastic Teachers)")
     print("=" * 80)
-    print(f"{'Monastic Teacher':<26} | {'In Scope':<8} | {'Synced':<8} | {'Transcribed':<11} | {'Sync %':<9}")
-    print("-" * 26 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 11 + "-+-" + "-" * 9)
+    print(f"{'Monastic Teacher':<28} | {'In Scope':<8} | {'Synced':<8} | {'Transcribed':<11} | {'Sync %':<9}")
+    print("-" * 28 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 11 + "-+-" + "-" * 9)
+
+    tot_cat = 0
+    tot_synced = 0
+    tot_tr = 0
 
     for teacher in teachers:
         c_cat = cat_t.get(teacher, 0)
         c_synced = synced_t.get(teacher, 0)
         c_tr = tr_t.get(teacher, 0)
         pct = (c_synced / c_cat * 100) if c_cat else 0
-        print(f"{teacher:<26} | {c_cat:>8,} | {c_synced:>8,} | {c_tr:>11,} | {pct:6.1f}%")
+        tot_cat += c_cat
+        tot_synced += c_synced
+        tot_tr += c_tr
+        print(f"{teacher:<28} | {c_cat:>8,} | {c_synced:>8,} | {c_tr:>11,} | {pct:6.1f}%")
 
+    print("-" * 28 + "-+-" + "-" * 8 + "-+-" + "-" * 8 + "-+-" + "-" * 11 + "-+-" + "-" * 9)
+    sync_pct = (tot_synced / tot_cat * 100) if tot_cat else 0
+    print(f"{'Total':<28} | {tot_cat:>8,} | {tot_synced:>8,} | {tot_tr:>11,} | {sync_pct:6.1f}%")
     print("=" * 80)
 
 
