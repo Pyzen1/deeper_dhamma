@@ -690,7 +690,34 @@ def run_sync(
                     time.sleep(sleep_seconds)
             except KeyboardInterrupt:
                 ydl_adapter.clear_active_progress()
-                l.info("\n[*] Interrupted by user. Run again to resume downloads.")
+                # Immediate cleanup of any 0-byte or corrupted remnants of the interrupted download
+                for remnant in (dest_mp3, dest_m4a, dest_jpg):
+                    if remnant.exists() and remnant.stat().st_size == 0:
+                        try:
+                            remnant.unlink()
+                        except OSError:
+                            pass
+                # Also remove any transient aria2/part fragments for this specific file
+                for p in dest_folder.glob(f"{ep['filename']}.*"):
+                    if p.suffix.lower() in (".temp", ".part", ".ytdl") or ".temp." in p.name:
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
+
+                l.info("\n[*] Download session interrupted by user (Ctrl+C).")
+
+                # Guarantee that any episodes successfully completed earlier in this session are preserved and indexed
+                if auto_index_db and success_count > 0:
+                    try:
+                        from deeper_dhamma.storage import TranscriptDatabase
+                        tdb = TranscriptDatabase()
+                        idx_res = tdb.index_archive_audio_files(target_dir)
+                        l.info(f"[+] Audio database catalog refreshed: {idx_res.get('new_episodes_indexed', 0)} new file(s) indexed.")
+                    except Exception as e:
+                        l.debug(f"Audio database auto-index notice: {e}")
+
+                l.info("[*] Run 'python main.py sync' at any time to resume remaining downloads safely.\n")
                 sys.exit(130)
             except Exception as e:
                 ydl_adapter.clear_active_progress()
