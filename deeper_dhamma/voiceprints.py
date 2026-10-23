@@ -187,90 +187,100 @@ def bootstrap_voiceprints(
 
     encoder = SpeakerEncoder(device=device)
 
-    all_files = sorted(list(archive_p.rglob("*.mp3")))
+    # Load existing counts from voiceprints table if not cleared
     counts = {}
+    if not clear_existing:
+        with sqlite3.connect(str(db.db_path)) as conn:
+            cur = conn.execute("SELECT teacher_slug, era, COUNT(*) FROM voiceprints GROUP BY teacher_slug, era;")
+            counts = {(row[0], row[1]): row[2] for row in cur.fetchall()}
+
+    all_files = sorted(list(archive_p.rglob("*.mp3")) + list(archive_p.rglob("*.m4a")))
     total_added = 0
 
-    logger.info(f"Scanning {len(all_files)} audio files across archive for voiceprint extraction...")
+    # Group files by teacher so that monastics with few talks are prioritized
+    teacher_files: Dict[str, List] = {}
+    for f in all_files:
+        tslug, tdisplay = identify_primary_teacher(f.name)
+        if tslug != "unknown_teacher":
+            teacher_files.setdefault(tslug, []).append((f, tdisplay))
 
-    for audio_f in all_files:
-        teacher_slug, display_name = identify_primary_teacher(audio_f.name)
-        if teacher_slug == "unknown_teacher":
-            continue
+    logger.info(f"Scanning {len(all_files)} audio files across archive ({len(teacher_files)} known teachers represented)...")
 
-        year_val = None
-        for part in audio_f.parts:
-            if part.isdigit() and len(part) == 4:
-                year_val = int(part)
-                break
-        if not year_val:
-            year_val = 2010
-
-        era = determine_era(year_val)
-        cluster_key = (teacher_slug, era)
-        current_count = counts.get(cluster_key, 0)
-        if current_count >= samples_per_teacher_era:
-            continue
-
-        try:
-            info = get_audio_info(audio_f)
-            dur = info["duration"]
-            if dur < 180:
-                continue
-
-            # Candidate time offsets across the talk to find active voiced speech
-            candidate_times = [60.0, 120.0, 180.0, 240.0, 300.0, 420.0, 600.0]
-            best_waveform = None
-            best_energy = -1.0
-            best_start_t = 120.0
-
-            for cand_t in candidate_times:
-                if cand_t + sample_duration_sec > dur - 10.0:
-                    continue
-                seg_wave, _ = load_audio_segment(
-                    audio_f,
-                    start_sec=cand_t,
-                    end_sec=cand_t + sample_duration_sec,
-                )
-                mean_energy = float(torch.mean(torch.abs(seg_wave)).item())
-                max_energy = float(torch.max(torch.abs(seg_wave)).item())
-
-                # If this segment has strong speech energy, accept immediately
-                if mean_energy >= 0.012 and max_energy >= 0.08:
-                    best_waveform = seg_wave
-                    best_start_t = cand_t
-                    best_energy = mean_energy
+    for tslug, files in teacher_files.items():
+        for audio_f, display_name in files:
+            year_val = None
+            for part in audio_f.parts:
+                if part.isdigit() and len(part) == 4:
+                    year_val = int(part)
                     break
+            if not year_val:
+                year_val = 2010
 
-                if mean_energy > best_energy:
-                    best_energy = mean_energy
-                    best_waveform = seg_wave
-                    best_start_t = cand_t
-
-            # Skip file if no candidate has minimum speech energy
-            if best_waveform is None or best_energy < 0.005:
+            era = determine_era(year_val)
+            cluster_key = (tslug, era)
+            current_count = counts.get(cluster_key, 0)
+            if current_count >= samples_per_teacher_era:
                 continue
 
-            end_t = best_start_t + sample_duration_sec
-            emb = encoder.encode_waveform(best_waveform)
+            try:
+                info = get_audio_info(audio_f)
+                dur = info["duration"]
+                if dur < 30.0:
+                    continue
 
-            db.insert_voiceprint(
-                teacher_slug=teacher_slug,
-                display_name=display_name,
-                era=era,
-                role="monastic_primary",
-                source_file=audio_f.name,
-                start_sec=best_start_t,
-                end_sec=end_t,
-                embedding=emb,
-            )
+                # Candidate time offsets across the talk to find active voiced speech
+                candidate_times = [60.0, 120.0, 180.0, 240.0, 300.0, 420.0, 600.0]
+                best_waveform = None
+                best_energy = -1.0
+                best_start_t = 60.0
 
-            counts[cluster_key] = current_count + 1
-            total_added += 1
-        except Exception as e:
-            logger.debug(f"Error processing {audio_f.name}: {e}")
+                for cand_t in candidate_times:
+                    if cand_t + sample_duration_sec > dur - 5.0:
+                        continue
+                    seg_wave, _ = load_audio_segment(
+                        audio_f,
+                        start_sec=cand_t,
+                        end_sec=cand_t + sample_duration_sec,
+                    )
+                    mean_energy = float(torch.mean(torch.abs(seg_wave)).item())
+                    max_energy = float(torch.max(torch.abs(seg_wave)).item())
 
-    logger.info(f"[✓] Voiceprint bootstrap complete: {total_added} embeddings in database.")
+                    # If this segment has strong speech energy, accept immediately
+                    if mean_energy >= 0.010 and max_energy >= 0.06:
+                        best_waveform = seg_wave
+                        best_start_t = cand_t
+                        best_energy = mean_energy
+                        break
+
+                    if mean_energy > best_energy:
+                        best_energy = mean_energy
+                        best_waveform = seg_wave
+                        best_start_t = cand_t
+
+                # Skip file if no candidate has minimum speech energy
+                if best_waveform is None or best_energy < 0.003:
+                    continue
+
+                end_t = best_start_t + sample_duration_sec
+                emb = encoder.encode_waveform(best_waveform)
+
+                db.insert_voiceprint(
+                    teacher_slug=tslug,
+                    display_name=display_name,
+                    era=era,
+                    role="monastic_primary",
+                    source_file=audio_f.name,
+                    start_sec=best_start_t,
+                    end_sec=end_t,
+                    embedding=emb,
+                )
+
+                counts[cluster_key] = current_count + 1
+                total_added += 1
+            except Exception as e:
+                logger.debug(f"Error processing {audio_f.name}: {e}")
+
+    logger.info(f"[✓] Voiceprint bootstrap complete: {total_added} embeddings added to database.")
     return total_added
 
 
