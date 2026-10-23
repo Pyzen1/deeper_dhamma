@@ -13,6 +13,7 @@ Usage:
   python main.py benchmark   # Evaluates accuracy against gold standards
   python main.py test        # Runs end-to-end sanity verification test
   python main.py status      # Inspects transcription progress and archive catalog
+  python main.py audit       # Inspects, audits integrity, and cleans/scrubs archive
 """
 
 import sys

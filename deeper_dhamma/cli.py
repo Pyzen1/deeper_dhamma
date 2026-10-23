@@ -12,6 +12,7 @@ Subcommands:
   benchmark   Evaluate transcription accuracy against gold-standard references
   test        Run end-to-end verification test on a 120s audio sample
   status      Inspect transcription progress and available archive audio catalog
+  audit       Inspect, audit integrity, and clean/scrub archive audio files
 """
 
 import argparse
@@ -520,6 +521,53 @@ def cmd_status(args):
     print_teacher_breakdown(data, limit=12)
 
 
+def cmd_audit(args):
+    """Executes audio archive inspection, scrubbing, and reporting."""
+    import time
+    from deeper_dhamma.audit import scan_archive, clean_archive, print_audit_report
+    from deeper_dhamma.config import ARCHIVE_DIR, LOGS_DIR
+
+    t0 = time.time()
+    archive_dir = Path(args.target_dir) if getattr(args, "target_dir", None) else ARCHIVE_DIR
+
+    all_files_count = len(list(archive_dir.rglob("*")))
+    issues = scan_archive(
+        archive_dir=archive_dir,
+        workers=args.workers,
+        deep_probe=not args.quick,
+        progress=True,
+    )
+    elapsed = time.time() - t0
+
+    print_audit_report(issues, total_scanned=all_files_count, elapsed_sec=elapsed)
+
+    # Save JSON report if requested or default
+    report_path = Path(args.report) if getattr(args, "report", None) else (LOGS_DIR / "archive_audit_report.json")
+    try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(issues, f, indent=2)
+        print(f"\n[+] Audit JSON report saved to: {report_path}")
+    except Exception as e:
+        logger.debug(f"Could not save JSON audit report: {e}")
+
+    # Perform cleaning if requested
+    if args.clean or args.fix_extensions:
+        dry_run = args.dry_run
+        mode_str = "DRY-RUN (Simulating)" if dry_run else "EXECUTING"
+        print(f"\n[*] {mode_str} Archive Scrubbing / Cleaning...")
+        counts = clean_archive(
+            issues=issues,
+            dry_run=dry_run,
+            delete_ghosts=args.clean,
+            fix_extensions=args.fix_extensions,
+            log=logger,
+        )
+        print(f"[✓] Scrubbing finished: {counts['deleted_ghosts']} ghost(s) deleted, {counts['deleted_fragments']} fragment(s) deleted, {counts['renamed_extensions']} extension(s) fixed.")
+        if dry_run and (counts['deleted_ghosts'] + counts['deleted_fragments'] + counts['renamed_extensions'] > 0):
+            print("[i] To apply changes permanently, run again without --dry-run: python main.py audit --clean")
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -651,6 +699,21 @@ def main(argv=None):
     p_status.add_argument("--limit", "-n", type=int, default=25, help="Max items to show in listings (default: 25)")
     p_status.add_argument("--json", action="store_true", help="Output raw metrics as JSON")
     p_status.set_defaults(func=cmd_status, subparser=p_status)
+
+    # 11. Audit & Scrubbing
+    p_audit = subparsers.add_parser(
+        "audit",
+        help="Inspect, audit integrity, and clean/scrub archive audio files",
+    )
+    p_audit.add_argument("--scan", "-s", action="store_true", help="Scan archive and report health issues")
+    p_audit.add_argument("--clean", "-c", action="store_true", help="Purge 0-byte ghost files, transient fragments, and corrupt files")
+    p_audit.add_argument("--quick", "-q", action="store_true", help="Skip deep ffprobe decode checks (fast file scan only)")
+    p_audit.add_argument("--fix-extensions", action="store_true", help="Auto-fix container/codec mismatches (e.g. AAC in .mp3 -> .m4a)")
+    p_audit.add_argument("--dry-run", action="store_true", help="Simulate cleaning actions without modifying files")
+    p_audit.add_argument("--workers", "-w", type=int, default=8, help="Concurrent audit worker threads (default: 8)")
+    p_audit.add_argument("--target-dir", "-t", type=str, help="Custom archive directory path to inspect")
+    p_audit.add_argument("--report", "-r", type=str, help="Custom JSON report output file path")
+    p_audit.set_defaults(func=cmd_audit, subparser=p_audit)
 
     # If no arguments provided to CLI at all, print top-level help
     if not argv:
