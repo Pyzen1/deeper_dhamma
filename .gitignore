@@ -6,6 +6,8 @@ archive/
 *.jpg
 
 # Logs (keep download tracker archive.log)
+logs/
+!logs/.gitkeep
 *.log
 *.log.*
 !archive.log

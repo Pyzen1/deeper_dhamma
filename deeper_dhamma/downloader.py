@@ -28,6 +28,7 @@ from deeper_dhamma.config import (
     CATALOG_PATH,
     ARCHIVE_LOG_PATH,
     PROJECT_ROOT,
+    DEFAULT_SYNC_LOG,
 )
 from deeper_dhamma.catalog import (
     parse_episode_metadata,
@@ -418,7 +419,7 @@ def run_sync(
 
     catalog_path = Path(catalog_file) if Path(catalog_file).is_absolute() else (PROJECT_ROOT / catalog_file)
     archive_path = Path(archive_log_file) if Path(archive_log_file).is_absolute() else (PROJECT_ROOT / archive_log_file)
-    default_log = PROJECT_ROOT / "sync_deeper_dhamma.log"
+    default_log = DEFAULT_SYNC_LOG
     p_log = Path(log_file) if log_file else default_log
 
     l = setup_sync_logging(p_log)
