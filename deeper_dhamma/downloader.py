@@ -701,7 +701,17 @@ def run_sync(
                             remnant.unlink()
                         except OSError:
                             pass
-                l.error(f"[!] Error downloading '{ep['title']}': {e}", exc_info=True)
+                err_str = str(e)
+                if "user-site-page-not-found" in err_str or "HTTP Error 404" in err_str:
+                    l.warning(f"[!] Podbean 404 Notice: Talk '{ep['title']}' was removed from CDN by host. Skipping.\n")
+                    if ep.get("id"):
+                        try:
+                            with open(archive_path, "a", encoding="utf-8") as af:
+                                af.write(f"podbean {ep['id']}\n")
+                        except Exception:
+                            pass
+                else:
+                    l.error(f"[!] Error downloading '{ep['title']}': {e}\n")
 
         l.info(f"[✓] Sync finished: {success_count} episode(s) downloaded.")
 
