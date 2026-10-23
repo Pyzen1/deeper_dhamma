@@ -272,3 +272,124 @@ def bootstrap_voiceprints(
 
     logger.info(f"[✓] Voiceprint bootstrap complete: {total_added} embeddings in database.")
     return total_added
+
+
+def inspect_unknown_audio(
+    archive_dir: Path | str = ARCHIVE_DIR,
+    threshold: float = 0.40,
+    stride_sec: float = 20.0,
+    max_scan_sec: float = 300.0,
+    limit: Optional[int] = None,
+    device: str = "cuda:0",
+    update_db: bool = True,
+) -> List[Dict]:
+    """
+    Scans archive audio files where the teacher is unknown, extracts speaker embeddings
+    using ECAPA-TDNN, compares against the reference voiceprint gallery, and associates
+    identified teachers in dhamma_transcripts.db.
+    """
+    from deeper_dhamma.storage import TranscriptDatabase
+    from deeper_dhamma.profiler import SpeakerProfiler
+
+    trans_db = TranscriptDatabase()
+    trans_db.index_archive_audio_files(archive_dir)
+
+    with trans_db._get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, title, filepath, year
+            FROM episodes
+            WHERE primary_teacher = 'unknown_teacher'
+               OR identified_teachers = 'Unknown Teacher'
+               OR identified_teachers IS NULL
+            ORDER BY year ASC, title ASC;
+            """
+        ).fetchall()
+        unknown_candidates = [dict(r) for r in rows]
+
+    if not unknown_candidates:
+        logger.info("[✓] No unknown audio files found in database.")
+        return []
+
+    if limit:
+        unknown_candidates = unknown_candidates[:limit]
+
+    logger.info(f"[*] Initializing SpeakerEncoder on {device}...")
+    vp_db = VoiceprintDatabase()
+    encoder = SpeakerEncoder(device=device)
+    profiler = SpeakerProfiler(vp_db, encoder)
+
+    results = []
+    for ep in unknown_candidates:
+        ep_id = ep["id"]
+        filepath_str = ep.get("filepath")
+        file_path = Path(filepath_str) if filepath_str else None
+
+        if not file_path or not file_path.exists():
+            matches = list(Path(archive_dir).rglob(f"{ep_id}.*"))
+            if matches:
+                file_path = matches[0]
+
+        if not file_path or not file_path.exists():
+            continue
+
+        era = determine_era(ep.get("year", 2010) or 2010)
+        try:
+            profile = profiler.profile_audio(
+                file_path,
+                stride_sec=stride_sec,
+                window_sec=3.0,
+                era=era,
+                max_scan_duration_sec=max_scan_sec,
+            )
+        except Exception as e:
+            logger.warning(f"Error profiling {file_path.name}: {e}")
+            continue
+
+        ranked = profile.get("ranked_speakers", [])
+        identified_speaker = None
+        confidence = 0.0
+        share = 0.0
+
+        for spk in ranked:
+            slug = spk.get("slug", "")
+            if slug and not slug.startswith("unregistered_speaker"):
+                if spk.get("confidence", 0.0) >= threshold:
+                    identified_speaker = spk
+                    confidence = float(spk["confidence"])
+                    share = float(spk["share"])
+                    break
+
+        item_result = {
+            "episode_id": ep_id,
+            "filename": file_path.name,
+            "year": ep.get("year"),
+            "identified": identified_speaker is not None,
+            "teacher_slug": identified_speaker["slug"] if identified_speaker else "unknown_teacher",
+            "display_name": identified_speaker["display_name"] if identified_speaker else "Unknown Teacher",
+            "confidence": confidence,
+            "share": share,
+            "is_multi_speaker": profile.get("is_multi_speaker", False),
+            "all_speakers": ranked,
+        }
+        results.append(item_result)
+
+        if identified_speaker and update_db:
+            trans_db.associate_teacher(
+                episode_id=ep_id,
+                teacher_slug=identified_speaker["slug"],
+                detection_source="voiceprint",
+                confidence=confidence,
+                share=share,
+            )
+            with trans_db._get_connection() as conn:
+                conn.execute(
+                    """
+                    UPDATE episodes
+                    SET primary_teacher = ?, primary_display = ?
+                    WHERE id = ?;
+                    """,
+                    (identified_speaker["slug"], identified_speaker["display_name"], ep_id),
+                )
+
+    return results

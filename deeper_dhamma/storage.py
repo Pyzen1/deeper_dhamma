@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from deeper_dhamma.config import TRANSCRIPTS_DB_PATH
+from deeper_dhamma.config import ARCHIVE_DIR, TRANSCRIPTS_DB_PATH
 
 logger = logging.getLogger("storage")
 
@@ -43,7 +43,7 @@ class TranscriptDatabase:
         self._init_schema()
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute("PRAGMA journal_mode = WAL;")
@@ -65,6 +65,9 @@ class TranscriptDatabase:
                     year INTEGER,
                     primary_teacher TEXT,
                     primary_display TEXT,
+                    identified_teachers TEXT,
+                    filepath TEXT,
+                    is_transcribed INTEGER DEFAULT 0,
                     media_url TEXT,
                     permalink TEXT,
                     duration_sec REAL NOT NULL,
@@ -73,6 +76,41 @@ class TranscriptDatabase:
                     terminology_changelog TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS teachers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    slug TEXT UNIQUE NOT NULL,
+                    display_name TEXT NOT NULL,
+                    default_role TEXT DEFAULT 'monastic_primary',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS episode_teachers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_id TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+                    teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+                    detection_source TEXT NOT NULL,
+                    confidence REAL DEFAULT 1.0,
+                    share REAL DEFAULT 0.0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(episode_id, teacher_id, detection_source)
+                );
+
+                CREATE VIEW IF NOT EXISTS v_episode_teachers AS
+                SELECT
+                    et.id AS association_id,
+                    e.id AS episode_id,
+                    e.title AS episode_title,
+                    t.id AS teacher_id,
+                    t.slug AS teacher_slug,
+                    t.display_name AS teacher_name,
+                    et.detection_source,
+                    et.confidence,
+                    et.share,
+                    e.identified_teachers
+                FROM episode_teachers et
+                JOIN episodes e ON et.episode_id = e.id
+                JOIN teachers t ON et.teacher_id = t.id;
 
                 CREATE TABLE IF NOT EXISTS speech_segments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,6 +153,19 @@ class TranscriptDatabase:
                 """
             )
 
+            # Ensure columns exist on legacy episodes table
+            cur = conn.execute("PRAGMA table_info(episodes);")
+            cols = {row["name"] for row in cur.fetchall()}
+            if "identified_teachers" not in cols:
+                conn.execute("ALTER TABLE episodes ADD COLUMN identified_teachers TEXT;")
+            if "filepath" not in cols:
+                conn.execute("ALTER TABLE episodes ADD COLUMN filepath TEXT;")
+            if "is_transcribed" not in cols:
+                conn.execute("ALTER TABLE episodes ADD COLUMN is_transcribed INTEGER DEFAULT 0;")
+                conn.execute("UPDATE episodes SET is_transcribed = 1 WHERE duration_sec > 0;")
+
+        self.seed_teachers()
+
     def save_episode(
         self,
         episode_metadata: Dict,
@@ -149,15 +200,18 @@ class TranscriptDatabase:
                     """
                     INSERT INTO episodes (
                         id, title, date, year, primary_teacher, primary_display,
+                        identified_teachers, is_transcribed,
                         media_url, permalink, duration_sec, is_multi_speaker,
                         speaker_shares, terminology_changelog
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         date = excluded.date,
                         year = excluded.year,
                         primary_teacher = excluded.primary_teacher,
                         primary_display = excluded.primary_display,
+                        identified_teachers = COALESCE(episodes.identified_teachers, excluded.identified_teachers),
+                        is_transcribed = 1,
                         media_url = excluded.media_url,
                         permalink = excluded.permalink,
                         duration_sec = excluded.duration_sec,
@@ -167,6 +221,7 @@ class TranscriptDatabase:
                     """,
                     (
                         ep_id, title, date_display, year_int, primary_slug, primary_display,
+                        primary_display,
                         media_url, permalink, duration_sec, is_multi,
                         shares_json, changelog_json,
                     ),
@@ -196,11 +251,210 @@ class TranscriptDatabase:
                     segment_rows,
                 )
 
+        if primary_slug and primary_slug != "unknown_teacher":
+            self.associate_teacher(
+                episode_id=ep_id,
+                teacher_slug=primary_slug,
+                detection_source="pipeline",
+                confidence=1.0,
+                share=1.0,
+            )
+
         logger.info(f"[✓] Saved '{title}' to database ({len(segment_rows)} turns indexed).")
+
+    def seed_teachers(self, teachers: Optional[List[Dict]] = None) -> int:
+        """Seeds the teachers table with known monastics and roles."""
+        if teachers is None:
+            try:
+                from deeper_dhamma.catalog import KNOWN_TEACHERS
+                teachers = KNOWN_TEACHERS
+            except ImportError:
+                teachers = []
+
+        added = 0
+        with self._get_connection() as conn:
+            with conn:
+                for t in teachers:
+                    cur = conn.execute(
+                        """
+                        INSERT INTO teachers (slug, display_name, default_role)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(slug) DO UPDATE SET
+                            display_name = excluded.display_name,
+                            default_role = excluded.default_role;
+                        """,
+                        (t["slug"], t["display_name"], t.get("default_role", "monastic_primary")),
+                    )
+                    if cur.rowcount > 0:
+                        added += 1
+                conn.execute(
+                    """
+                    INSERT INTO teachers (slug, display_name, default_role)
+                    VALUES ('unknown_teacher', 'Unknown Teacher', 'unregistered')
+                    ON CONFLICT(slug) DO NOTHING;
+                    """
+                )
+        return added
+
+    def associate_teacher(
+        self,
+        episode_id: str,
+        teacher_slug: str,
+        detection_source: str = "filename",
+        confidence: float = 1.0,
+        share: float = 0.0,
+    ) -> None:
+        """
+        Associates a teacher with an episode in `episode_teachers` and updates
+        the denormalized `identified_teachers` summary column on `episodes`.
+        """
+        with self._get_connection() as conn:
+            with conn:
+                cur = conn.execute("SELECT id, display_name FROM teachers WHERE slug = ?;", (teacher_slug,))
+                row = cur.fetchone()
+                if not row:
+                    cur2 = conn.execute(
+                        "INSERT INTO teachers (slug, display_name) VALUES (?, ?);",
+                        (teacher_slug, teacher_slug.replace("_", " ").title()),
+                    )
+                    teacher_id = cur2.lastrowid
+                    display_name = teacher_slug.replace("_", " ").title()
+                else:
+                    teacher_id = row["id"]
+                    display_name = row["display_name"]
+
+                conn.execute(
+                    """
+                    INSERT INTO episode_teachers (
+                        episode_id, teacher_id, detection_source, confidence, share
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(episode_id, teacher_id, detection_source) DO UPDATE SET
+                        confidence = excluded.confidence,
+                        share = excluded.share;
+                    """,
+                    (episode_id, teacher_id, detection_source, confidence, share),
+                )
+
+                # Recompute identified_teachers summary column
+                assoc_rows = conn.execute(
+                    """
+                    SELECT t.display_name, et.detection_source, et.confidence
+                    FROM episode_teachers et
+                    JOIN teachers t ON et.teacher_id = t.id
+                    WHERE et.episode_id = ?
+                    ORDER BY et.confidence DESC, et.id ASC;
+                    """,
+                    (episode_id,),
+                ).fetchall()
+
+                items = []
+                for a in assoc_rows:
+                    if a["display_name"] == "Unknown Teacher" and len(assoc_rows) > 1:
+                        continue
+                    if a["detection_source"] == "voiceprint":
+                        items.append(f"{a['display_name']} (voiceprint {a['confidence']:.2f})")
+                    else:
+                        items.append(a["display_name"])
+
+                unique_items = list(dict.fromkeys(items))
+                summary_str = ", ".join(unique_items) if unique_items else display_name
+
+                conn.execute(
+                    "UPDATE episodes SET identified_teachers = ? WHERE id = ?;",
+                    (summary_str, episode_id),
+                )
+
+    def index_archive_audio_files(
+        self,
+        archive_dir: Path | str = ARCHIVE_DIR,
+    ) -> Dict[str, int]:
+        """
+        Indexes all audio files on disk into `episodes` and creates initial teacher
+        associations in `episode_teachers` and `identified_teachers` from filenames.
+        """
+        from deeper_dhamma.catalog import identify_primary_teacher, parse_episode_metadata
+
+        archive_dir = Path(archive_dir)
+        total_files = 0
+        added_episodes = 0
+        associated_teachers = 0
+
+        with self._get_connection() as conn:
+            with conn:
+                for p in archive_dir.rglob("*"):
+                    if not p.is_file():
+                        continue
+                    if p.name.endswith(".temp.mp3") or p.name.endswith(".temp.m4a"):
+                        continue
+                    if p.suffix.lower() not in (".mp3", ".m4a"):
+                        continue
+
+                    total_files += 1
+                    stem = p.stem
+                    year_val, _, _ = parse_episode_metadata(p.name, "")
+                    teacher_slug, teacher_display = identify_primary_teacher(p.name)
+
+                    # Check if episode exists
+                    cur = conn.execute(
+                        "SELECT id, is_transcribed, identified_teachers FROM episodes WHERE id = ?;",
+                        (stem,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        conn.execute(
+                            """
+                            INSERT INTO episodes (
+                                id, title, date, year, primary_teacher, primary_display,
+                                duration_sec, is_transcribed, filepath, identified_teachers
+                            ) VALUES (?, ?, ?, ?, ?, ?, 0.0, 0, ?, ?);
+                            """,
+                            (
+                                stem,
+                                p.name,
+                                str(year_val),
+                                year_val,
+                                teacher_slug,
+                                teacher_display,
+                                str(p),
+                                teacher_display,
+                            ),
+                        )
+                        added_episodes += 1
+                    else:
+                        conn.execute(
+                            "UPDATE episodes SET filepath = ? WHERE id = ? AND (filepath IS NULL OR filepath = '');",
+                            (str(p), stem),
+                        )
+
+                    # Associate initial teacher from filename
+                    cur_t = conn.execute("SELECT id FROM teachers WHERE slug = ?;", (teacher_slug,))
+                    t_row = cur_t.fetchone()
+                    if t_row:
+                        t_id = t_row["id"]
+                        cur_assoc = conn.execute(
+                            """
+                            INSERT INTO episode_teachers (
+                                episode_id, teacher_id, detection_source, confidence, share
+                            ) VALUES (?, ?, 'filename', 1.0, 1.0)
+                            ON CONFLICT(episode_id, teacher_id, detection_source) DO NOTHING;
+                            """,
+                            (stem, t_id),
+                        )
+                        if cur_assoc.rowcount > 0:
+                            associated_teachers += 1
+
+        return {
+            "total_audio_files": total_files,
+            "new_episodes_indexed": added_episodes,
+            "filename_associations": associated_teachers,
+        }
 
     def has_episode(self, episode_id: str) -> bool:
         with self._get_connection() as conn:
-            cur = conn.execute("SELECT 1 FROM episodes WHERE id = ? LIMIT 1;", (episode_id,))
+            cur = conn.execute(
+                "SELECT 1 FROM episodes WHERE id = ? AND is_transcribed = 1 LIMIT 1;",
+                (episode_id,),
+            )
             return cur.fetchone() is not None
 
     def get_episode(self, episode_id: str) -> Optional[Dict]:

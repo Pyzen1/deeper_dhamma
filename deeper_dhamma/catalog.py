@@ -2,7 +2,9 @@
 Monastic Teacher Catalog, Era Determination, and Episode Metadata Parsing.
 """
 
+import html
 import re
+import unicodedata
 from typing import Optional, Tuple
 
 # Era classifications based on temporal vocal drift and recording media transitions
@@ -20,7 +22,13 @@ KNOWN_TEACHERS = [
     {
         "slug": "ajahn_brahm",
         "display_name": "Ajahn Brahm",
-        "patterns": [r"brahmavamso", r"\bajahn\s+brahm\b", r"\bbrahm\b(?!ali)"],
+        "patterns": [
+            r"brahmavamso",
+            r"\bajahn\s+brahm\b",
+            r"\bbrahm\b(?!ali)",
+            r"\bajahn\s+bram\b",
+            r"\bbram\b(?!ali)",
+        ],
         "default_role": "monastic_primary",
     },
     {
@@ -54,9 +62,117 @@ KNOWN_TEACHERS = [
         "default_role": "monastic_primary",
     },
     {
+        "slug": "ajahn_appicchato",
+        "display_name": "Ajahn Appicchato",
+        "patterns": [r"(?:ajahn|venerable|ven)\s+appic+h?ato\b", r"\bappic+h?ato\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "ajahn_santutthi",
+        "display_name": "Ajahn Santutthi",
+        "patterns": [r"(?:ajahn|venerable|ven)\s+santut+hi\b", r"\bsantut+hi\b"],
+        "default_role": "monastic_primary",
+    },
+    {
         "slug": "ayya_karunika",
         "display_name": "Ayya Karunika",
         "patterns": [r"(?:ayya|ayye)\s+karunika\b", r"\bkarunika\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "ayya_seri",
+        "display_name": "Ayya Seri",
+        "patterns": [r"(?:ayya|ayye)\s+seri\b", r"\bseri\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "bhante_gunaratana",
+        "display_name": "Bhante Gunaratana",
+        "patterns": [r"gunaratana\b", r"\bbhante\s+g\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "venerable_cittapalo",
+        "display_name": "Venerable Cittapalo",
+        "patterns": [r"(?:venerable|ven|bhante|ajahn)\s+cittapalo\b", r"\bcittapalo\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "venerable_nitho",
+        "display_name": "Venerable Nitho",
+        "patterns": [r"(?:venerable|ven|bhante|ajahn)\s+nitho\b", r"\bnitho\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "ayya_visuddhi",
+        "display_name": "Ayya Visuddhi",
+        "patterns": [r"(?:ayya|ayye)\s+visuddhi\b", r"\bvisuddhi\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "venerable_jhanarato",
+        "display_name": "Venerable Jhanarato",
+        "patterns": [r"(?:venerable|ven|bhante|ajahn)\s+jhanarato\b", r"\bjhanarato\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "ajahn_dhiravamso",
+        "display_name": "Ajahn Dhiravamso",
+        "patterns": [r"(?:ajahn|venerable|ven)\s+dh?iravamso\b", r"\bdh?iravamso\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "venerable_ekaggata",
+        "display_name": "Venerable Ekaggata",
+        "patterns": [r"(?:venerable|ven|bhante|ajahn)\s+ekag+at+a\b", r"\bekag+at+a\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "venerable_munissara",
+        "display_name": "Venerable Munissara",
+        "patterns": [r"(?:venerable|ven|bhante|ajahn)\s+munissara\b", r"\bmunissara\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "bhante_akaliko",
+        "display_name": "Bhante Akaliko",
+        "patterns": [r"(?:bhante|venerable|ven|ajahn)\s+akaliko\b", r"\bakaliko\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "ajahn_chandako",
+        "display_name": "Ajahn Chandako",
+        "patterns": [r"(?:ajahn|venerable|ven)\s+chandako\b", r"\bchandako\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "ajahn_kassapa",
+        "display_name": "Ajahn Kassapa",
+        "patterns": [r"(?:ajahn|venerable|ven)\s+kassapa\b", r"\bkassapa\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "ajahn_sangharatana",
+        "display_name": "Ajahn Sangharatana",
+        "patterns": [r"(?:ajahn|venerable|ven)\s+sangharatana\b", r"\bsangharatana\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "ajahn_pasada",
+        "display_name": "Ajahn Pasada",
+        "patterns": [r"(?:ajahn|venerable|ven)\s+pasada\b", r"\bpasada\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "venerable_bodhidhaja",
+        "display_name": "Venerable Bodhidhaja",
+        "patterns": [r"(?:venerable|ven|bhante|ajahn)\s+bodhidhaja\b", r"\bbodhidhaja\b"],
+        "default_role": "monastic_primary",
+    },
+    {
+        "slug": "venerable_buddharakkhita",
+        "display_name": "Venerable Buddharakkhita",
+        "patterns": [r"(?:venerable|ven|bhante|ajahn)\s+buddharakkhita\b", r"\bbuddharakkhita\b"],
         "default_role": "monastic_primary",
     },
     {
@@ -98,7 +214,7 @@ KNOWN_TEACHERS = [
     {
         "slug": "venerable_nibbuto",
         "display_name": "Venerable Nibbuto",
-        "patterns": [r"(?:venerable|ven|bhante)\s+nibbuto\b"],
+        "patterns": [r"(?:venerable|ven|bhante|ajahn)\s+nibbuto\b", r"\bnibbuto\b"],
         "default_role": "monastic_primary",
     },
     {
@@ -148,57 +264,156 @@ def identify_primary_teacher(text: str) -> Tuple[str, str]:
     return "unknown_teacher", "Unknown Teacher"
 
 
-def clean_slug(s: str) -> str:
-    """Converts a title or string to a lowercase underscore slug."""
-    s = s.lower().strip()
-    s = re.sub(r"[^\w\s-]", "", s)
-    s = re.sub(r"[\s-]+", "_", s)
-    return s.strip("_")
+MONTH_MAP = {
+    "january": "01", "jan": "01",
+    "february": "02", "feb": "02",
+    "march": "03", "mar": "03",
+    "april": "04", "apr": "04",
+    "may": "05",
+    "june": "06", "jun": "06",
+    "july": "07", "jul": "07",
+    "august": "08", "aug": "08",
+    "september": "09", "sep": "09", "sept": "09",
+    "october": "10", "oct": "10",
+    "november": "11", "nov": "11",
+    "december": "12", "dec": "12",
+}
+
+NON_ENGLISH_PATTERNS = [
+    r"\b(?:in\s+)?thai(?:\s+language)?\b",
+    r"\b(?:with\s+)?sinhalese(?:\s+translation)?\b",
+    r"\b(?:in\s+)?sinhala(?:\s+language)?\b",
+    r"\b(?:in\s+)?chinese(?:\s+language)?\b",
+    r"\bmandarin\b",
+    r"\bcantonese\b",
+    r"\bvietnamese\b",
+    r"\bburmese\b",
+    r"\bwith\s+\w+\s+translation\b",
+    r"[\u0e00-\u0e7f]",  # Thai Unicode range
+    r"[\u4e00-\u9fff]",  # Chinese Unicode range
+    r"[\u0d80-\u0dff]",  # Sinhala Unicode range
+]
+_NON_ENGLISH_REGEX = re.compile("|".join(NON_ENGLISH_PATTERNS), re.IGNORECASE)
 
 
-def parse_episode_metadata(title: str, upload_date: str) -> Tuple[int, str, str]:
+def is_english_talk(title: str) -> bool:
+    """Returns True if the talk title does not indicate non-English language or translation."""
+    return not bool(_NON_ENGLISH_REGEX.search(title))
+
+
+def clean_slug(text: str) -> str:
     """
-    Extracts the year, folder subpath, and clean filename for an episode.
-    Returns (year, subfolder, filename_stem).
+    Normalizes unicode strings (e.g. Pali diacritics: ā -> a, ṇ -> n, ḍ -> d)
+    into clean, lowercase, underscore-separated ASCII slugs.
     """
-    # 1. Determine Year
-    year_match = re.search(r"\b(19\d\d|20\d\d)\b", title)
-    if year_match:
-        year = int(year_match.group(1))
-    elif upload_date and len(upload_date) >= 4 and upload_date[:4].isdigit():
-        year = int(upload_date[:4])
-    else:
-        year = 2000
+    text = html.unescape(text)
+    decomposed = unicodedata.normalize("NFKD", text)
+    ascii_only = decomposed.encode("ascii", "ignore").decode("ascii")
+    lowered = ascii_only.lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", lowered)
+    return slug.strip("_")
 
-    # 2. Determine Subfolder (Series vs Standalone)
-    lower_title = title.lower()
-    series_slug = None
 
-    if "rains retreat" in lower_title or "rains" in lower_title:
-        series_slug = f"{year}_rains_retreat"
-    elif "9 day" in lower_title or "9-day" in lower_title or "nine day" in lower_title:
-        month_match = re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b", lower_title)
-        if month_match:
-            series_slug = f"{year}_{month_match.group(1)}_9_day_retreat"
-        else:
-            series_slug = f"{year}_9_day_retreat"
-    elif "sutta retreat" in lower_title or "sutta study" in lower_title:
-        series_slug = f"{year}_sutta_retreat"
-    elif "easter retreat" in lower_title:
-        series_slug = f"{year}_easter_retreat"
-    elif "retreat" in lower_title:
-        series_slug = f"{year}_retreat"
+to_ascii_slug = clean_slug  # Backward-compatible alias
 
-    subfolder = series_slug if series_slug else "standalone"
 
-    # 3. Determine Clean Filename
-    # Use upload date if available (YYYY-MM-DD)
-    date_str = ""
-    if upload_date and len(upload_date) == 8:
-        date_str = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
-    else:
-        date_str = f"{year}-01-01"
+def extract_year_and_date(title: str, upload_date: str) -> Tuple[str, str]:
+    """
+    Extracts the true talk year and yyyy-mm-dd date prefix.
+    Detects dates or years in the title for older releases / backfilled talks,
+    falling back to upload_date.
+    """
+    # 1. Explicit full date in title: e.g. 15 August 2001, 26th April 2003, 27 November 2025
+    m_full_date = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(19\d\d|20\d\d)\b", title)
+    if m_full_date:
+        day = m_full_date.group(1).zfill(2)
+        mon_name = m_full_date.group(2).lower()
+        yr = m_full_date.group(3)
+        if mon_name in MONTH_MAP:
+            return yr, f"{yr}-{MONTH_MAP[mon_name]}-{day}"
 
-    slug = clean_slug(title)
-    filename_stem = f"{date_str}_{slug}"
-    return year, subfolder, filename_stem
+    # 2. Month + Year: e.g. November 2011, October 2013
+    m_mon_yr = re.search(r"\b([A-Za-z]+)\s+(19\d\d|20\d\d)\b", title)
+    if m_mon_yr:
+        mon_name = m_mon_yr.group(1).lower()
+        yr = m_mon_yr.group(2)
+        if mon_name in MONTH_MAP:
+            return yr, f"{yr}-{MONTH_MAP[mon_name]}-01"
+
+    # 3. Series or title starting with year: e.g. 2017 Rains Retreat, 1997 9 Day Retreat
+    m_start_yr = re.match(r"^(19\d\d|20\d\d)\b", title)
+    if m_start_yr:
+        yr = m_start_yr.group(1)
+        if upload_date and len(upload_date) == 8:
+            return yr, f"{yr}-{upload_date[4:6]}-{upload_date[6:8]}"
+        return yr, f"{yr}-01-01"
+
+    # 4. Standalone year at end of title: e.g. ... | 1997
+    m_end_yr = re.search(r"\|\s*(19\d\d|20\d\d)\s*$", title)
+    if m_end_yr:
+        yr = m_end_yr.group(1)
+        if upload_date and len(upload_date) == 8:
+            return yr, f"{yr}-{upload_date[4:6]}-{upload_date[6:8]}"
+        return yr, f"{yr}-01-01"
+
+    # Fallback to upload_date
+    yr = upload_date[:4] if len(upload_date) >= 4 else "unknown_year"
+    d_prefix = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}" if len(upload_date) == 8 else yr
+    return yr, d_prefix
+
+
+def parse_episode_metadata(title: str, upload_date: str) -> Tuple[str, str, str]:
+    """
+    Parses an episode title into a (year, series_folder, clean_filename) tuple.
+    Extracts true talk year, series, part tags (padded), and normalized ASCII slug.
+    """
+    title = html.unescape(title)
+    talk_year, date_prefix = extract_year_and_date(title, upload_date)
+
+    m_fraction = re.search(r"^(.*?)\s*\((\d+)/(\d+)\)(.*)$", title)
+    m_part = re.search(r"^(.*?)\s*-\s*Part\s+(\d+)/(\d+)(.*)$", title, re.IGNORECASE)
+    m_lead_frac = re.search(r"^(.*?)\|\s*(\d+)/(\d+)\s+(Retreat.*)$", title, re.IGNORECASE)
+    m_day = re.search(r"^(.*?\bRetreat\b)\s*-\s*Day\s+(\d+)(.*)$", title, re.IGNORECASE)
+
+    if m_fraction:
+        series_raw, cur_str, total_str, remainder = m_fraction.groups()
+        pad = len(total_str)
+        part_tag = f"{cur_str.zfill(pad)}_{total_str}"
+        series_folder = clean_slug(series_raw.replace("|", " "))
+        remainder_slug = clean_slug(remainder)
+        parts = [date_prefix, series_folder, part_tag, remainder_slug]
+        filename = "_".join(p for p in parts if p)
+        return talk_year, series_folder, filename
+
+    if m_part:
+        series_raw, cur_str, total_str, remainder = m_part.groups()
+        pad = len(total_str)
+        part_tag = f"part_{cur_str.zfill(pad)}_{total_str}"
+        series_folder = clean_slug(series_raw.replace("|", " "))
+        remainder_slug = clean_slug(remainder)
+        parts = [date_prefix, series_folder, part_tag, remainder_slug]
+        filename = "_".join(p for p in parts if p)
+        return talk_year, series_folder, filename
+
+    if m_lead_frac:
+        pre_series, cur_str, total_str, post_series = m_lead_frac.groups()
+        pad = len(total_str)
+        part_tag = f"{cur_str.zfill(pad)}_{total_str}"
+        series_folder = clean_slug(f"{pre_series} {post_series}")
+        parts = [date_prefix, series_folder, part_tag]
+        filename = "_".join(p for p in parts if p)
+        return talk_year, series_folder, filename
+
+    if m_day:
+        series_raw, day_str, remainder = m_day.groups()
+        part_tag = f"day_{day_str.zfill(2)}"
+        series_folder = clean_slug(series_raw.replace("|", " "))
+        remainder_slug = clean_slug(remainder)
+        parts = [date_prefix, series_folder, part_tag, remainder_slug]
+        filename = "_".join(p for p in parts if p)
+        return talk_year, series_folder, filename
+
+    clean_title = clean_slug(title)
+    parts = [date_prefix, clean_title]
+    filename = "_".join(p for p in parts if p)
+    return talk_year, "standalone", filename

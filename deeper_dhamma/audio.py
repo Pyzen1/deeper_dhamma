@@ -12,15 +12,44 @@ import torchaudio
 
 def get_audio_info(file_path: Path | str) -> Dict:
     """Reads audio file metadata without loading the entire stream into memory."""
-    info = sf.info(str(file_path))
-    return {
-        "samplerate": info.samplerate,
-        "channels": info.channels,
-        "duration": info.duration,
-        "frames": info.frames,
-        "format": info.format,
-        "subtype": info.subtype,
-    }
+    try:
+        info = sf.info(str(file_path))
+        return {
+            "samplerate": info.samplerate,
+            "channels": info.channels,
+            "duration": info.duration,
+            "frames": info.frames,
+            "format": info.format,
+            "subtype": info.subtype,
+        }
+    except Exception:
+        # Fallback to ffprobe when soundfile does not recognize format (e.g. .m4a)
+        import subprocess
+        import json
+        cmd = [
+            "ffprobe", "-v", "error", "-show_entries",
+            "format=duration:stream=sample_rate,channels",
+            "-of", "json", str(file_path)
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if proc.returncode == 0:
+            meta = json.loads(proc.stdout)
+            duration = float(meta.get("format", {}).get("duration", 0.0))
+            sr = 16000
+            channels = 1
+            streams = meta.get("streams", [])
+            if streams:
+                sr = int(streams[0].get("sample_rate", 16000))
+                channels = int(streams[0].get("channels", 1))
+            return {
+                "samplerate": sr,
+                "channels": channels,
+                "duration": duration,
+                "frames": int(duration * sr),
+                "format": Path(file_path).suffix.lstrip(".").upper(),
+                "subtype": "UNKNOWN",
+            }
+        raise
 
 
 def load_audio_segment(
@@ -39,23 +68,45 @@ def load_audio_segment(
     """
     info = get_audio_info(file_path)
     sr = info["samplerate"]
+    dur = info["duration"]
 
-    start_frame = max(0, int(start_sec * sr))
-    if end_sec is not None:
-        stop_frame = min(info["frames"], int(end_sec * sr))
-        frames_to_read = max(0, stop_frame - start_frame)
-    else:
-        frames_to_read = -1
+    if start_sec >= dur:
+        return torch.zeros((1, 0)), target_sr
 
-    data, _ = sf.read(
-        str(file_path),
-        start=start_frame,
-        frames=frames_to_read,
-        dtype="float32",
-        always_2d=True,
-    )
+    try:
+        start_frame = max(0, int(start_sec * sr))
+        if end_sec is not None:
+            stop_frame = min(info["frames"], int(end_sec * sr))
+            frames_to_read = max(0, stop_frame - start_frame)
+        else:
+            frames_to_read = -1
 
-    tensor = torch.from_numpy(data.T)
+        data, _ = sf.read(
+            str(file_path),
+            start=start_frame,
+            frames=frames_to_read,
+            dtype="float32",
+            always_2d=True,
+        )
+        tensor = torch.from_numpy(data.T)
+    except Exception:
+        # FFmpeg pipe fallback for formats not supported by soundfile (e.g. .m4a)
+        import subprocess
+        import io
+        dur_to_read = (end_sec - start_sec) if end_sec is not None else (dur - start_sec)
+        cmd = [
+            "ffmpeg", "-ss", str(max(0.0, start_sec)), "-t", str(max(0.01, dur_to_read)),
+            "-i", str(file_path), "-f", "wav", "-ar", str(target_sr), "-ac", "1", "pipe:1"
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg decoding failed: {proc.stderr.decode('utf-8', errors='ignore')}")
+        data, read_sr = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=True)
+        tensor = torch.from_numpy(data.T)
+        sr = read_sr
+
+    if tensor.shape[-1] == 0:
+        return tensor, target_sr
 
     # Downmix to mono
     if tensor.shape[0] > 1:

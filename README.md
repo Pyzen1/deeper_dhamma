@@ -40,9 +40,14 @@ python main.py export --id pb28113880 --format md
 python main.py export --year 2001 --format vtt --output-dir exports/2001_vtt/
 python main.py export --all --format md --output-dir exports/all_markdown/
 
-# 4. Manage Voiceprints Gallery
-python main.py voiceprints              # Inspect current reference voiceprints
-python main.py voiceprints --rebuild    # Rebuild gallery from audio archive
+# 4. Manage Voiceprints Gallery & Resolve Unknown Speakers
+python main.py voiceprints --list            # Inspect current reference voiceprints
+python main.py voiceprints --rebuild         # Rebuild gallery from audio archive
+python main.py voiceprints --inspect-unknown # Inspect unknown audio and associate discovered teachers in SQLite DB
+
+# 5. Dashboard Status & Coverage
+python main.py status -a                     # Full dashboard (summary, year, teacher tables)
+python main.py status -t                     # Monastic teacher coverage breakdown
 
 # 5. Query & Search Canonical Buddhism Lexicon (SuttaCentral Bodhi/Sujato & BSWA Brahm/Brahmali)
 python main.py lexicon --lookup jhana
@@ -57,10 +62,18 @@ python main.py curate --approve 1997-05-23_1997_9_day_retreat_day_01_part_2_the_
 python main.py benchmark --duration 300
 
 # 8. Sanity Test
-python main.py test
+python main.py test --run
 
 # 9. Sync Audio Catalog & Downloader
 python main.py sync --year 2026
+
+# 10. Transcription Progress & Archive Availability Status
+python main.py status --all             # Full dashboard (summary, year breakdown, teacher breakdown)
+python main.py status --summary         # High-level archive, catalog & transcription summary
+python main.py status --years           # Year-by-year availability and transcription status table
+python main.py status --teachers        # Monastic teacher breakdown
+python main.py status --pending -y 2001 # List audio files in archive ready to be transcribed
+python main.py status --completed       # List already transcribed talks in database
 ```
 
 ## Directory Structure

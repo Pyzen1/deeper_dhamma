@@ -12,6 +12,7 @@ Usage:
   python main.py curate      # Curates & inspects gold-standard reference transcripts
   python main.py benchmark   # Evaluates accuracy against gold standards
   python main.py test        # Runs end-to-end sanity verification test
+  python main.py status      # Inspects transcription progress and archive catalog
 """
 
 import sys

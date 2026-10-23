@@ -11,6 +11,7 @@ Subcommands:
   curate      Curate and verify gold-standard reference transcripts
   benchmark   Evaluate transcription accuracy against gold-standard references
   test        Run end-to-end verification test on a 120s audio sample
+  status      Inspect transcription progress and available archive audio catalog
 """
 
 import argparse
@@ -40,12 +41,67 @@ def cmd_sync(args):
         year=args.year,
         dry_run=args.dry_run,
         workers=args.workers,
+        rate_limit_mb=getattr(args, "rate_limit_mb", 10),
+        sleep_seconds=getattr(args, "sleep_seconds", 1),
+        refresh_catalog=getattr(args, "refresh_catalog", False),
+        catalog_only=getattr(args, "catalog_only", False),
+        reorganize=getattr(args, "reorganize", False),
+        allow_non_english=getattr(args, "allow_non_english", False),
     )
 
 
 def cmd_voiceprints(args):
-    """Builds or inspects reference speaker embeddings."""
-    from deeper_dhamma.voiceprints import VoiceprintDatabase, bootstrap_voiceprints
+    """Builds, lists, or inspects reference speaker embeddings."""
+    from deeper_dhamma.voiceprints import (
+        VoiceprintDatabase,
+        bootstrap_voiceprints,
+        inspect_unknown_audio,
+    )
+
+    if getattr(args, "inspect_unknown", False):
+        print("=" * 80)
+        print("BSWA Deeper Dhamma: Voiceprint Speaker Identification on Unknown Audio")
+        print("=" * 80)
+        print(f"[*] Confidence threshold: {args.threshold:.2f}")
+        print(f"[*] Acoustic scan window: up to {args.max_scan_duration:.0f}s (stride: {args.stride:.0f}s)")
+        print(f"[*] Compute device:       {args.device}")
+        if getattr(args, "dry_run", False):
+            print("[*] Mode:                 DRY RUN (database will not be updated)")
+        print("-" * 80)
+
+        results = inspect_unknown_audio(
+            archive_dir=args.archive_dir,
+            threshold=args.threshold,
+            stride_sec=args.stride,
+            max_scan_sec=args.max_scan_duration,
+            limit=args.limit,
+            device=args.device,
+            update_db=not getattr(args, "dry_run", False),
+        )
+
+        if not results:
+            print("[✓] No unknown audio files to inspect.")
+            return
+
+        print(f"\nScanned {len(results)} unknown audio file(s):\n")
+        print(f"{'Filename':<55} | {'Year':<4} | {'Detected Teacher':<20} | {'Confidence':<10} | {'Status'}")
+        print("-" * 115)
+        resolved = 0
+        for r in results:
+            fname = r["filename"][:54]
+            yr = str(r.get("year", ""))
+            teacher = r["display_name"]
+            conf = f"{r['confidence']:.4f}" if r["identified"] else "N/A"
+            status = "RESOLVED" if r["identified"] else "Unidentified"
+            if r["identified"]:
+                resolved += 1
+            print(f"{fname:<55} | {yr:<4} | {teacher:<20} | {conf:<10} | {status}")
+
+        print("=" * 115)
+        print(f"[✓] Complete: {resolved} / {len(results)} audio files resolved by voiceprint.")
+        if not getattr(args, "dry_run", False) and resolved > 0:
+            print("[+] Associations and identified_teachers column successfully updated in dhamma_transcripts.db.")
+        return
 
     if args.rebuild:
         print("[*] Rebuilding voiceprints gallery from audio archive...")
@@ -239,7 +295,9 @@ def cmd_export(args):
         print(f"[✓] Batch export complete: {len(episodes)} files written to {out_dir}")
         return
 
-    print("[-] Please specify --id, --year, --all, or --list.")
+    print("[-] Please specify --id, --year, --all, or --list.\n")
+    if hasattr(args, "subparser"):
+        args.subparser.print_help()
 
 
 def cmd_curate(args):
@@ -284,7 +342,9 @@ def cmd_curate(args):
         )
         return
 
-    print("[-] Please specify an audio file, --approve <slug>, or --list.")
+    print("[-] Please specify an audio file, --approve <slug>, or --list.\n")
+    if hasattr(args, "subparser"):
+        args.subparser.print_help()
 
 
 def cmd_lexicon(args):
@@ -345,7 +405,9 @@ def cmd_lexicon(args):
             print(f"  - {r['pali_plain']:<20} ({r['pali_diacritic']}): {r['english_description'][:80]}...")
         print()
     else:
-        print("[-] Please specify --lookup <term>, --search <query>, --sources, or --source-content <query>.")
+        print("[-] Please specify --lookup <term>, --search <query>, --sources, or --source-content <query>.\n")
+        if hasattr(args, "subparser"):
+            args.subparser.print_help()
 
 
 
@@ -408,7 +470,60 @@ def cmd_test(args):
     print("\n[✓] End-to-end test passed successfully!")
 
 
-def main():
+def cmd_status(args):
+    """Displays transcription progress and available archive audio statistics."""
+    from deeper_dhamma.status import (
+        collect_status,
+        print_summary,
+        print_year_breakdown,
+        print_teacher_breakdown,
+        print_pending_files,
+        print_completed_episodes,
+    )
+
+    data = collect_status(year_filter=args.year)
+
+    if args.json:
+        def json_default(obj):
+            if isinstance(obj, Path):
+                return str(obj)
+            if isinstance(obj, set):
+                return list(obj)
+            return str(obj)
+        print(json.dumps(data, indent=2, default=json_default, ensure_ascii=False))
+        return
+
+    # Specific sub-reports requested
+    if args.pending:
+        print_pending_files(data, limit=args.limit)
+        return
+
+    if args.completed:
+        print_completed_episodes(data, limit=args.limit)
+        return
+
+    if args.years:
+        print_year_breakdown(data)
+        return
+
+    if args.teachers:
+        print_teacher_breakdown(data, limit=args.limit)
+        return
+
+    if args.summary:
+        print_summary(data)
+        return
+
+    # Default view for --all or if a filter (--year) was provided
+    print_summary(data)
+    print_year_breakdown(data)
+    print_teacher_breakdown(data, limit=12)
+
+
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+
     parser = argparse.ArgumentParser(
         description="BSWA Deeper Dhamma: Unified AI Audio Archiving, Transcription & Search Suite",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -417,21 +532,35 @@ def main():
 
     # 1. Sync
     p_sync = subparsers.add_parser("sync", help="Sync podcast feed and download talks")
+    p_sync.add_argument("--all", "-a", action="store_true", help="Sync entire audio archive")
     p_sync.add_argument("--limit", "-n", type=int, help="Limit number of talks to download")
     p_sync.add_argument("--year", "-y", type=int, help="Filter downloads by year")
     p_sync.add_argument("--series", "-s", type=str, help="Filter downloads by series name")
     p_sync.add_argument("--dry-run", action="store_true", help="Preview downloads without fetching")
     p_sync.add_argument("--workers", "-w", type=int, default=3, help="Concurrent download workers (default: 3)")
-    p_sync.set_defaults(func=cmd_sync)
+    p_sync.add_argument("--rate-limit-mb", "-r", type=int, default=10, help="Download speed limit in MB/s (default: 10)")
+    p_sync.add_argument("--sleep-seconds", type=int, default=1, help="Delay between downloading episodes in seconds (default: 1)")
+    p_sync.add_argument("--refresh-catalog", action="store_true", help="Force re-crawling all Podbean pages")
+    p_sync.add_argument("--catalog-only", action="store_true", help="Only generate/update catalog.json without downloading")
+    p_sync.add_argument("--reorganize", action="store_true", help="Reorganize existing audio files into their true date/year folders")
+    p_sync.add_argument("--allow-non-english", action="store_true", help="Include non-English talks in sync")
+    p_sync.set_defaults(func=cmd_sync, subparser=p_sync)
 
     # 2. Voiceprints
     p_vp = subparsers.add_parser("voiceprints", help="Manage reference speaker voiceprints")
+    p_vp.add_argument("--inspect-unknown", "-u", action="store_true", help="Inspect archive audio with unknown teacher using voiceprint gallery")
     p_vp.add_argument("--rebuild", action="store_true", help="Rebuild voiceprint gallery from archive")
+    p_vp.add_argument("--list", "-l", action="store_true", help="List reference voiceprints in gallery")
+    p_vp.add_argument("--threshold", type=float, default=0.40, help="Confidence threshold for speaker identification (default: 0.40)")
+    p_vp.add_argument("--max-scan-duration", type=float, default=300.0, help="Max duration in seconds to scan per file (default: 300.0)")
+    p_vp.add_argument("--stride", type=float, default=20.0, help="Stride interval in seconds between acoustic samples (default: 20.0)")
+    p_vp.add_argument("--limit", "-n", type=int, help="Limit number of unknown files to inspect")
+    p_vp.add_argument("--dry-run", action="store_true", help="Preview identification without updating database")
     p_vp.add_argument("--samples-per-cluster", type=int, default=6, help="Samples per teacher/era cluster")
     p_vp.add_argument("--era", type=str, help="Filter listing by era (1997_2003, 2004_2014, 2015_2026)")
     p_vp.add_argument("--archive-dir", default=ARCHIVE_DIR, help="Audio archive directory")
     p_vp.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
-    p_vp.set_defaults(func=cmd_voiceprints)
+    p_vp.set_defaults(func=cmd_voiceprints, subparser=p_vp)
 
     # 3. Transcribe
     p_trans = subparsers.add_parser("transcribe", help="Transcribe audio talks and index in SQLite")
@@ -448,14 +577,14 @@ def main():
     p_trans.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
     p_trans.add_argument("--archive-dir", default=ARCHIVE_DIR, help="Audio archive directory")
     p_trans.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
-    p_trans.set_defaults(func=cmd_transcribe)
+    p_trans.set_defaults(func=cmd_transcribe, subparser=p_trans)
 
     # 4. Search
     p_search = subparsers.add_parser("search", help="Full-text search across transcripts")
     p_search.add_argument("query", type=str, help="Search query (supports boolean operators like AND, OR, NOT)")
     p_search.add_argument("--limit", "-n", type=int, default=20, help="Max results (default: 20)")
     p_search.add_argument("--db", default=TRANSCRIPTS_DB_PATH, help="Path to SQLite transcripts database")
-    p_search.set_defaults(func=cmd_search)
+    p_search.set_defaults(func=cmd_search, subparser=p_search)
 
     # 5. Export
     p_export = subparsers.add_parser("export", help="Export transcripts to Markdown, WebVTT, or JSON")
@@ -466,7 +595,7 @@ def main():
     p_export.add_argument("--format", choices=["md", "vtt", "json"], default="md", help="Export format (default: md)")
     p_export.add_argument("--output-dir", "-o", type=str, help="Destination directory for exported files")
     p_export.add_argument("--db", default=TRANSCRIPTS_DB_PATH, help="Path to SQLite transcripts database")
-    p_export.set_defaults(func=cmd_export)
+    p_export.set_defaults(func=cmd_export, subparser=p_export)
 
     # 6. Curate
     p_curate = subparsers.add_parser("curate", help="Curate and verify gold-standard reference transcripts")
@@ -477,7 +606,7 @@ def main():
     p_curate.add_argument("--auto-approve", action="store_true", help="Directly save high-confidence synthetic reference as gold standard")
     p_curate.add_argument("--no-self-correct", action="store_true", help="Disable dual-pass self-correction loop")
     p_curate.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
-    p_curate.set_defaults(func=cmd_curate)
+    p_curate.set_defaults(func=cmd_curate, subparser=p_curate)
 
     # 7. Lexicon
     p_lex = subparsers.add_parser("lexicon", help="Query or search the Buddhism Lexicon Database")
@@ -486,26 +615,54 @@ def main():
     p_lex.add_argument("--sources", action="store_true", help="List all embedded offline source documents and compression metrics")
     p_lex.add_argument("--source-content", type=str, help="Decompress and display embedded source document text by URL or title")
     p_lex.add_argument("--limit", "-n", type=int, default=10, help="Max results for search (default: 10)")
-    p_lex.set_defaults(func=cmd_lexicon)
+    p_lex.set_defaults(func=cmd_lexicon, subparser=p_lex)
 
     # 8. Benchmark
     p_bench = subparsers.add_parser("benchmark", help="Evaluate accuracy against gold-standard references")
+    p_bench.add_argument("--run", action="store_true", help="Execute benchmark evaluations")
     p_bench.add_argument("--duration", "-d", type=float, default=300.0, help="Benchmark duration in seconds (default: 300)")
     p_bench.add_argument("--batch-size", "-b", type=int, default=16, help="Batch size for parallel inference (default: 16)")
     p_bench.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
     p_bench.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
-    p_bench.set_defaults(func=cmd_benchmark)
+    p_bench.set_defaults(func=cmd_benchmark, subparser=p_bench)
 
     # 9. Test
     p_test = subparsers.add_parser("test", help="Run end-to-end sanity verification test")
+    p_test.add_argument("--run", action="store_true", help="Execute end-to-end test")
     p_test.add_argument("--file", "-f", type=str, help="Specific audio file to test")
     p_test.add_argument("--duration", "-d", type=float, default=120.0, help="Test duration in seconds (default: 120)")
     p_test.add_argument("--batch-size", "-b", type=int, default=16, help="Batch size for parallel inference (default: 16)")
     p_test.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
     p_test.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
-    p_test.set_defaults(func=cmd_test)
+    p_test.set_defaults(func=cmd_test, subparser=p_test)
 
-    args = parser.parse_args()
+    # 10. Status
+    p_status = subparsers.add_parser(
+        "status",
+        help="Inspect transcription progress and available archive audio catalog",
+    )
+    p_status.add_argument("--all", "-a", action="store_true", help="Display full dashboard (summary, year, teacher tables)")
+    p_status.add_argument("--summary", "-s", action="store_true", help="Display high-level executive summary")
+    p_status.add_argument("--years", "-y", action="store_true", help="Display year-by-year transcription and archive table")
+    p_status.add_argument("--teachers", "-t", action="store_true", help="Display breakdown by monastic teacher")
+    p_status.add_argument("--pending", "-p", action="store_true", help="List audio files awaiting transcription")
+    p_status.add_argument("--completed", "-c", action="store_true", help="List already transcribed episodes")
+    p_status.add_argument("--year", type=int, help="Filter statistics or listings by specific year")
+    p_status.add_argument("--limit", "-n", type=int, default=25, help="Max items to show in listings (default: 25)")
+    p_status.add_argument("--json", action="store_true", help="Output raw metrics as JSON")
+    p_status.set_defaults(func=cmd_status, subparser=p_status)
+
+    # If no arguments provided to CLI at all, print top-level help
+    if not argv:
+        parser.print_help()
+        sys.exit(0)
+
+    # If a subcommand was specified without any arguments/options, print subparser help
+    if len(argv) == 1 and argv[0] in subparsers.choices:
+        subparsers.choices[argv[0]].print_help()
+        sys.exit(0)
+
+    args = parser.parse_args(argv)
     if hasattr(args, "func"):
         args.func(args)
     else:
