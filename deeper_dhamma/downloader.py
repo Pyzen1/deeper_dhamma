@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import time
 import urllib.request
@@ -168,7 +169,9 @@ class CatalogEpisodePP(yt_dlp.postprocessor.PostProcessor):
 
     def run(self, info: dict) -> tuple[list, dict]:
         info["title"] = self.ep_meta["title"]
-        info["upload_date"] = self.ep_meta["upload_date"]
+        raw_date = self.ep_meta.get("upload_date") or ""
+        if raw_date:
+            info["upload_date"] = raw_date.replace("-", "")
         info["custom_year"] = str(self.ep_meta["year"])
         info["custom_series"] = self.ep_meta["series"]
         info["custom_filename"] = self.ep_meta["filename"]
@@ -393,6 +396,78 @@ def reorganize_existing_files(
     return moved_count
 
 
+def cleanup_corrupted_archive_files(target_dir: Path, log: Optional[logging.Logger] = None) -> int:
+    """Removes 0-byte audio/image files and transient fragments left behind by interrupted runs."""
+    removed = 0
+    for p in target_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        # Remove unfinished temporary files
+        if p.suffix.lower() in (".temp", ".part", ".ytdl", ".aria2") or ".temp." in p.name:
+            try:
+                p.unlink()
+                removed += 1
+            except OSError:
+                pass
+        # Remove empty 0-byte media files
+        elif p.suffix.lower() in (".mp3", ".m4a", ".jpg", ".jpeg", ".png", ".webp") and p.stat().st_size == 0:
+            try:
+                p.unlink()
+                removed += 1
+            except OSError:
+                pass
+    if removed > 0 and log:
+        log.info(f"[+] Purged {removed} empty (0-byte) or transient fragment file(s) from archive.")
+    return removed
+
+
+def safe_embed_cover_art(audio_path: Path, thumbnail_path: Path, log: Optional[logging.Logger] = None) -> bool:
+    """
+    Safely embeds cover art thumbnail into MP3 ID3 tags without re-encoding audio.
+    Filters out any legacy/corrupted video streams to guarantee resilience.
+    """
+    if not audio_path.exists() or not thumbnail_path.exists():
+        return False
+    if audio_path.suffix.lower() != ".mp3":
+        return False
+    temp_out = audio_path.with_suffix(".tmp_embed.mp3")
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", str(audio_path),
+        "-i", str(thumbnail_path),
+        "-map", "0:a:0",
+        "-map", "1:v:0",
+        "-c", "copy",
+        "-id3v2_version", "3",
+        "-metadata:s:v", "title=Album cover",
+        "-metadata:s:v", "comment=Cover (front)",
+        str(temp_out),
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+        if res.returncode == 0 and temp_out.exists() and temp_out.stat().st_size > 1024:
+            _resilient_os_replace(temp_out, audio_path)
+            return True
+        else:
+            if temp_out.exists():
+                try:
+                    temp_out.unlink()
+                except OSError:
+                    pass
+            if log and res.stderr:
+                log.debug(f"Cover art embed notice for {audio_path.name}: {res.stderr.strip()[:120]}")
+            return False
+    except Exception as e:
+        if temp_out.exists():
+            try:
+                temp_out.unlink()
+            except OSError:
+                pass
+        if log:
+            log.debug(f"Cover art embed skipped for {audio_path.name}: {e}")
+        return False
+
+
 def run_sync(
     target_dir: Path | str = ARCHIVE_DIR,
     catalog_file: Path | str = CATALOG_PATH,
@@ -445,6 +520,9 @@ def run_sync(
         if reorganize:
             l.info("[✓] Reorganization finished.")
             return {"status": "reorganized"}
+
+        # Purge any 0-byte ghost files or transient partial downloads from prior aborted sessions
+        cleanup_corrupted_archive_files(target_dir, log=l)
 
         if catalog_only or (limit is not None and limit <= 0):
             l.info(f"[+] Catalog '{catalog_path.name}' is ready ({len(catalog)} episodes indexed). Exiting as requested.")
@@ -565,24 +643,27 @@ def run_sync(
             l.info(f"   -> Folder: {ep['year']}/{ep['series']}/")
             l.info(f"   -> File:   {ep['filename']}.mp3")
 
+            dest_folder = target_dir / ep["year"] / ep["series"]
+            dest_folder.mkdir(parents=True, exist_ok=True)
+            dest_mp3 = dest_folder / f"{ep['filename']}.mp3"
+            dest_m4a = dest_folder / f"{ep['filename']}.m4a"
+            dest_jpg = dest_folder / f"{ep['filename']}.jpg"
+
+            # Pre-cleanup: if 0-byte ghost files exist, remove them before yt-dlp sees them
+            for ghost in (dest_mp3, dest_m4a, dest_jpg):
+                if ghost.exists() and ghost.stat().st_size == 0:
+                    try:
+                        ghost.unlink()
+                    except OSError:
+                        pass
+
             ydl_adapter = YTDLPLogAdapter(l)
             ydl_opts = {
                 "downloader": "aria2c",
                 "downloader_args": {"aria2c": aria2_args},
                 "download_archive": str(archive_path),
-                "add_metadata": True,
                 "writethumbnail": True,
                 "logger": ydl_adapter,
-                "postprocessors": [
-                    {
-                        "key": "FFmpegMetadata",
-                        "add_metadata": True,
-                    },
-                    {
-                        "key": "EmbedThumbnail",
-                        "already_have_thumbnail": False,
-                    },
-                ],
                 "windowsfilenames": True,
                 "retries": 10,
                 "fragment_retries": 10,
@@ -600,9 +681,9 @@ def run_sync(
                 if ret == 0:
                     success_count += 1
                     elapsed = time.time() - t0
-                    dest_mp3 = target_dir / ep["year"] / ep["series"] / f"{ep['filename']}.mp3"
-                    dest_m4a = target_dir / ep["year"] / ep["series"] / f"{ep['filename']}.m4a"
                     dest_file = dest_mp3 if dest_mp3.exists() else dest_m4a
+                    if dest_file.exists() and dest_jpg.exists():
+                        safe_embed_cover_art(dest_file, dest_jpg, log=l)
                     size_str = f" ({dest_file.stat().st_size / (1024 * 1024):.1f} MB)" if dest_file.exists() else ""
                     l.info(f"   [✓] Completed in {elapsed:.1f}s{size_str} - tagged with cover art\n")
                 if sleep_seconds > 0 and idx < len(pending_episodes):
@@ -613,6 +694,13 @@ def run_sync(
                 sys.exit(130)
             except Exception as e:
                 ydl_adapter.clear_active_progress()
+                # Post-failure cleanup: purge any 0-byte remnants so they don't break subsequent attempts
+                for remnant in (dest_mp3, dest_m4a, dest_jpg):
+                    if remnant.exists() and remnant.stat().st_size == 0:
+                        try:
+                            remnant.unlink()
+                        except OSError:
+                            pass
                 l.error(f"[!] Error downloading '{ep['title']}': {e}", exc_info=True)
 
         l.info(f"[✓] Sync finished: {success_count} episode(s) downloaded.")
