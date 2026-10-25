@@ -131,3 +131,27 @@ While `buddhism_lexicon.db`, `voiceprints.db`, and `dhamma_transcripts.db` remai
 * **Why Combine for Web?** The browser is 100% read-only (zero write lock contention) and does not perform acoustic inference (`voiceprints.db` is excluded). Consolidating into `dhamma_web.db` allows the browser to download and query a single vacuumed file.
 * **Cache Validation**: The build script stamps `PRAGMA user_version = <YYYYMMDD>` at byte offset 60..63 of the file header. The client worker issues a 100-byte HTTP Range probe (`Range: bytes=0-99`) to validate local `IndexedDB` caching before fetching any updates.
 
+## Pluggable Web Architecture: Zero Code Duplication
+
+Both the live development server (`python main.py serve --run`) and the static site (`python main.py web --build`) share 100% of the UI code, CSS styling, audio player, and templates without duplication.
+
+Data access is decoupled via a dependency-injected client adapter:
+
+```text
++---------------------------------------------------------------------------------+
+|                         Unified Frontend (100% Shared)                          |
+|  views/index.html + static/style.css + static/app.js (calls window.DeeperDhammaDB)
++---------------------------------------------------------------------------------+
+                                         |
+                       loads <script src="db_client.js">
+                                         |
+            +----------------------------+----------------------------+
+            |                                                         |
+            v (Local Dev: serve --run)                                v (Static Site: web --build)
+[ adapters/api_client.js ]                                  [ adapters/wasm_client.js ]
+  - Served dynamically at /static/db_client.js                - Copied as dist/db_client.js
+  - Queries Bottle /api/* endpoints                           - Queries dist/dhamma_web.db in-browser
+  - Instant live DB reflection during transcription           - Zero /api/ or backend fallback in dist/
+```
+
+

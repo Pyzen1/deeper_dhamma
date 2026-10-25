@@ -87,143 +87,13 @@
   };
 
   // ==========================================================================
-  // Database Service (SQLite WASM Web Worker with REST API Fallback)
+  // Database Service (Injected Adapter: ApiDatabaseClient or WasmDatabaseClient)
   // ==========================================================================
 
-  class DatabaseService {
-    constructor() {
-      this.worker = null;
-      this.reqSeq = 0;
-      this.pending = new Map();
-      this.mode = 'worker'; // 'worker' or 'api'
-      this.readyPromise = null;
-    }
-
-    init() {
-      if (this.readyPromise) return this.readyPromise;
-
-      this.readyPromise = new Promise((resolve) => {
-        if (typeof window !== 'undefined' && window.Worker) {
-          try {
-            this.worker = new Worker('./db_worker.js');
-            this.worker.onmessage = (e) => {
-              const { id, success, data, error } = e.data || {};
-              if (this.pending.has(id)) {
-                const { resolve: res, reject: rej } = this.pending.get(id);
-                this.pending.delete(id);
-                if (success) res(data);
-                else rej(new Error(error || 'Worker query failed'));
-              }
-            };
-
-            this.worker.onerror = (err) => {
-              console.warn('[DB Service] Worker error, falling back to API:', err);
-              this.mode = 'api';
-              resolve(false);
-            };
-
-            this.send('init', { dbUrl: './dhamma_web.db' })
-              .then((res) => {
-                console.log('[DB Service] SQLite WASM Worker initialized successfully:', res);
-                this.mode = 'worker';
-                resolve(true);
-              })
-              .catch((err) => {
-                console.warn('[DB Service] Worker init failed, falling back to API:', err);
-                this.mode = 'api';
-                resolve(false);
-              });
-            return;
-          } catch (err) {
-            console.warn('[DB Service] Worker instantiation failed:', err);
-          }
-        }
-        this.mode = 'api';
-        resolve(false);
-      });
-
-      return this.readyPromise;
-    }
-
-    send(type, payload) {
-      const id = ++this.reqSeq;
-      return new Promise((resolve, reject) => {
-        this.pending.set(id, { resolve, reject });
-        this.worker.postMessage({ id, type, payload });
-      });
-    }
-
-    async getStats() {
-      await this.init();
-      if (this.mode === 'worker') {
-        return this.send('get_stats');
-      }
-      const res = await fetch('/api/stats');
-      return res.json();
-    }
-
-    async search(query, options = {}) {
-      await this.init();
-      if (this.mode === 'worker') {
-        return this.send('search', { query, ...options });
-      }
-      const params = new URLSearchParams({
-        q: query,
-        limit: String(options.limit || 40),
-        exact: options.exact ? '1' : '0',
-      });
-      if (options.teacher) params.set('teacher', options.teacher);
-      if (options.year) params.set('year', options.year);
-      const res = await fetch(`/api/search?${params.toString()}`);
-      return res.json();
-    }
-
-    async getEpisodes(options = {}) {
-      await this.init();
-      if (this.mode === 'worker') {
-        return this.send('get_episodes', options);
-      }
-      const params = new URLSearchParams({
-        transcribed_only: options.transcribedOnly ? '1' : '0',
-        limit: String(options.limit || 60),
-      });
-      if (options.teacher) params.set('teacher', options.teacher);
-      if (options.year) params.set('year', options.year);
-      const res = await fetch(`/api/episodes?${params.toString()}`);
-      return res.json();
-    }
-
-    async getEpisode(episodeId) {
-      await this.init();
-      if (this.mode === 'worker') {
-        return this.send('get_episode', { episodeId });
-      }
-      const res = await fetch(`/api/episodes/${encodeURIComponent(episodeId)}`);
-      return res.json();
-    }
-
-    async searchLexicon(query, limit = 10) {
-      await this.init();
-      if (this.mode === 'worker') {
-        return this.send('search_lexicon', { query, limit });
-      }
-      const res = await fetch(`/api/lexicon/search?q=${encodeURIComponent(query)}&limit=${limit}`);
-      const data = await res.json();
-      return data.results || [];
-    }
-
-    async lookupLexicon(term) {
-      await this.init();
-      if (this.mode === 'worker') {
-        const data = await this.send('lookup_lexicon', { term });
-        return { term, found: !!data, data };
-      }
-      const res = await fetch(`/api/lexicon/lookup?term=${encodeURIComponent(term)}`);
-      return res.json();
-    }
+  const dbService = window.DeeperDhammaDB ? new window.DeeperDhammaDB() : null;
+  if (!dbService) {
+    console.error('[App] No DeeperDhammaDB database client found. Ensure db_client.js is loaded.');
   }
-
-  const dbService = new DatabaseService();
 
   // ==========================================================================
   // Initialization
@@ -948,9 +818,8 @@
       }
 
       try {
-        const res = await fetch('/api/episodes?transcribed_only=1&limit=1');
-        const data = await res.json();
-        if (data.episodes && data.episodes.length > 0 && data.episodes[0].media_url) {
+        const data = await dbService.getEpisodes({ transcribedOnly: true, limit: 1 });
+        if (data && data.episodes && data.episodes.length > 0 && data.episodes[0].media_url) {
           const ep = data.episodes[0];
           playAudioSegment({
             media_url: ep.media_url,

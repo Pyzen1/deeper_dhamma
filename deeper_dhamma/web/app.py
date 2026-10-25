@@ -50,6 +50,11 @@ def create_app() -> Bottle:
     db = TranscriptDatabase()
     lexicon_db = BuddhismLexiconDatabase()
 
+    @app.route("/static/db_client.js")
+    @app.route("/db_client.js")
+    def serve_db_client():
+        return static_file("api_client.js", root=str(STATIC_DIR / "adapters"), mimetype="application/javascript")
+
     @app.route("/static/<filepath:path>", name="static")
     def serve_static(filepath: str):
         return static_file(filepath, root=str(STATIC_DIR))

@@ -118,6 +118,7 @@ deeper_dhamma/
 │   ├── export_web.py           # Static site & SQLite WASM bundle compiler
 │   └── web/                    # Frontend assets, views & Web Worker
 │       ├── static/             # CSS, app.js, db_worker.js, sqlite3.wasm
+│       │   └── adapters/       # Pluggable data adapters (api_client.js, wasm_client.js)
 │       └── views/              # Bottle templates (index.html)
 └── benchmarks/
     └── reference_transcripts/  # Verified word-for-word human reference transcripts

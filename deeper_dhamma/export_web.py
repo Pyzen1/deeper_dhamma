@@ -176,13 +176,19 @@ def export_static_site(output_dir: Path | str = "dist") -> Path:
     # 2. Ensure SQLite WASM engine assets exist
     ensure_wasm_assets(STATIC_SRC_DIR)
 
-    # 3. Copy static frontend assets
+    # 3. Copy static frontend assets (skips directories like adapters/)
     copied_files = 0
     for src_file in STATIC_SRC_DIR.iterdir():
         if src_file.is_file():
             dst_file = out_path / src_file.name
             shutil.copy2(src_file, dst_file)
             copied_files += 1
+
+    # Deploy pure SQLite WASM client adapter to dist/db_client.js
+    wasm_adapter = STATIC_SRC_DIR / "adapters" / "wasm_client.js"
+    if wasm_adapter.exists():
+        shutil.copy2(wasm_adapter, out_path / "db_client.js")
+        copied_files += 1
 
     print(f"[✓] Copied {copied_files} frontend/WASM assets into {out_path.name}/")
 
