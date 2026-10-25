@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deeper Dhamma — AI Search & Audio Player</title>
+  <meta name="description" content="Instant full-text search across 30+ years of Theravada Buddhist talks by Ajahn Brahm and BSWA monastics, with direct turn-level audio streaming.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dark-theme">
+  <!-- Left Navigation Sidebar -->
+  <aside class="app-sidebar" id="app-sidebar">
+    <div class="sidebar-top">
+      <div class="sidebar-brand">
+        <div class="brand-symbol" aria-hidden="true">☸</div>
+        <div class="brand-text">
+          <h1 class="brand-title" id="site-title">Deeper Dhamma</h1>
+          <span class="brand-subtitle">BSWA Audio Archive</span>
+        </div>
+      </div>
+
+      <!-- Navigation Menu -->
+      <nav class="sidebar-nav" id="main-nav-tabs" aria-label="View navigation">
+        <button type="button" class="tab-btn sidebar-nav-item active" id="tab-search-btn" data-tab="search-view">
+          <span class="nav-icon">✨</span>
+          <span class="nav-label">Search</span>
+          <span class="badge" id="search-count-badge">0</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-browse-btn" data-tab="browse-view">
+          <span class="nav-icon">📚</span>
+          <span class="nav-label">Browse Talks</span>
+          <span class="badge" id="browse-count-badge">0</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-lexicon-btn" data-tab="lexicon-view">
+          <span class="nav-icon">📖</span>
+          <span class="nav-label">Pali Lexicon</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-transcript-btn" data-tab="transcript-view" style="display: none;">
+          <span class="nav-icon">📜</span>
+          <span class="nav-label">Transcript</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="stat-card" id="archive-stats-badge">
+        <div class="stat-card-title">Archive Index</div>
+        <div class="stat-card-body" id="stat-episodes">Loading archive...</div>
+      </div>
+      <div class="sidebar-shortcuts-hint">
+        <span><kbd>/</kbd> Quick Search</span>
+        <span><kbd>Space</kbd> Play / Pause</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main App Shell (Scrollable Views Area) -->
+  <main class="app-main" id="main-content">
+    <!-- Content Sections -->
+    <section class="views-wrapper" id="views-container">
+      <!-- 1. Search Results View -->
+      <div class="view-panel active" id="search-view">
+        <div class="search-box-wrapper">
+          <div class="search-bar" id="search-bar-container">
+            <span class="search-icon" aria-hidden="true">🔍</span>
+            <input 
+              type="search" 
+              id="search-input" 
+              placeholder="Search teachings, suttas, or questions (e.g. 'five hindrances', 'jhana', 'letting go')..." 
+              autocomplete="off" 
+              spellcheck="false" 
+              aria-label="Search transcripts"
+              autofocus
+            >
+            <button type="button" id="clear-search-btn" class="btn-icon" title="Clear search" aria-label="Clear search" style="display: none;">✕</button>
+            <div class="search-shortcut" id="search-shortcut-hint">
+              <kbd>/</kbd>
+            </div>
+          </div>
+
+          <!-- Filter & Control Bar -->
+          <div class="filter-controls" id="filter-controls">
+            <div class="filter-group">
+              <label class="toggle-pill" id="exact-toggle-label" title="Force exact phrase matching without typo correction or stemming">
+                <input type="checkbox" id="exact-mode-checkbox">
+                <span class="toggle-track"></span>
+                <span class="toggle-text">Exact Phrase Only</span>
+              </label>
+            </div>
+
+            <div class="filter-group select-group">
+              <select id="teacher-filter-select" aria-label="Filter by Monastic Teacher">
+                <option value="">All Monastics</option>
+              </select>
+
+              <select id="year-filter-select" aria-label="Filter by Year">
+                <option value="">All Years</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="results-header" id="search-meta-bar" style="display: none;">
+          <div class="query-meta" id="query-meta-text">Found results</div>
+          <div class="query-tier-badge" id="query-tier-badge">Tier 1: Exact</div>
+        </div>
+
+        <!-- Initial Placeholder State -->
+        <div class="empty-state" id="search-empty-state">
+          <div class="empty-icon">🪷</div>
+          <h2>Search 30+ Years of Theravada Teachings</h2>
+          <p>Instant zero-copy search across high-accuracy Whisper transcripts. Click any speech segment to stream directly from Podbean at that precise second.</p>
+          <div class="example-chips" id="example-queries">
+            <span>Try searching:</span>
+            <button type="button" class="chip-btn" data-query="five hindrances">five hindrances</button>
+            <button type="button" class="chip-btn" data-query="mindfulness of breathing">mindfulness of breathing</button>
+            <button type="button" class="chip-btn" data-query="anatta non-self">anatta non-self</button>
+            <button type="button" class="chip-btn" data-query="jhana stillness">jhana stillness</button>
+            <button type="button" class="chip-btn" data-query="forgiveness compassion">forgiveness compassion</button>
+          </div>
+        </div>
+
+        <!-- Results List -->
+        <div class="results-list" id="search-results-list" style="display: none;"></div>
+      </div>
+
+      <!-- 2. Browse Episodes View -->
+      <div class="view-panel" id="browse-view">
+        <div class="browse-header">
+          <div class="browse-header-info">
+            <h2>Archive Catalog</h2>
+            <p class="section-desc">Browse talks and retreats. Transcribed talks feature turn-level timestamps and searchable text.</p>
+          </div>
+          <div class="browse-filter-bar">
+            <select id="browse-teacher-filter-select" aria-label="Filter by Monastic Teacher">
+              <option value="">All Monastics</option>
+            </select>
+            <select id="browse-year-filter-select" aria-label="Filter by Year">
+              <option value="">All Years</option>
+            </select>
+          </div>
+        </div>
+        <div class="browse-grid" id="browse-episodes-grid">
+          <div class="loading-spinner">Loading talks...</div>
+        </div>
+      </div>
+
+      <!-- 3. Pali Lexicon View -->
+      <div class="view-panel" id="lexicon-view">
+        <div class="lexicon-header">
+          <h2>Buddhism Doctrinal Reference Lexicon</h2>
+          <p class="section-desc">Canonical Pali terminology and pronunciation definitions curated from SuttaCentral and BSWA retreat teachers.</p>
+          <div class="lexicon-search-bar">
+            <input type="search" id="lexicon-search-input" placeholder="Look up Pali or English term (e.g. samadhi, kamma, nibbidā)..." autocomplete="off">
+          </div>
+        </div>
+        <div class="lexicon-results" id="lexicon-results-list">
+          <div class="empty-state-subtle">Enter a Buddhist term above to view canonical definitions and phonetic rules.</div>
+        </div>
+      </div>
+
+      <!-- 4. Transcript Reader View -->
+      <div class="view-panel" id="transcript-view">
+        <div class="transcript-view-header">
+          <div class="transcript-top-bar">
+            <button type="button" class="btn-back" id="transcript-back-btn" title="Return to previous view">
+              ← Back
+            </button>
+            <div class="transcript-meta-badges">
+              <span class="drawer-tag" id="drawer-date-tag">Date</span>
+              <span class="drawer-meta" id="drawer-meta-info">Teacher • Duration</span>
+            </div>
+          </div>
+          <h2 class="transcript-title" id="drawer-episode-title">Episode Title</h2>
+          <div class="transcript-actions-row">
+            <button type="button" class="btn-primary" id="drawer-play-full-btn" title="Play talk from beginning">
+              ▶ Play Talk
+            </button>
+            <a href="#" target="_blank" rel="noopener noreferrer" class="btn-secondary" id="drawer-podbean-link" title="Open episode on Deeper Dhamma Podbean">
+              ↗ Podbean Page
+            </a>
+          </div>
+        </div>
+
+        <div class="transcript-reader-container" id="drawer-turns-container">
+          <div class="loading-spinner">Loading transcript...</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Sticky Bottom Audio Player Bar (Always Visible) -->
+  <footer class="audio-player-bar" id="audio-player-bar">
+    <div class="player-container">
+      <!-- Track Information -->
+      <div class="track-info">
+        <div class="track-icon-wrapper" aria-hidden="true">
+          <div class="track-pulse"></div>
+          <span class="track-icon">🎙️</span>
+        </div>
+        <div class="track-details">
+          <div class="track-title" id="player-track-title">Ready to Play</div>
+          <div class="track-meta">
+            <span class="track-speaker" id="player-track-speaker">Select a talk or segment to begin</span>
+            <span class="bullet-sep">•</span>
+            <span class="track-stream-badge">Podbean CDN</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Player Center Controls -->
+      <div class="player-controls">
+        <div class="control-buttons">
+          <button type="button" class="btn-ctl" id="btn-skip-back" title="Rewind 15 seconds" aria-label="Rewind 15 seconds">
+            ↺ 15s
+          </button>
+          <button type="button" class="btn-ctl-main" id="btn-play-pause" title="Play or Pause" aria-label="Play or Pause">
+            ▶
+          </button>
+          <button type="button" class="btn-ctl" id="btn-skip-fwd" title="Skip forward 15 seconds" aria-label="Skip forward 15 seconds">
+            15s ↻
+          </button>
+        </div>
+
+        <div class="scrubber-row">
+          <span class="time-label" id="time-current">0:00</span>
+          <input type="range" id="audio-scrubber" min="0" max="100" value="0" step="0.1" aria-label="Audio progress scrubber">
+          <span class="time-label" id="time-total">0:00</span>
+        </div>
+      </div>
+
+      <!-- Right Audio Extras -->
+      <div class="player-extras">
+        <div class="speed-selector">
+          <button type="button" class="speed-btn active" data-speed="1.0">1.0x</button>
+          <button type="button" class="speed-btn" data-speed="1.25">1.25x</button>
+          <button type="button" class="speed-btn" data-speed="1.5">1.5x</button>
+          <button type="button" class="speed-btn" data-speed="1.75">1.75x</button>
+        </div>
+        <div class="volume-control">
+          <span class="vol-icon" id="vol-icon">🔊</span>
+          <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1" aria-label="Volume slider">
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden Native Audio Engine -->
+    <audio id="native-audio" preload="none"></audio>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

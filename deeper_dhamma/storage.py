@@ -525,6 +525,8 @@ class TranscriptDatabase:
                     e.title,
                     e.date,
                     e.primary_display as teacher,
+                    e.media_url,
+                    e.permalink,
                     s.start_sec,
                     s.end_sec,
                     snippet(transcripts_fts, 1, '<b>', '</b>', '...', 15) as snippet_text

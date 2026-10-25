@@ -43,3 +43,6 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 !databases/buddhism_lexicon.db
+
+# Static web build distribution
+dist/

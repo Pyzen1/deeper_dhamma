@@ -10,6 +10,8 @@ from deeper_dhamma.config import (
     VOICEPRINTS_DB_PATH,
     BUDDHISM_LEXICON_DB_PATH,
     LEXICON_DB_PATH,
+    DEFAULT_WEB_HOST,
+    DEFAULT_WEB_PORT,
 )
 from deeper_dhamma.pipeline import TranscriptionPipeline
 from deeper_dhamma.storage import TranscriptDatabase
@@ -40,4 +42,6 @@ __all__ = [
     "VOICEPRINTS_DB_PATH",
     "BUDDHISM_LEXICON_DB_PATH",
     "LEXICON_DB_PATH",
+    "DEFAULT_WEB_HOST",
+    "DEFAULT_WEB_PORT",
 ]

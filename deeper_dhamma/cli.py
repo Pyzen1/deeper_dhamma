@@ -13,6 +13,8 @@ Subcommands:
   test        Run end-to-end verification test on a 120s audio sample
   status      Inspect transcription progress and available archive audio catalog
   audit       Inspect, audit integrity, and clean/scrub archive audio files
+  serve       Launch Bottle-based Web UI and search API server
+  web         Build static distribution (dist/) or run local preview server
 """
 
 import argparse
@@ -29,7 +31,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("deeper_dhamma")
 
-from deeper_dhamma.config import ARCHIVE_DIR, TRANSCRIPTS_DB_PATH
+from deeper_dhamma.config import (
+    ARCHIVE_DIR,
+    DEFAULT_WEB_HOST,
+    DEFAULT_WEB_PORT,
+    TRANSCRIPTS_DB_PATH,
+)
 from deeper_dhamma.storage import TranscriptDatabase
 
 
@@ -602,6 +609,37 @@ def cmd_audit(args):
             print("[i] To apply changes permanently, run again without --dry-run: python main.py audit --clean")
 
 
+def cmd_serve(args):
+    """Starts the Bottle-based web UI and search REST API."""
+    if not getattr(args, "run", False):
+        if hasattr(args, "subparser"):
+            args.subparser.print_help()
+        return
+    from deeper_dhamma.web.app import run_server
+    run_server(host=args.host, port=args.port, reloader=args.reload)
+
+
+def cmd_web(args):
+    """Manages the static web application: compilation, bundling, and local preview."""
+    has_build = getattr(args, "build", False)
+    has_run = getattr(args, "run", False)
+
+    if not has_build and not has_run:
+        if hasattr(args, "subparser"):
+            args.subparser.print_help()
+        return
+
+    out_dir = getattr(args, "output_dir", None) or "dist"
+
+    if has_build:
+        from deeper_dhamma.export_web import export_static_site
+        export_static_site(output_dir=out_dir)
+
+    if has_run:
+        from deeper_dhamma.export_web import run_web_preview
+        run_web_preview(host=args.host, port=args.port, dist_dir=out_dir)
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -752,6 +790,64 @@ def main(argv=None):
     p_audit.add_argument("--target-dir", "-t", type=str, help="Custom archive directory path to inspect")
     p_audit.add_argument("--report", "-r", type=str, help="Custom JSON report output file path")
     p_audit.set_defaults(func=cmd_audit, subparser=p_audit)
+
+    # 12. Web UI & Search Server
+    p_serve = subparsers.add_parser(
+        "serve",
+        help="Start the Bottle-based Web UI and search server",
+    )
+    p_serve.add_argument(
+        "--run", "-r",
+        action="store_true",
+        help="Start the web server (required to launch server)",
+    )
+    p_serve.add_argument(
+        "--host",
+        default=DEFAULT_WEB_HOST,
+        help=f"Host address to bind (default: {DEFAULT_WEB_HOST})",
+    )
+    p_serve.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=DEFAULT_WEB_PORT,
+        help=f"Port to listen on (default: {DEFAULT_WEB_PORT})",
+    )
+    p_serve.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
+    p_serve.set_defaults(func=cmd_serve, subparser=p_serve)
+
+    # 13. Static Web Application & SQLite WASM Compiler
+    p_web = subparsers.add_parser(
+        "web",
+        help="Build static distribution (dist/) or run local preview server",
+    )
+    p_web.add_argument(
+        "--build", "-b",
+        action="store_true",
+        help="Compile static site and consolidated SQLite database into dist/",
+    )
+    p_web.add_argument(
+        "--run", "-r",
+        action="store_true",
+        help="Start local preview web server",
+    )
+    p_web.add_argument(
+        "--port", "-p",
+        type=int,
+        default=DEFAULT_WEB_PORT,
+        help=f"Port to listen on (default: {DEFAULT_WEB_PORT})",
+    )
+    p_web.add_argument(
+        "--host",
+        default=DEFAULT_WEB_HOST,
+        help=f"Host address to bind (default: {DEFAULT_WEB_HOST})",
+    )
+    p_web.add_argument(
+        "--output-dir", "-o",
+        default="dist",
+        help="Target distribution directory for build (default: dist)",
+    )
+    p_web.set_defaults(func=cmd_web, subparser=p_web)
 
     # If no arguments provided to CLI at all, print top-level help
     if not argv:

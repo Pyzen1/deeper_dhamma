@@ -19,7 +19,8 @@ dependencies = [
     "pypdf>=4.0.0",
     "mutagen>=1.47.0",
     "feedparser>=6.0.0",
-    "requests>=2.31.0"
+    "requests>=2.31.0",
+    "bottle>=0.13.0"
 ]
 
 [project.scripts]

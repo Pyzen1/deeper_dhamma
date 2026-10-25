@@ -14,6 +14,8 @@ Usage:
   python main.py test        # Runs end-to-end sanity verification test
   python main.py status      # Inspects transcription progress and archive catalog
   python main.py audit       # Inspects, audits integrity, and cleans/scrubs archive
+  python main.py serve       # Launches Bottle-based Web UI & search server
+  python main.py web         # Compiles static site distribution or runs preview
 """
 
 import sys

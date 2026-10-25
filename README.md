@@ -74,6 +74,16 @@ python main.py status --years           # Year-by-year availability and transcri
 python main.py status --teachers        # Monastic teacher breakdown
 python main.py status --pending -y 2001 # List audio files in archive ready to be transcribed
 python main.py status --completed       # List already transcribed talks in database
+
+# 11. Static Web Application & SQLite WASM Compiler (Zero-Backend Serverless)
+python main.py web --build              # Compiles vacuumed dhamma_web.db & static bundle into dist/
+python main.py web --run                # Preview static site with native HTTP Range support
+python main.py web --build --run        # Compile and immediately preview
+python main.py web -r --port 8080       # Custom port or output directory
+
+# 12. Dynamic Web UI & API Server (Bottle.py)
+python main.py serve --run              # Launch dynamic REST server on http://127.0.0.1:34266
+python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
 ```
 
 ## Directory Structure
@@ -104,7 +114,11 @@ deeper_dhamma/
 │   ├── pipeline.py             # End-to-end TranscriptionPipeline orchestrator
 │   ├── downloader.py           # Podbean RSS feed sync
 │   ├── curation.py             # Reference transcript curation & audit review
-│   └── benchmark.py            # Gold-standard accuracy benchmarks
+│   ├── benchmark.py            # Gold-standard accuracy benchmarks
+│   ├── export_web.py           # Static site & SQLite WASM bundle compiler
+│   └── web/                    # Frontend assets, views & Web Worker
+│       ├── static/             # CSS, app.js, db_worker.js, sqlite3.wasm
+│       └── views/              # Bottle templates (index.html)
 └── benchmarks/
     └── reference_transcripts/  # Verified word-for-word human reference transcripts
 ```

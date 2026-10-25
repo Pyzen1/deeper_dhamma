@@ -99,3 +99,35 @@ LEFT JOIN vp.speaker_gallery g ON s.speaker_slug = g.speaker_name
 GROUP BY s.speaker_slug, g.display_name
 ORDER BY turn_count DESC;
 ```
+
+---
+
+## Static Web Distribution Compilation (`dhamma_web.db`)
+
+While `buddhism_lexicon.db`, `voiceprints.db`, and `dhamma_transcripts.db` remain strictly separated during ingestion, training, and transcription on the developer system, the web application runs 100% serverless via in-browser **SQLite WASM**:
+
+```text
+=================== DEVELOPMENT / INGESTION (Source) ===================
+  [buddhism_lexicon.db]       [voiceprints.db]       [dhamma_transcripts.db]
+  - Tracked in Git            - Ignored by Git       - Ignored by Git
+  - Doctrinal reference       - 192-d ECAPA vectors  - Live transcription writes
+           |                          |                         |
+           | (Doctrinal terms)        x (EXCLUDED FROM WEB)     | (Segments, FTS5)
+           +--------------------------+-------------------------+
+                                      |
+                                      v  python main.py web --build
+=================== STATIC WEB DISTRIBUTION (dist/) ====================
+                           [dhamma_web.db]
+                   - episodes & speech_segments
+                   - transcripts_fts (FTS5)
+                   - terms & lexicon_fts
+                   - PRAGMA user_version = <YYYYMMDD>
+                   - VACUUM (zero fragmentation, ~2.5 MB)
+                                      |
+                                      v
+                             Shipped to Browser
+```
+
+* **Why Combine for Web?** The browser is 100% read-only (zero write lock contention) and does not perform acoustic inference (`voiceprints.db` is excluded). Consolidating into `dhamma_web.db` allows the browser to download and query a single vacuumed file.
+* **Cache Validation**: The build script stamps `PRAGMA user_version = <YYYYMMDD>` at byte offset 60..63 of the file header. The client worker issues a 100-byte HTTP Range probe (`Range: bytes=0-99`) to validate local `IndexedDB` caching before fetching any updates.
+

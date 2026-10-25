@@ -56,3 +56,9 @@ TRANSCRIPTS_DB_PATH = DATABASES_DIR / "dhamma_transcripts.db"
 DATA_DIR = DATABASES_DIR
 VOICEPRINTS_DIR = DATABASES_DIR
 TRANSCRIPTS_DIR = DATABASES_DIR
+
+# 4. Web UI & Server Configuration
+# Port 34266 spells 'DHAMM' on phone keypads and is an unassigned, low-collision port in the IANA registered range.
+DEFAULT_WEB_HOST = os.environ.get("DEEPER_DHAMMA_HOST", "127.0.0.1")
+DEFAULT_WEB_PORT = int(os.environ.get("DEEPER_DHAMMA_PORT", "34266"))
+
