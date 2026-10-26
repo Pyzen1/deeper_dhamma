@@ -29,6 +29,7 @@ from deeper_dhamma.aligner import SpeakerAligner
 from deeper_dhamma.terminology import TerminologyEditor
 from deeper_dhamma.lexicon import BuddhismLexiconDatabase
 from deeper_dhamma.storage import TranscriptDatabase
+from deeper_dhamma.calibration import StreamSeekCalibrator
 
 logger = logging.getLogger("pipeline")
 
@@ -53,6 +54,7 @@ class TranscriptionPipeline:
         self.profiler = SpeakerProfiler(voiceprint_db=self.voiceprints_db, encoder=self.encoder)
         self.lexicon_db = BuddhismLexiconDatabase()
         self.terminology_editor = TerminologyEditor(self.lexicon_db.db_path)
+        self.calibrator = StreamSeekCalibrator()
         self.db = TranscriptDatabase(db_path=transcripts_db_path)
 
         # Build fast lookup map from catalog.json if available
@@ -225,7 +227,10 @@ class TranscriptionPipeline:
             if term_changelog:
                 logger.info(f"    [+] Terminology editor applied {len(term_changelog)} standardization rule(s).")
 
-            # 6. Commit to Unified SQLite Database
+            # 6. Stream Seek Calibration (aligns uncompressed PCM time to browser HTTP seek timeline)
+            attributed = self.calibrator.calibrate_segments(audio_path=audio_path, segments=attributed)
+
+            # 7. Commit to Unified SQLite Database
             logger.info("    Committing to unified SQLite database & updating FTS5 index...")
             self.db.save_episode(
                 episode_metadata=meta,
