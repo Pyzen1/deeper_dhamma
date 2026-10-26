@@ -12,10 +12,11 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - Float16 on NVIDIA CUDA (RTX 5070 Ti) with BatchedInferencePipeline running **50x–70x faster than real-time**.
   - In-memory waveform caching for zero-disk acoustic profiling and speaker attribution.
   - Silero VAD speech filtering and Pali doctrinal prompt conditioning.
-- **Era-Tagged Voiceprint Gallery (`speechbrain/spkrec-ecapa-voxceleb`)**:
+- **Era-Tagged Voiceprint Gallery & Continuous Diarization (`speechbrain/spkrec-ecapa-voxceleb`)**:
   - 192-d ECAPA-TDNN embeddings cataloging monastics across eras (`1997_2003`, `2004_2014`, `2015_2026`).
-  - Pre-analysis acoustic clustering for detecting uncredited co-teachers, Q&A dialogues, and host introductions.
-  - Ultra-fast monologue bypass for solo talks.
+  - Word-level conversational pause change-point detection: splits multi-speaker exchanges grouped by ASR at natural speech pauses ($\ge 0.45\text{s}$).
+  - Candidate-aware hysteresis ($\ge 0.42$ for nominated teachers, $\ge 0.48$ for unprofiled third-party monastics) with paralinguistic resilience against laughter, coughs, and throat-clearing.
+  - Uniform acoustic analysis: every turn in every talk is analyzed individually, eliminating false-monologue assumptions.
 - **Buddhist Reference Terminology Editor**:
   - Canonical dictionary normalization in standard Latin Pali (`jhana`, `samadhi`, `anatta`, `Bodhinyana`, `Rains Retreat`).
   - Inlines structured audit changelogs into metadata.

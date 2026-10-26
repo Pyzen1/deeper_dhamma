@@ -16,6 +16,7 @@ from deeper_dhamma.config import (
 )
 from deeper_dhamma.catalog import (
     determine_era,
+    identify_all_teachers,
     identify_primary_teacher,
     parse_episode_metadata,
 )
@@ -167,8 +168,13 @@ class TranscriptionPipeline:
                     primary_slug = top["slug"]
                     primary_display = top["display_name"]
 
-            # Collect all active teacher slugs for tailored vocabulary steering
+            # Collect all active teacher slugs for tailored vocabulary steering and turn candidate roster
+            all_meta_teachers = identify_all_teachers(ep_title or audio_path.name)
             active_slugs = [primary_slug]
+            for t_slug, _ in all_meta_teachers:
+                if t_slug not in active_slugs:
+                    active_slugs.append(t_slug)
+
             if profile.get("is_multi_speaker") and profile.get("ranked_speakers"):
                 for s in profile["ranked_speakers"]:
                     if s.get("share", 0) >= 0.08 and s["slug"] not in active_slugs and not s["slug"].startswith("unregistered"):
@@ -206,6 +212,7 @@ class TranscriptionPipeline:
                 era=era,
                 profile=profile,
                 waveform_16k=waveform_16k,
+                candidate_monastics=active_slugs,
             )
             logger.info(f"    Speaker alignment complete in {time.time() - t_spk0:.2f}s ({len(attributed)} turns).")
 

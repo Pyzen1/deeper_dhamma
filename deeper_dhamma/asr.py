@@ -53,7 +53,7 @@ class Transcriber:
         self,
         audio_16k_mono: np.ndarray,
         vad_filter: bool = True,
-        word_timestamps: bool = False,
+        word_timestamps: bool = True,
         prompt: Optional[str] = None,
         hotwords: Optional[str] = None,
         hallucination_silence_threshold: Optional[float] = 2.0,
@@ -91,12 +91,22 @@ class Transcriber:
 
         segments = []
         for s in segments_gen:
+            words = []
+            if getattr(s, "words", None):
+                for w in s.words:
+                    words.append({
+                        "word": w.word,
+                        "start": round(w.start, 3),
+                        "end": round(w.end, 3),
+                        "prob": round(float(getattr(w, "probability", 1.0)), 3),
+                    })
             segments.append({
                 "start": round(s.start, 3),
                 "end": round(s.end, 3),
                 "text": s.text.strip(),
                 "avg_logprob": round(float(getattr(s, "avg_logprob", 0.0)), 4),
                 "no_speech_prob": round(float(getattr(s, "no_speech_prob", 0.0)), 4),
+                "words": words,
             })
 
         return segments

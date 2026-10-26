@@ -4,6 +4,7 @@ Voiceprint Database & Reference Gallery Bootstrapper.
 
 import json
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -200,6 +201,17 @@ def bootstrap_voiceprints(
     # Group files by teacher so that monastics with few talks are prioritized
     teacher_files: Dict[str, List] = {}
     for f in all_files:
+        # Skip multi-teacher / co-taught recordings for bootstrapping exemplar reference voiceprints
+        matched_monastics = set()
+        lower_name = f.name.lower().replace("_", " ")
+        for t in KNOWN_TEACHERS:
+            for pat in t["patterns"]:
+                if re.search(pat, lower_name):
+                    matched_monastics.add(t["slug"])
+                    break
+        if len(matched_monastics) > 1:
+            continue
+
         tslug, tdisplay = identify_primary_teacher(f.name)
         if tslug != "unknown_teacher":
             teacher_files.setdefault(tslug, []).append((f, tdisplay))

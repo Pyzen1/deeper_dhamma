@@ -5,7 +5,7 @@ Monastic Teacher Catalog, Era Determination, and Episode Metadata Parsing.
 import html
 import re
 import unicodedata
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 # Era classifications based on temporal vocal drift and recording media transitions
 ERA_ANALOG = "1997_2003"        # Cassette recordings, higher pitch, faster cadence
@@ -252,6 +252,22 @@ def determine_era(year: int) -> str:
         return ERA_EARLY_DIGITAL
     else:
         return ERA_HIGH_DEF
+
+
+def identify_all_teachers(text: str) -> List[Tuple[str, str]]:
+    """Identifies all matching teachers from text metadata like episode title or filename."""
+    lower_text = text.lower().replace("_", " ")
+    results = []
+    seen = set()
+    for teacher in KNOWN_TEACHERS:
+        for pattern in teacher["patterns"]:
+            if re.search(pattern, lower_text):
+                slug = teacher["slug"]
+                if slug not in seen and slug != "unknown_teacher":
+                    seen.add(slug)
+                    results.append((slug, teacher["display_name"]))
+                break
+    return results
 
 
 def identify_primary_teacher(text: str) -> Tuple[str, str]:
