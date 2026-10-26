@@ -203,6 +203,8 @@ class TranscriptDatabase:
         changelog_json = json.dumps(terminology_changelog or [], ensure_ascii=False)
         is_multi = 1 if episode_metadata.get("is_multi_speaker", False) else 0
 
+        filepath = episode_metadata.get("filepath", "")
+
         with self._get_connection() as conn:
             with conn:
                 conn.execute(
@@ -211,8 +213,8 @@ class TranscriptDatabase:
                         id, title, date, year, primary_teacher, primary_display,
                         identified_teachers, is_transcribed,
                         media_url, permalink, duration_sec, is_multi_speaker,
-                        speaker_shares, terminology_changelog
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+                        speaker_shares, terminology_changelog, filepath
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         date = excluded.date,
@@ -227,6 +229,7 @@ class TranscriptDatabase:
                         is_multi_speaker = excluded.is_multi_speaker,
                         speaker_shares = excluded.speaker_shares,
                         terminology_changelog = excluded.terminology_changelog,
+                        filepath = COALESCE(NULLIF(excluded.filepath, ''), episodes.filepath),
                         last_error = NULL,
                         last_error_at = NULL,
                         last_error_op = NULL;
@@ -235,7 +238,7 @@ class TranscriptDatabase:
                         ep_id, title, date_display, year_int, primary_slug, primary_display,
                         primary_display,
                         media_url, permalink, duration_sec, is_multi,
-                        shares_json, changelog_json,
+                        shares_json, changelog_json, filepath,
                     ),
                 )
 
@@ -262,6 +265,65 @@ class TranscriptDatabase:
                     """,
                     segment_rows,
                 )
+
+                # If the episode ID differs from filename_stem, synchronize the filename row with full metadata
+                if filename_stem and filename_stem != ep_id:
+                    conn.execute(
+                        """
+                        INSERT INTO episodes (
+                            id, title, date, year, primary_teacher, primary_display,
+                            identified_teachers, is_transcribed,
+                            media_url, permalink, duration_sec, is_multi_speaker,
+                            speaker_shares, terminology_changelog, filepath
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            title = excluded.title,
+                            date = excluded.date,
+                            year = excluded.year,
+                            primary_teacher = excluded.primary_teacher,
+                            primary_display = excluded.primary_display,
+                            identified_teachers = COALESCE(episodes.identified_teachers, excluded.identified_teachers),
+                            is_transcribed = 1,
+                            media_url = excluded.media_url,
+                            permalink = excluded.permalink,
+                            duration_sec = excluded.duration_sec,
+                            is_multi_speaker = excluded.is_multi_speaker,
+                            speaker_shares = excluded.speaker_shares,
+                            terminology_changelog = excluded.terminology_changelog,
+                            filepath = COALESCE(NULLIF(excluded.filepath, ''), episodes.filepath),
+                            last_error = NULL,
+                            last_error_at = NULL,
+                            last_error_op = NULL;
+                        """,
+                        (
+                            filename_stem, title, date_display, year_int, primary_slug, primary_display,
+                            primary_display,
+                            media_url, permalink, duration_sec, is_multi,
+                            shares_json, changelog_json, filepath,
+                        ),
+                    )
+                    conn.execute("DELETE FROM speech_segments WHERE episode_id = ?;", (filename_stem,))
+                    segment_rows_stem = [
+                        (
+                            filename_stem,
+                            idx,
+                            round(float(seg["start"]), 3),
+                            round(float(seg["end"]), 3),
+                            seg.get("speaker", "unknown"),
+                            seg.get("speaker_display", seg.get("speaker", "Unknown")),
+                            seg.get("text", "").strip(),
+                        )
+                        for idx, seg in enumerate(attributed_segments)
+                    ]
+                    conn.executemany(
+                        """
+                        INSERT INTO speech_segments (
+                            episode_id, turn_index, start_sec, end_sec,
+                            speaker_slug, speaker_display, text
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                        """,
+                        segment_rows_stem,
+                    )
 
         if primary_slug and primary_slug != "unknown_teacher":
             self.associate_teacher(
@@ -385,11 +447,24 @@ class TranscriptDatabase:
         associations in `episode_teachers` and `identified_teachers` from filenames.
         """
         from deeper_dhamma.catalog import identify_primary_teacher, parse_episode_metadata
+        from deeper_dhamma.config import CATALOG_PATH
+        import html
 
         archive_dir = Path(archive_dir)
         total_files = 0
         added_episodes = 0
         associated_teachers = 0
+
+        catalog_map = {}
+        if CATALOG_PATH and Path(CATALOG_PATH).exists():
+            try:
+                with open(CATALOG_PATH, "r", encoding="utf-8") as f:
+                    cat_list = json.load(f)
+                for ep in cat_list:
+                    _, _, fname = parse_episode_metadata(ep.get("title", ""), ep.get("upload_date", ""))
+                    catalog_map[fname] = ep
+            except Exception as e:
+                logger.warning(f"Could not load catalog in scan_archive_directory: {e}")
 
         with self._get_connection() as conn:
             with conn:
@@ -406,6 +481,19 @@ class TranscriptDatabase:
                     year_val, _, _ = parse_episode_metadata(p.name, "")
                     teacher_slug, teacher_display = identify_primary_teacher(p.name)
 
+                    cat_ep = catalog_map.get(stem)
+                    if cat_ep:
+                        clean_title = html.unescape(cat_ep.get("title", stem))
+                        media_url = cat_ep.get("media_url")
+                        permalink = cat_ep.get("permalink")
+                        upload_date = cat_ep.get("upload_date", "")
+                        date_display = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}" if len(upload_date) == 8 else str(year_val)
+                    else:
+                        clean_title = stem.replace("_", " ").title()
+                        media_url = None
+                        permalink = None
+                        date_display = str(year_val)
+
                     # Check if episode exists
                     cur = conn.execute(
                         "SELECT id, is_transcribed, identified_teachers FROM episodes WHERE id = ?;",
@@ -417,25 +505,35 @@ class TranscriptDatabase:
                             """
                             INSERT INTO episodes (
                                 id, title, date, year, primary_teacher, primary_display,
-                                duration_sec, is_transcribed, filepath, identified_teachers
-                            ) VALUES (?, ?, ?, ?, ?, ?, 0.0, 0, ?, ?);
+                                duration_sec, is_transcribed, filepath, identified_teachers,
+                                media_url, permalink
+                            ) VALUES (?, ?, ?, ?, ?, ?, 0.0, 0, ?, ?, ?, ?);
                             """,
                             (
                                 stem,
-                                p.name,
-                                str(year_val),
+                                clean_title,
+                                date_display,
                                 year_val,
                                 teacher_slug,
                                 teacher_display,
                                 str(p),
                                 teacher_display,
+                                media_url,
+                                permalink,
                             ),
                         )
                         added_episodes += 1
                     else:
                         conn.execute(
-                            "UPDATE episodes SET filepath = ? WHERE id = ? AND (filepath IS NULL OR filepath = '');",
-                            (str(p), stem),
+                            """
+                            UPDATE episodes SET
+                                filepath = COALESCE(NULLIF(filepath, ''), ?),
+                                media_url = COALESCE(media_url, ?),
+                                permalink = COALESCE(permalink, ?),
+                                title = CASE WHEN title LIKE '%.mp3' OR title LIKE '%.m4a' THEN ? ELSE title END
+                            WHERE id = ?;
+                            """,
+                            (str(p), media_url, permalink, clean_title, stem),
                         )
 
                     # Associate initial teacher from filename
@@ -475,8 +573,14 @@ class TranscriptDatabase:
             if not ep:
                 return None
             ep_dict = dict(ep)
-            ep_dict["speaker_shares"] = json.loads(ep_dict.get("speaker_shares") or "{}")
-            ep_dict["terminology_changelog"] = json.loads(ep_dict.get("terminology_changelog") or "[]")
+            try:
+                ep_dict["speaker_shares"] = json.loads(ep_dict.get("speaker_shares") or "{}")
+            except Exception:
+                ep_dict["speaker_shares"] = {}
+            try:
+                ep_dict["terminology_changelog"] = json.loads(ep_dict.get("terminology_changelog") or "[]")
+            except Exception:
+                ep_dict["terminology_changelog"] = []
 
             segs = conn.execute(
                 "SELECT * FROM speech_segments WHERE episode_id = ? ORDER BY turn_index ASC;",

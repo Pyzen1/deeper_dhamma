@@ -2,6 +2,7 @@
 TranscriptionPipeline Orchestrator.
 """
 
+import html
 import json
 import logging
 import time
@@ -96,7 +97,7 @@ class TranscriptionPipeline:
             catalog_entry = self.catalog_map.get(audio_path.stem)
 
         if catalog_entry:
-            ep_title = catalog_entry.get("title", audio_path.stem)
+            ep_title = html.unescape(catalog_entry.get("title", audio_path.stem))
             ep_id = catalog_entry.get("id", audio_path.stem)
             media_url = catalog_entry.get("media_url", "")
             permalink = catalog_entry.get("permalink", "")
@@ -183,6 +184,7 @@ class TranscriptionPipeline:
                 "upload_date": upload_date,
                 "is_multi_speaker": profile.get("is_multi_speaker", False),
                 "speaker_shares": profile.get("shares", {}),
+                "filepath": str(audio_path.resolve()),
             }
 
             # 3. Speech-to-Text with Teacher-Specific Prompt Steering & Continuous Hotwords

@@ -184,6 +184,15 @@ def export_static_site(output_dir: Path | str = "dist") -> Path:
             shutil.copy2(src_file, dst_file)
             copied_files += 1
 
+    # Copy icons directory if present
+    icons_src = STATIC_SRC_DIR / "icons"
+    if icons_src.exists() and icons_src.is_dir():
+        icons_dst = out_path / "icons"
+        if icons_dst.exists():
+            shutil.rmtree(icons_dst)
+        shutil.copytree(icons_src, icons_dst)
+        copied_files += len(list(icons_src.glob("*.svg")))
+
     # Deploy pure SQLite WASM client adapter to dist/db_client.js
     wasm_adapter = STATIC_SRC_DIR / "adapters" / "wasm_client.js"
     if wasm_adapter.exists():

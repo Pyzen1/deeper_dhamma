@@ -37,11 +37,14 @@ class SpeakerAligner:
         if not asr_segments:
             return []
 
+        # Clean single teacher display name for turn attribution
+        primary_teacher_display = primary_display.split(" & ")[0] if " & " in primary_display else primary_display
+
         # Monologue Fast-Path: If acoustic profiling proved solo speaker
         if profile and not profile.get("is_multi_speaker", True):
             for seg in asr_segments:
                 seg["speaker"] = primary_slug
-                seg["speaker_display"] = primary_display
+                seg["speaker_display"] = primary_teacher_display
                 seg["role"] = "monastic_primary"
                 seg["confidence"] = 0.95
             return self._merge_consecutive_turns(asr_segments, merge_gap_sec)
@@ -55,7 +58,7 @@ class SpeakerAligner:
             # Short interjections default to primary teacher
             if dur < 2.5:
                 seg["speaker"] = primary_slug
-                seg["speaker_display"] = primary_display
+                seg["speaker_display"] = primary_teacher_display
                 seg["role"] = "monastic_primary"
                 seg["confidence"] = 0.85
                 assigned_segments.append(seg)
@@ -89,7 +92,7 @@ class SpeakerAligner:
                 seg["confidence"] = id_result["confidence"]
             except Exception:
                 seg["speaker"] = primary_slug
-                seg["speaker_display"] = primary_display
+                seg["speaker_display"] = primary_teacher_display
                 seg["role"] = "monastic_primary"
                 seg["confidence"] = 0.70
 

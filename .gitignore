@@ -40,6 +40,8 @@ Thumbs.db
 
 # Local database outputs
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 !databases/buddhism_lexicon.db

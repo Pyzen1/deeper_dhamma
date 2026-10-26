@@ -20,6 +20,23 @@
     catalog: [],
   };
 
+  // ==========================================================================
+  // Fluent Emoji High Contrast Media Control SVG Icons (Wikipedia Reference)
+  // https://en.wikipedia.org/wiki/Media_control_symbols
+  // ==========================================================================
+  const FLUENT_ICONS = {
+    play: `<svg class="fluent-icon fluent-play" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path class="fluent-symbol" d="M23.5 16.866C24.1667 16.4811 24.1667 15.5189 23.5 15.134L11.5 8.20577C10.8333 7.82087 10 8.302 10 9.0718L10 22.9282C10 23.698 10.8333 24.1791 11.5 23.7942L23.5 16.866Z" fill="currentColor"/><path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/></svg>`,
+    pause: `<svg class="fluent-icon fluent-pause" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path class="fluent-symbol" d="M11 10C11 9.44772 11.4477 9 12 9H14C14.5523 9 15 9.44772 15 10V22C15 22.5523 14.5523 23 14 23H12C11.4477 23 11 22.5523 11 22V10Z" fill="currentColor"/><path class="fluent-symbol" d="M18 9C17.4477 9 17 9.44772 17 10V22C17 22.5523 17.4477 23 18 23H20C20.5523 23 21 22.5523 21 22V10C21 9.44772 20.5523 9 20 9H18Z" fill="currentColor"/><path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/></svg>`,
+    rewind: `<svg class="fluent-icon fluent-rewind" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path class="fluent-symbol" d="M15 15.0378V9.68977C15 8.80811 13.9419 8.35788 13.3066 8.9692L6.74885 15.2794C6.34001 15.6728 6.34001 16.3272 6.74885 16.7206L13.3066 23.0308C13.9419 23.6421 15 23.1919 15 22.3102V16.9622L21.3066 23.0308C21.9419 23.6421 23 23.1919 23 22.3102V9.68977C23 8.80811 21.9419 8.35788 21.3066 8.9692L15 15.0378Z" fill="currentColor"/><path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/></svg>`,
+    fastForward: `<svg class="fluent-icon fluent-fast-forward" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path class="fluent-symbol" d="M17 15.0377L10.6934 8.9692C10.0581 8.35788 9 8.80811 9 9.68977L9 22.3102C9 23.1919 10.0581 23.6421 10.6934 23.0308L17 16.9622V22.3102C17 23.1919 18.0581 23.6421 18.6934 23.0308L25.2512 16.7206C25.66 16.3272 25.66 15.6728 25.2512 15.2794L18.6934 8.9692C18.0581 8.35788 17 8.80811 17 9.68977V15.0377Z" fill="currentColor"/><path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/></svg>`,
+    skipBack: `<svg class="fluent-icon fluent-skip-back" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path class="fluent-symbol" d="M17 9.68977V15.0378L23.3066 8.9692C23.9419 8.35788 25 8.80811 25 9.68977V22.3102C25 23.1919 23.9419 23.6421 23.3066 23.0308L17 16.9622V22.3102C17 23.1919 15.9419 23.6421 15.3066 23.0308L9 16.9623V22.5C9 22.7761 8.77614 23 8.5 23H7.5C7.22386 23 7 22.7761 7 22.5V9.5C7 9.22386 7.22386 9 7.5 9H8.5C8.77614 9 9 9.22386 9 9.5V15.0378L15.3066 8.9692C15.9419 8.35788 17 8.80811 17 9.68977Z" fill="currentColor"/><path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/></svg>`,
+    skipFwd: `<svg class="fluent-icon fluent-skip-fwd" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path class="fluent-symbol" d="M9.69338 8.9692L16 15.0378V9.68977C16 8.80811 17.0581 8.35788 17.6934 8.9692L24 15.0377V9.5C24 9.22386 24.2239 9 24.5 9H25.5C25.7761 9 26 9.22386 26 9.5V22.5C26 22.7761 25.7761 23 25.5 23H24.5C24.2239 23 24 22.7761 24 22.5V16.9622L17.6934 23.0308C17.0581 23.6421 16 23.1919 16 22.3102V16.9622L9.69338 23.0308C9.05807 23.6421 8 23.1919 8 22.3102L8 9.68977C8 8.80811 9.05807 8.35788 9.69338 8.9692Z" fill="currentColor"/><path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/></svg>`,
+    speakerHigh: `<svg class="fluent-icon fluent-speaker-high" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7.99756 23.001L16.6106 26.8308C17.7343 27.3704 19.0356 26.551 19.0356 25.3044V19.0768C20.6809 19.0289 21.9999 17.6801 21.9999 16.0232C21.9999 14.3663 20.6809 13.0175 19.0356 12.9696V6.49639C19.0356 5.25508 17.1704 4.70337 16.0474 5.23141L8.01223 9.0124V9H3.80282C2.80707 9 2 9.84705 2 10.8921V21.1079C2 22.153 2.80707 23 3.80282 23L7.99756 23.001ZM17.0356 7.03194V24.831L9.99756 21.7015L9.99758 10.2885L16.8909 7.04485L16.8926 7.04443C16.9011 7.04219 16.9385 7.03229 17.0069 7.03165C17.0165 7.03156 17.0261 7.03166 17.0356 7.03194Z" fill="currentColor"/><path d="M24.11 11.0695C23.9694 10.9151 23.8237 10.7676 23.6725 10.6276C23.035 10.0376 22 10.4914 22 11.3601V11.3876C22 11.6595 22.1181 11.9164 22.3175 12.1007C23.3031 13.0139 23.9212 14.3189 23.9212 15.7682C23.9212 17.2176 23.3037 18.5226 22.3175 19.4357C22.1119 19.6257 22 19.8964 22 20.1764C22 21.047 23.0369 21.4976 23.6756 20.9057C23.7419 20.8445 23.8069 20.782 23.8706 20.7176C25.2437 19.3445 25.9762 17.5014 25.9175 15.5514C25.8681 13.8932 25.2256 12.2976 24.11 11.0695Z" fill="currentColor"/><path d="M23.5063 7.97456C23.195 7.79455 23 7.46518 23 7.1058C23 6.3333 23.8369 5.85705 24.5056 6.24455C27.79 8.14705 30 11.6989 30 15.7683C30 19.8371 27.7906 23.3896 24.505 25.2921C23.8363 25.6796 22.9994 25.2027 22.9994 24.4302C22.9994 24.0714 23.1931 23.7427 23.5038 23.5627C24.1756 23.1739 24.8006 22.6952 25.3638 22.1321C27.0863 20.4096 28.0244 18.1121 27.9994 15.6721C27.9763 13.4202 27.1031 11.2471 25.56 9.60643C24.9475 8.95518 24.2556 8.40893 23.5063 7.97456Z" fill="currentColor"/></svg>`,
+    speakerLow: `<svg class="fluent-icon fluent-speaker-low" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M16.6106 26.8308L7.99756 23.001L3.80282 23C2.80707 23 2 22.153 2 21.1079V10.8921C2 9.84705 2.80707 9 3.80282 9H8.01223V9.0124L16.0474 5.23141C17.1704 4.70337 19.0356 5.25508 19.0356 6.49639V12.9696C20.6809 13.0175 21.9999 14.3663 21.9999 16.0232C21.9999 17.6801 20.6809 19.0289 19.0356 19.0768V25.3044C19.0356 26.551 17.7343 27.3704 16.6106 26.8308ZM17.0356 24.831V7.03194C17.0261 7.03166 17.0165 7.03156 17.0069 7.03165C16.9385 7.03229 16.9011 7.04219 16.8926 7.04443L16.8909 7.04485L9.99758 10.2885L9.99756 21.7015L17.0356 24.831Z" fill="currentColor"/><path d="M24.11 11.0695C23.9694 10.9151 23.8237 10.7676 23.6725 10.6276C23.035 10.0376 22 10.4914 22 11.3601V11.3876C22 11.6595 22.1181 11.9164 22.3175 12.1007C23.3031 13.0139 23.9212 14.3189 23.9212 15.7682C23.9212 17.2176 23.3037 18.5226 22.3175 19.4357C22.1119 19.6257 22 19.8964 22 20.1764C22 21.047 23.0369 21.4976 23.6756 20.9057C23.7419 20.8445 23.8069 20.782 23.8706 20.7176C25.2437 19.3445 25.9762 17.5014 25.9175 15.5514C25.8681 13.8932 25.2256 12.2976 24.11 11.0695Z" fill="currentColor"/></svg>`,
+    speakerMute: `<svg class="fluent-icon fluent-speaker-mute" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M19.0356 20.7181L24.9692 26.6519C25.4342 27.1161 26.1866 27.1161 26.6509 26.6511C27.1151 26.1869 27.1151 25.4337 26.6509 24.9694L6.83142 5.14994C6.36718 4.6857 5.61394 4.6857 5.1497 5.14994C4.68545 5.61418 4.68545 6.36742 5.1497 6.83167L7.31807 9.00012H3.80282C2.80707 9.00012 2 9.84717 2 10.8922V21.108C2 22.1531 2.80707 23.0001 3.80282 23.0001L7.99756 23.0011L16.6106 26.8309C17.7343 27.3705 19.0356 26.5512 19.0356 25.3045V20.7181ZM17.0356 18.718V24.8311L9.99756 21.7016L9.99758 11.6797L17.0356 18.718Z" fill="currentColor"/><path d="M21.9999 16.0233C21.9999 16.5266 21.8782 17.0015 21.6626 17.4201L17.0356 12.7931V7.03206C17.0261 7.03178 17.0165 7.03168 17.0069 7.03177C16.9385 7.03241 16.9011 7.04231 16.8926 7.04455L16.8909 7.04498L13.0805 8.83799L11.5774 7.33491L16.0474 5.23153C17.1704 4.70349 19.0356 5.2552 19.0356 6.49651V12.9697C20.6809 13.0176 21.9999 14.3664 21.9999 16.0233Z" fill="currentColor"/></svg>`,
+    mic: `<svg class="fluent-icon fluent-mic" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M17.2889 2H14.7289C12.1789 2 10.0989 4.07 10.0989 6.63V8.12H14.8589C15.2789 8.12 15.6089 8.46 15.6089 8.87C15.6089 9.27999 15.2789 9.62 14.8589 9.62H10.0989V11.3101H14.8589C15.2789 11.3101 15.6089 11.6401 15.6089 12.0601C15.6089 12.4701 15.2789 12.8101 14.8589 12.8101H10.0989V14.49H14.8589C15.2789 14.49 15.6089 14.83 15.6089 15.24C15.6089 15.65 15.2789 15.99 14.8589 15.99H10.0989V17.37C10.0989 19.93 12.1689 22 14.7289 22H17.2889C19.8489 22 21.9189 19.93 21.9189 17.37V6.63C21.9189 4.07 19.8389 2 17.2889 2ZM21.9188 8.12V9.62H17.1588C16.7388 9.62 16.4088 9.27999 16.4088 8.87C16.4088 8.46 16.7388 8.12 17.1588 8.12H21.9188ZM17.1588 11.3101H21.9188V12.8101H17.1588C16.7388 12.8101 16.4088 12.4701 16.4088 12.0601C16.4088 11.6401 16.7388 11.3101 17.1588 11.3101ZM21.9188 14.49V15.99H17.1588C16.7388 15.99 16.4088 15.65 16.4088 15.24C16.4088 14.83 16.7388 14.49 17.1588 14.49H21.9188Z" fill="currentColor"/><path d="M23.9189 12.88C24.4712 12.88 24.9189 13.3277 24.9189 13.88V18.17C24.9189 21.9419 21.8618 24.9994 18.0901 25H18.0889L13.8289 25.01C10.0655 25.01 7.00891 21.9512 7.00891 18.18V13.89C7.00891 13.3377 7.45663 12.89 8.00891 12.89C8.5612 12.89 9.00891 13.3377 9.00891 13.89V18.18C9.00891 20.8485 11.1717 23.0094 13.8278 23.01H13.8289L18.0889 23C20.7566 23 22.9189 20.8377 22.9189 18.17V13.88C22.9189 13.3277 23.3666 12.88 23.9189 12.88Z" fill="currentColor"/><path d="M11.2889 26H13.819V25.01H18.209V26H20.7289C21.6589 26 22.5089 26.51 22.9389 27.32L23.9289 29.14C24.1388 29.53 23.8588 30 23.4188 30H8.58885C8.14885 30 7.86885 29.53 8.07885 29.14L9.06885 27.32C9.50885 26.51 10.3689 26 11.2889 26Z" fill="currentColor"/></svg>`
+  };
+
   // DOM Elements Cache
   const els = {
     // Inputs & Filters
@@ -75,7 +92,9 @@
     nativeAudio: document.getElementById('native-audio'),
     playerTitle: document.getElementById('player-track-title'),
     playerSpeaker: document.getElementById('player-track-speaker'),
+    btnPrevTrack: document.getElementById('btn-prev-track'),
     btnPlayPause: document.getElementById('btn-play-pause'),
+    btnNextTrack: document.getElementById('btn-next-track'),
     btnSkipBack: document.getElementById('btn-skip-back'),
     btnSkipFwd: document.getElementById('btn-skip-fwd'),
     scrubber: document.getElementById('audio-scrubber'),
@@ -84,6 +103,7 @@
     speedBtns: document.querySelectorAll('.speed-btn'),
     volumeSlider: document.getElementById('volume-slider'),
     volIcon: document.getElementById('vol-icon'),
+    volToggleBtn: document.getElementById('vol-toggle-btn'),
   };
 
   // ==========================================================================
@@ -700,16 +720,26 @@
     });
 
     audio.addEventListener('play', () => {
-      els.btnPlayPause.textContent = '⏸';
-      els.btnPlayPause.setAttribute('title', 'Pause');
+      els.btnPlayPause.innerHTML = FLUENT_ICONS.pause;
+      els.btnPlayPause.setAttribute('title', 'Pause (Space)');
+      els.btnPlayPause.setAttribute('aria-label', 'Pause');
     });
 
     audio.addEventListener('pause', () => {
-      els.btnPlayPause.textContent = '▶';
-      els.btnPlayPause.setAttribute('title', 'Play');
+      els.btnPlayPause.innerHTML = FLUENT_ICONS.play;
+      els.btnPlayPause.setAttribute('title', 'Play (Space)');
+      els.btnPlayPause.setAttribute('aria-label', 'Play');
     });
 
     els.btnPlayPause.addEventListener('click', togglePlayPause);
+
+    if (els.btnPrevTrack) {
+      els.btnPrevTrack.addEventListener('click', playPrevTrack);
+    }
+
+    if (els.btnNextTrack) {
+      els.btnNextTrack.addEventListener('click', playNextTrack);
+    }
 
     els.btnSkipBack.addEventListener('click', () => {
       audio.currentTime = Math.max(0, audio.currentTime - 15);
@@ -736,11 +766,70 @@
       });
     });
 
-    // Volume slider
+    // Volume handling
+    function updateVolumeIcon(vol) {
+      if (!els.volIcon) return;
+      if (vol === 0) {
+        els.volIcon.innerHTML = FLUENT_ICONS.speakerMute;
+        if (els.volToggleBtn) els.volToggleBtn.title = 'Unmute audio';
+      } else if (vol < 0.5) {
+        els.volIcon.innerHTML = FLUENT_ICONS.speakerLow;
+        if (els.volToggleBtn) els.volToggleBtn.title = 'Mute audio';
+      } else {
+        els.volIcon.innerHTML = FLUENT_ICONS.speakerHigh;
+        if (els.volToggleBtn) els.volToggleBtn.title = 'Mute audio';
+      }
+    }
+
+    let lastVolume = 1.0;
+    if (els.volToggleBtn) {
+      els.volToggleBtn.addEventListener('click', () => {
+        if (audio.volume > 0) {
+          lastVolume = audio.volume;
+          audio.volume = 0;
+          els.volumeSlider.value = 0;
+        } else {
+          audio.volume = lastVolume > 0 ? lastVolume : 1.0;
+          els.volumeSlider.value = audio.volume;
+        }
+        updateVolumeIcon(audio.volume);
+      });
+    }
+
     els.volumeSlider.addEventListener('input', () => {
       audio.volume = parseFloat(els.volumeSlider.value);
-      els.volIcon.textContent = audio.volume === 0 ? '🔇' : (audio.volume < 0.5 ? '🔉' : '🔊');
+      updateVolumeIcon(audio.volume);
     });
+  }
+
+  function playPrevTrack() {
+    if (!state.catalog || state.catalog.length === 0) return;
+    const currentIdx = state.catalog.findIndex(ep => ep.media_url === state.currentMediaUrl);
+    if (currentIdx > 0) {
+      const prevEp = state.catalog[currentIdx - 1];
+      playAudioSegment({
+        media_url: prevEp.media_url,
+        title: prevEp.title,
+        teacher: prevEp.teacher || prevEp.primary_display,
+        start_sec: 0,
+      });
+    } else {
+      els.nativeAudio.currentTime = 0;
+    }
+  }
+
+  function playNextTrack() {
+    if (!state.catalog || state.catalog.length === 0) return;
+    const currentIdx = state.catalog.findIndex(ep => ep.media_url === state.currentMediaUrl);
+    if (currentIdx >= 0 && currentIdx < state.catalog.length - 1) {
+      const nextEp = state.catalog[currentIdx + 1];
+      playAudioSegment({
+        media_url: nextEp.media_url,
+        title: nextEp.title,
+        teacher: nextEp.teacher || nextEp.primary_display,
+        start_sec: 0,
+      });
+    }
   }
 
   function playAudioSegment({ media_url, title, teacher, start_sec }) {
