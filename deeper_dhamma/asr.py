@@ -64,7 +64,13 @@ class Transcriber:
         Returns list of segment dictionaries with start, end, text, and acoustic confidence metrics.
         """
         active_prompt = prompt or self.initial_prompt
-        if self.batched_pipeline is not None:
+        vad_params = dict(
+            threshold=0.30,
+            min_speech_duration_ms=100,
+            min_silence_duration_ms=500,
+            speech_pad_ms=400,
+        )
+        if self.batched_pipeline is not None and vad_filter:
             segments_gen, _ = self.batched_pipeline.transcribe(
                 audio_16k_mono,
                 batch_size=self.batch_size,
@@ -72,6 +78,7 @@ class Transcriber:
                 initial_prompt=active_prompt,
                 hotwords=hotwords,
                 vad_filter=vad_filter,
+                vad_parameters=vad_params,
                 word_timestamps=word_timestamps,
                 hallucination_silence_threshold=hallucination_silence_threshold,
                 condition_on_previous_text=condition_on_previous_text,
@@ -83,7 +90,7 @@ class Transcriber:
                 initial_prompt=active_prompt,
                 hotwords=hotwords,
                 vad_filter=vad_filter,
-                vad_parameters=dict(min_silence_duration_ms=500),
+                vad_parameters=vad_params,
                 word_timestamps=word_timestamps,
                 hallucination_silence_threshold=hallucination_silence_threshold,
                 condition_on_previous_text=condition_on_previous_text,

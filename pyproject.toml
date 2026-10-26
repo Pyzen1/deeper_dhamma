@@ -29,3 +29,7 @@ deeper-dhamma = "deeper_dhamma.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["deeper_dhamma*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["scratch", "archive", "databases", "dist"]

@@ -86,9 +86,9 @@ class StreamSeekCalibrator:
             if total_dur <= 0:
                 return lambda t: t
 
-            # Precalculate byte offset boundaries for each 1% in the Xing TOC
-            toc_bytes = [int((toc[i] / 256.0) * bytes_len) + id3_len for i in range(100)]
-            toc_bytes.append(bytes_len + id3_len)
+            audio_stream_size = float(bytes_len or (audio_path.stat().st_size - id3_len))
+            if audio_stream_size <= 0:
+                return lambda t: t
 
             # Sample packet positions across the audio file using ffprobe
             cmd = [
@@ -126,14 +126,8 @@ class StreamSeekCalibrator:
 
                 if t - last_t >= 2.0:
                     last_t = t
-                    seek_t = t
-                    for i in range(100):
-                        if toc_bytes[i] <= pos <= toc_bytes[i + 1]:
-                            b0, b1 = toc_bytes[i], toc_bytes[i + 1]
-                            ratio = (pos - b0) / (b1 - b0) if b1 > b0 else 0
-                            pct = i + ratio
-                            seek_t = (pct / 100.0) * total_dur
-                            break
+                    offset_in_audio = max(0, pos - id3_len)
+                    seek_t = (offset_in_audio / audio_stream_size) * total_dur
                     pcm_times.append(t)
                     browser_seek_times.append(seek_t)
 
