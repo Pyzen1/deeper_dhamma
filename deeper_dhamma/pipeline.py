@@ -153,7 +153,12 @@ class TranscriptionPipeline:
                 era=era,
                 waveform_16k=waveform_16k,
             )
-            if profile["is_multi_speaker"] and profile.get("ranked_speakers"):
+            # Collect all active teacher slugs for tailored vocabulary steering and turn candidate roster
+            all_meta_teachers = identify_all_teachers(ep_title or audio_path.name)
+            if len(all_meta_teachers) > 1:
+                primary_display = " & ".join(t[1] for t in all_meta_teachers[:2])
+                primary_slug = all_meta_teachers[0][0]
+            elif profile["is_multi_speaker"] and profile.get("ranked_speakers"):
                 raw_names = [s["display_name"] for s in profile["ranked_speakers"] if s["share"] >= 0.08 and s.get("confidence", 0) >= 0.40]
                 if primary_display not in raw_names and meta_teacher_slug != "unknown_teacher":
                     raw_names.insert(0, primary_display)
@@ -168,8 +173,6 @@ class TranscriptionPipeline:
                     primary_slug = top["slug"]
                     primary_display = top["display_name"]
 
-            # Collect all active teacher slugs for tailored vocabulary steering and turn candidate roster
-            all_meta_teachers = identify_all_teachers(ep_title or audio_path.name)
             active_slugs = [primary_slug]
             for t_slug, _ in all_meta_teachers:
                 if t_slug not in active_slugs:
