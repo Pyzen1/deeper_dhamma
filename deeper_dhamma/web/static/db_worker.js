@@ -69,10 +69,11 @@ async function setCachedDatabase(key, version, buffer) {
 
 async function fetchRemoteVersion(dbUrl) {
   try {
-    const res = await fetch(dbUrl, {
+    const url = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+    const res = await fetch(url, {
       method: 'GET',
       headers: { Range: 'bytes=0-99' },
-      cache: 'no-cache',
+      cache: 'no-store',
     });
     if (res.status === 206 || res.status === 200) {
       const headerBuf = await res.arrayBuffer();
@@ -104,19 +105,20 @@ async function initDatabase(dbUrl = 'dhamma_web.db') {
   let dbBuffer = null;
   let isFromCache = false;
 
-  if (cached && cached.version && cached.version >= remoteVersion && cached.buffer) {
-    // Cache is up-to-date!
+  if (cached && cached.version && remoteVersion && cached.version === remoteVersion && cached.buffer) {
+    // Cache is strictly up-to-date!
     console.log(`[DB Worker] Using cached database (v${cached.version}) from IndexedDB.`);
     dbBuffer = cached.buffer;
     currentDbVersion = cached.version;
     isFromCache = true;
   } else {
     // Need full download
-    console.log(`[DB Worker] Downloading updated database from ${dbUrl} (remote v${remoteVersion})...`);
+    console.log(`[DB Worker] Downloading updated database from ${dbUrl} (cached v${cached ? cached.version : 'none'} vs remote v${remoteVersion})...`);
     if (probeBuffer && probeBuffer.byteLength > 1000) {
       dbBuffer = probeBuffer;
     } else {
-      const res = await fetch(dbUrl);
+      const fetchUrl = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+      const res = await fetch(fetchUrl, { cache: 'no-store' });
       if (!res.ok) {
         throw new Error(`Failed to fetch database from ${dbUrl} (status ${res.status})`);
       }

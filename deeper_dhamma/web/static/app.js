@@ -707,9 +707,32 @@
   // ==========================================================================
 
   function setupAudioEngine() {
-    const audio = els.nativeAudio;
+    let isScrubbing = false;
+
+    function safeSeek(targetTime) {
+      const dur = audio.duration || Infinity;
+      const clamped = Math.max(0, Math.min(dur, targetTime));
+      if (audio.readyState >= 2) {
+        try {
+          audio.currentTime = clamped;
+        } catch (err) {
+          console.warn('Seek error:', err);
+        }
+      } else {
+        const onReady = () => {
+          try {
+            audio.currentTime = clamped;
+          } catch (err) {
+            console.warn('Seek on ready error:', err);
+          }
+        };
+        audio.addEventListener('canplay', onReady, { once: true });
+        audio.addEventListener('loadeddata', onReady, { once: true });
+      }
+    }
 
     audio.addEventListener('timeupdate', () => {
+      if (isScrubbing) return; // Do not overwrite slider while user is dragging
       const cur = audio.currentTime;
       const dur = audio.duration || 0;
       els.timeCurrent.textContent = formatSeconds(cur);
@@ -742,19 +765,36 @@
     }
 
     els.btnSkipBack.addEventListener('click', () => {
-      audio.currentTime = Math.max(0, audio.currentTime - 15);
+      safeSeek(audio.currentTime - 15);
     });
 
     els.btnSkipFwd.addEventListener('click', () => {
-      audio.currentTime = Math.min(audio.duration || Infinity, audio.currentTime + 15);
+      safeSeek(audio.currentTime + 15);
     });
 
+    // Scrubber: show preview during drag, seek only on commit to prevent stream thrashing
     els.scrubber.addEventListener('input', () => {
+      isScrubbing = true;
       const dur = audio.duration || 0;
       if (dur > 0) {
-        audio.currentTime = (els.scrubber.value / 100) * dur;
+        const previewTime = (parseFloat(els.scrubber.value) / 100) * dur;
+        els.timeCurrent.textContent = formatSeconds(previewTime);
       }
     });
+
+    const commitScrub = () => {
+      if (!isScrubbing) return;
+      const dur = audio.duration || 0;
+      if (dur > 0) {
+        const target = (parseFloat(els.scrubber.value) / 100) * dur;
+        safeSeek(target);
+      }
+      setTimeout(() => { isScrubbing = false; }, 150);
+    };
+
+    els.scrubber.addEventListener('change', commitScrub);
+    els.scrubber.addEventListener('mouseup', commitScrub);
+    els.scrubber.addEventListener('touchend', commitScrub);
 
     // Speed selector
     els.speedBtns.forEach(btn => {
@@ -846,21 +886,32 @@
     state.currentMediaUrl = media_url;
     const targetTime = Math.max(0, start_sec || 0);
 
+    function performSeek(sec) {
+      if (sec < 0) return;
+      const doSeek = () => {
+        try {
+          audio.currentTime = sec;
+        } catch (e) {
+          console.warn('Seek error:', e);
+        }
+      };
+      if (audio.readyState >= 2) {
+        doSeek();
+      } else {
+        audio.addEventListener('canplay', doSeek, { once: true });
+        audio.addEventListener('loadeddata', doSeek, { once: true });
+      }
+    }
+
     if (isDifferentSource) {
       audio.src = media_url;
       audio.playbackRate = state.playbackSpeed;
 
       if (targetTime > 0) {
-        audio.addEventListener('loadedmetadata', () => {
-          try {
-            audio.currentTime = targetTime;
-          } catch (e) {
-            console.warn('Seek error on load:', e);
-          }
-        }, { once: true });
+        performSeek(targetTime);
       }
 
-      // CRITICAL: Call audio.play() synchronously directly inside the user gesture
+      // Call audio.play() synchronously directly inside the user gesture
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.catch(e => {
@@ -868,11 +919,7 @@
         });
       }
     } else {
-      try {
-        audio.currentTime = targetTime;
-      } catch (e) {
-        console.warn('Seek error:', e);
-      }
+      performSeek(targetTime);
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.catch(e => console.warn('Play error:', e));
@@ -1018,6 +1065,27 @@
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
+
+  window.resetDeeperDhammaCache = async function () {
+    try {
+      if (window.indexedDB && window.indexedDB.databases) {
+        const dbs = await window.indexedDB.databases();
+        for (const db of dbs) {
+          if (db.name && db.name.includes('dhamma')) {
+            window.indexedDB.deleteDatabase(db.name);
+          }
+        }
+      } else {
+        window.indexedDB.deleteDatabase('dhamma_web_v1');
+      }
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.reload();
+    } catch (e) {
+      console.warn('Cache clear error:', e);
+      window.location.reload();
+    }
+  };
 
   // Start app on DOMContentLoaded
   if (document.readyState === 'loading') {

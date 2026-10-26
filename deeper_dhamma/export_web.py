@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 import sys
 import urllib.request
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -154,7 +155,7 @@ def export_static_site(output_dir: Path | str = "dist") -> Path:
     out_path.mkdir(parents=True, exist_ok=True)
 
     today = datetime.now()
-    version_int = int(today.strftime("%Y%m%d"))
+    version_int = int(time.time())
     date_str = today.strftime("%Y-%m-%d")
 
     print("\n" + "=" * 80)

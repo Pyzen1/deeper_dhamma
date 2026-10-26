@@ -66,7 +66,12 @@ def create_app() -> Bottle:
             return "Web UI template missing."
         with open(index_file, "r", encoding="utf-8") as f:
             html = f.read()
-        return HTTPResponse(body=html, status=200, headers={"Content-Type": "text/html; charset=utf-8"})
+        from bottle import SimpleTemplate
+        rendered = SimpleTemplate(html).render(
+            db_version=int(time.time()),
+            build_date=time.strftime("%Y-%m-%d"),
+        )
+        return HTTPResponse(body=rendered, status=200, headers={"Content-Type": "text/html; charset=utf-8"})
 
     @app.route("/api/search")
     def api_search():
