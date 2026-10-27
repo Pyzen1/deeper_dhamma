@@ -19,6 +19,9 @@
     stats: null,
     teachers: {},
     catalog: [],
+    currentFilteredTalks: [],
+    dateFilterMode: 'year',
+    archiveCancelRequested: false,
   };
 
   // ==========================================================================
@@ -48,6 +51,35 @@
     yearFilter: document.getElementById('year-filter-select'),
     browseTeacherFilter: document.getElementById('browse-teacher-filter-select'),
     browseYearFilter: document.getElementById('browse-year-filter-select'),
+    btnModeYear: document.getElementById('btn-mode-year'),
+    btnModeRange: document.getElementById('btn-mode-range'),
+    dateRangeInputs: document.getElementById('date-range-inputs'),
+    startDateInput: document.getElementById('start-date-input'),
+    endDateInput: document.getElementById('end-date-input'),
+    sortOrderSelect: document.getElementById('sort-order-select'),
+    resetFiltersBtn: document.getElementById('reset-filters-btn'),
+
+    // Search Actions & Archive Buttons
+    searchActionsBar: document.getElementById('search-actions-bar'),
+    filteredArchiveDropdownWrapper: document.getElementById('filtered-archive-dropdown-wrapper'),
+    btnDownloadFilteredArchive: document.getElementById('btn-download-filtered-archive'),
+    filteredArchiveCount: document.getElementById('filtered-archive-count'),
+    allArchiveDropdownWrapper: document.getElementById('all-archive-dropdown-wrapper'),
+    btnDownloadAllArchive: document.getElementById('btn-download-all-archive'),
+
+    // Single Talk Dropdown in Reader View
+    singleTalkDropdownWrapper: document.getElementById('single-talk-dropdown-wrapper'),
+    drawerDownloadBtn: document.getElementById('drawer-download-btn'),
+
+    // Archive Progress Modal
+    archiveProgressModal: document.getElementById('archive-progress-modal'),
+    archiveModalTitle: document.getElementById('archive-modal-title'),
+    archiveModalSubtitle: document.getElementById('archive-modal-subtitle'),
+    archiveProgressBar: document.getElementById('archive-progress-bar'),
+    archiveProgressPercent: document.getElementById('archive-progress-percent'),
+    archiveProgressCount: document.getElementById('archive-progress-count'),
+    archiveModalCurrentItem: document.getElementById('archive-modal-current-item'),
+    archiveCancelBtn: document.getElementById('archive-cancel-btn'),
     
     // Stats & Tabs
     statEpisodes: document.getElementById('stat-episodes'),
@@ -356,9 +388,567 @@
           }
         });
       }
+
+      if (els.btnDownloadAllArchive && data.transcribed_episodes) {
+        els.btnDownloadAllArchive.innerHTML = `📦 Download All Transcripts (${data.transcribed_episodes}) ▾`;
+      }
     } catch (err) {
       console.error('Failed to load archive stats:', err);
     }
+  }
+
+  // ==========================================================================
+  // Client-Side Zero-Storage PKZIP Engine (SimpleZipWriter)
+  // ==========================================================================
+
+  class SimpleZipWriter {
+    constructor() {
+      this.files = [];
+    }
+
+    addFile(filename, content) {
+      const data = typeof content === 'string' ? new TextEncoder().encode(content) : content;
+      this.files.push({ filename, data });
+    }
+
+    static crcTable = (() => {
+      const t = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) {
+          c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
+        }
+        t[i] = c;
+      }
+      return t;
+    })();
+
+    static crc32(buf) {
+      let crc = 0xFFFFFFFF;
+      const table = SimpleZipWriter.crcTable;
+      for (let i = 0; i < buf.length; i++) {
+        crc = (crc >>> 8) ^ table[(crc ^ buf[i]) & 0xFF];
+      }
+      return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    static async deflateBytes(bytes) {
+      if (typeof CompressionStream !== 'undefined') {
+        try {
+          const cs = new CompressionStream('deflate-raw');
+          const writer = cs.writable.getWriter();
+          writer.write(bytes);
+          writer.close();
+          const res = await new Response(cs.readable).arrayBuffer();
+          return new Uint8Array(res);
+        } catch (_) {}
+      }
+      return null;
+    }
+
+    async buildBlob() {
+      const localHeaders = [];
+      const centralDirs = [];
+      let offset = 0;
+
+      const now = new Date();
+      const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xFFFF;
+      const dosDate = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xFFFF;
+
+      for (const file of this.files) {
+        const nameBytes = new TextEncoder().encode(file.filename);
+        const crc = SimpleZipWriter.crc32(file.data);
+        const uncompressedSize = file.data.length;
+
+        const deflated = await SimpleZipWriter.deflateBytes(file.data);
+        const compressionMethod = deflated ? 8 : 0;
+        const fileBytes = deflated || file.data;
+        const compressedSize = fileBytes.length;
+
+        // Local file header (30 bytes + name + data)
+        const lh = new Uint8Array(30 + nameBytes.length + compressedSize);
+        const lhView = new DataView(lh.buffer);
+
+        lhView.setUint32(0, 0x04034b50, true);
+        lhView.setUint16(4, 20, true);
+        lhView.setUint16(6, 0x0800, true); // UTF-8 language encoding flag
+        lhView.setUint16(8, compressionMethod, true);
+        lhView.setUint16(10, dosTime, true);
+        lhView.setUint16(12, dosDate, true);
+        lhView.setUint32(14, crc, true);
+        lhView.setUint32(18, compressedSize, true);
+        lhView.setUint32(22, uncompressedSize, true);
+        lhView.setUint16(26, nameBytes.length, true);
+        lhView.setUint16(28, 0, true);
+
+        lh.set(nameBytes, 30);
+        lh.set(fileBytes, 30 + nameBytes.length);
+        localHeaders.push(lh);
+
+        // Central directory header (46 bytes + name)
+        const cd = new Uint8Array(46 + nameBytes.length);
+        const cdView = new DataView(cd.buffer);
+
+        cdView.setUint32(0, 0x02014b50, true);
+        cdView.setUint16(4, 20, true);
+        cdView.setUint16(6, 20, true);
+        cdView.setUint16(8, 0x0800, true);
+        cdView.setUint16(10, compressionMethod, true);
+        cdView.setUint16(12, dosTime, true);
+        cdView.setUint16(14, dosDate, true);
+        cdView.setUint32(16, crc, true);
+        cdView.setUint32(20, compressedSize, true);
+        cdView.setUint32(24, uncompressedSize, true);
+        cdView.setUint16(28, nameBytes.length, true);
+        cdView.setUint16(30, 0, true);
+        cdView.setUint16(32, 0, true);
+        cdView.setUint16(34, 0, true);
+        cdView.setUint16(36, 0, true);
+        cdView.setUint32(38, 0, true);
+        cdView.setUint32(42, offset, true);
+
+        cd.set(nameBytes, 46);
+        centralDirs.push(cd);
+
+        offset += lh.length;
+      }
+
+      const cdOffset = offset;
+      let cdTotalSize = 0;
+      centralDirs.forEach(cd => cdTotalSize += cd.length);
+
+      // End of central directory record (22 bytes)
+      const eocd = new Uint8Array(22);
+      const eocdView = new DataView(eocd.buffer);
+
+      eocdView.setUint32(0, 0x06054b50, true);
+      eocdView.setUint16(4, 0, true);
+      eocdView.setUint16(6, 0, true);
+      eocdView.setUint16(8, this.files.length, true);
+      eocdView.setUint16(10, this.files.length, true);
+      eocdView.setUint32(12, cdTotalSize, true);
+      eocdView.setUint32(16, cdOffset, true);
+      eocdView.setUint16(20, 0, true);
+
+      return new Blob([...localHeaders, ...centralDirs, eocd], { type: 'application/zip' });
+    }
+  }
+
+  // ==========================================================================
+  // Client-Side On-The-Fly Transcript Exporter (Zero Storage)
+  // ==========================================================================
+
+  const TranscriptExporter = {
+    formatTimestampHms(totalSeconds) {
+      const s = Math.max(0, Math.floor(totalSeconds || 0));
+      const hours = Math.floor(s / 3600);
+      const minutes = Math.floor((s % 3600) / 60);
+      const seconds = s % 60;
+      const pad = (n) => String(n).padStart(2, '0');
+      if (hours > 0) {
+        return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+      }
+      return `${pad(minutes)}:${pad(seconds)}`;
+    },
+
+    formatTimestampSrt(totalSeconds) {
+      const s = Math.max(0, totalSeconds || 0);
+      const hours = Math.floor(s / 3600);
+      const minutes = Math.floor((s % 3600) / 60);
+      const seconds = Math.floor(s % 60);
+      const millis = Math.floor((s - Math.floor(s)) * 1000);
+      const pad = (n, len = 2) => String(n).padStart(len, '0');
+      return `${pad(hours)}:${pad(minutes)}:${pad(seconds)},${pad(millis, 3)}`;
+    },
+
+    formatTimestampVtt(totalSeconds) {
+      const s = Math.max(0, totalSeconds || 0);
+      const hours = Math.floor(s / 3600);
+      const minutes = Math.floor((s % 3600) / 60);
+      const seconds = Math.floor(s % 60);
+      const millis = Math.floor((s - Math.floor(s)) * 1000);
+      const pad = (n, len = 2) => String(n).padStart(len, '0');
+      return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}.${pad(millis, 3)}`;
+    },
+
+    sanitizeSlug(text) {
+      if (!text) return 'talk';
+      return text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .substring(0, 60);
+    },
+
+    getFilename(ep, ext) {
+      const dateStr = ep.date || (ep.year ? `${ep.year}-01-01` : '2023-01-01');
+      const cleanDate = dateStr.includes('-') ? dateStr : `${dateStr}-01-01`;
+      const slug = this.sanitizeSlug(ep.title || ep.id);
+      return `${cleanDate}_${slug}_transcript.${ext}`;
+    },
+
+    toMarkdown(ep) {
+      const segments = ep.segments || [];
+      const teacher = ep.primary_display || ep.teacher || 'BSWA Monastic';
+      const durHms = this.formatTimestampHms(ep.duration_sec || 0);
+      const streamLink = ep.media_url ? `[Stream on Podbean](${ep.media_url})` : 'N/A';
+
+      const lines = [
+        `# ${ep.title}`,
+        `- **Date**: ${ep.date || ep.year || 'Unknown'}`,
+        `- **Primary Teacher**: ${teacher}`,
+        `- **Audio Stream**: ${streamLink}`,
+        `- **Duration**: ${durHms} (${Math.round(ep.duration_sec || 0)}s)`,
+        '',
+        '---',
+        '',
+      ];
+
+      segments.forEach((seg) => {
+        const ts = this.formatTimestampHms(seg.start_sec);
+        const spk = seg.speaker_display || teacher;
+        lines.push(`### [${ts}] ${spk}`);
+        lines.push(seg.text || '');
+        lines.push('');
+      });
+
+      return lines.join('\n');
+    },
+
+    toPlainText(ep) {
+      const segments = ep.segments || [];
+      const teacher = ep.primary_display || ep.teacher || 'BSWA Monastic';
+      const durHms = this.formatTimestampHms(ep.duration_sec || 0);
+
+      const lines = [
+        `Title: ${ep.title}`,
+        `Date: ${ep.date || ep.year || 'Unknown'}`,
+        `Teacher: ${teacher}`,
+        `Duration: ${durHms}`,
+        `Audio: ${ep.media_url || 'N/A'}`,
+        '',
+        '================================================================================',
+        '',
+      ];
+
+      segments.forEach((seg) => {
+        const ts = this.formatTimestampHms(seg.start_sec);
+        const spk = seg.speaker_display || teacher;
+        lines.push(`[${ts}] ${spk}:`);
+        lines.push(seg.text || '');
+        lines.push('');
+      });
+
+      return lines.join('\n');
+    },
+
+    toSrt(ep) {
+      const segments = ep.segments || [];
+      const teacher = ep.primary_display || ep.teacher || 'BSWA Monastic';
+      const lines = [];
+
+      segments.forEach((seg, idx) => {
+        const startStr = this.formatTimestampSrt(seg.start_sec);
+        const endStr = this.formatTimestampSrt(seg.end_sec);
+        const spk = seg.speaker_display || teacher;
+        lines.push(String(idx + 1));
+        lines.push(`${startStr} --> ${endStr}`);
+        lines.push(`[${spk}] ${seg.text || ''}`);
+        lines.push('');
+      });
+
+      return lines.join('\n');
+    },
+
+    toVtt(ep) {
+      const segments = ep.segments || [];
+      const teacher = ep.primary_display || ep.teacher || 'BSWA Monastic';
+      const lines = [
+        'WEBVTT',
+        `NOTE Title: ${ep.title}`,
+        `NOTE Speaker: ${teacher}`,
+        `NOTE Date: ${ep.date || ep.year || ''}`,
+        '',
+      ];
+
+      segments.forEach((seg) => {
+        const startStr = this.formatTimestampVtt(seg.start_sec);
+        const endStr = this.formatTimestampVtt(seg.end_sec);
+        const spk = seg.speaker_display || teacher;
+        lines.push(`${startStr} --> ${endStr}`);
+        lines.push(`<v ${spk}>${seg.text || ''}`);
+        lines.push('');
+      });
+
+      return lines.join('\n');
+    },
+
+    toJson(ep) {
+      return JSON.stringify(ep, null, 2);
+    },
+
+    triggerDownload(filename, mimeType, content) {
+      const blob = typeof content === 'string'
+        ? new Blob([content], { type: mimeType })
+        : (content instanceof Blob ? content : new Blob([content], { type: mimeType }));
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    },
+
+    async downloadSingle(epOrId, format = 'md') {
+      let ep = epOrId;
+      if (typeof epOrId === 'string' || !epOrId.segments) {
+        const epId = typeof epOrId === 'string' ? epOrId : (epOrId.id || epOrId.episode_id);
+        try {
+          ep = await dbService.getEpisode(epId);
+        } catch (err) {
+          console.error(`Failed to load transcript for ${epId}:`, err);
+        }
+      }
+      if (!ep || !ep.segments || ep.segments.length === 0) {
+        alert('This episode has not yet been transcribed.');
+        return;
+      }
+
+      let content = '';
+      let mime = 'text/plain; charset=utf-8';
+      let ext = format;
+
+      switch (format) {
+        case 'md':
+          content = this.toMarkdown(ep);
+          mime = 'text/markdown; charset=utf-8';
+          break;
+        case 'txt':
+          content = this.toPlainText(ep);
+          mime = 'text/plain; charset=utf-8';
+          break;
+        case 'srt':
+          content = this.toSrt(ep);
+          mime = 'application/x-subrip; charset=utf-8';
+          break;
+        case 'vtt':
+          content = this.toVtt(ep);
+          mime = 'text/vtt; charset=utf-8';
+          break;
+        case 'json':
+          content = this.toJson(ep);
+          mime = 'application/json; charset=utf-8';
+          break;
+        default:
+          content = this.toMarkdown(ep);
+          ext = 'md';
+      }
+
+      const filename = this.getFilename(ep, ext);
+      this.triggerDownload(filename, mime, content);
+    }
+  };
+
+  // ==========================================================================
+  // Archive Compilation Queue & Progress Synchronization
+  // ==========================================================================
+
+  async function compileAndDownloadArchive(episodesList, format = 'md', archiveBasename = 'transcripts') {
+    if (!episodesList || episodesList.length === 0) {
+      alert('No transcribed talks found matching the selected filters.');
+      return;
+    }
+
+    state.archiveCancelRequested = false;
+
+    // Show modal
+    if (els.archiveProgressModal) {
+      els.archiveProgressModal.style.display = 'flex';
+      els.archiveProgressBar.style.width = '0%';
+      els.archiveProgressBar.classList.remove('complete');
+      els.archiveProgressPercent.textContent = '0%';
+      els.archiveProgressCount.textContent = `0 of ${episodesList.length}`;
+      els.archiveModalTitle.textContent = 'Compiling Transcript Archive';
+      els.archiveModalSubtitle.textContent = `Packaging ${episodesList.length} talks into ${format.toUpperCase()} (.zip)...`;
+      els.archiveModalCurrentItem.textContent = 'Initializing in-memory zip archive...';
+    }
+
+    const zip = new SimpleZipWriter();
+    let processedCount = 0;
+
+    for (let i = 0; i < episodesList.length; i++) {
+      if (state.archiveCancelRequested) {
+        if (els.archiveProgressModal) els.archiveProgressModal.style.display = 'none';
+        return;
+      }
+
+      const summary = episodesList[i];
+      const epId = summary.id || summary.episode_id;
+      if (els.archiveModalCurrentItem) {
+        els.archiveModalCurrentItem.textContent = `[${i + 1}/${episodesList.length}] Compiling: "${summary.title}"...`;
+      }
+
+      let ep = summary;
+      if (!ep.segments || ep.segments.length === 0) {
+        try {
+          ep = await dbService.getEpisode(epId);
+        } catch (e) {
+          console.warn(`Could not load segments for ${epId}:`, e);
+        }
+      }
+
+      if (ep && ep.segments && ep.segments.length > 0) {
+        let content = '';
+        switch (format) {
+          case 'md': content = TranscriptExporter.toMarkdown(ep); break;
+          case 'txt': content = TranscriptExporter.toPlainText(ep); break;
+          case 'srt': content = TranscriptExporter.toSrt(ep); break;
+          case 'vtt': content = TranscriptExporter.toVtt(ep); break;
+          case 'json': content = TranscriptExporter.toJson(ep); break;
+          default: content = TranscriptExporter.toMarkdown(ep);
+        }
+
+        const filename = TranscriptExporter.getFilename(ep, format);
+        zip.addFile(filename, content);
+        processedCount++;
+      }
+
+      // Update progress
+      const pct = Math.round(((i + 1) / episodesList.length) * 100);
+      if (els.archiveProgressBar) els.archiveProgressBar.style.width = `${pct}%`;
+      if (els.archiveProgressPercent) els.archiveProgressPercent.textContent = `${pct}%`;
+      if (els.archiveProgressCount) els.archiveProgressCount.textContent = `${i + 1} of ${episodesList.length}`;
+
+      // Yield execution to allow DOM render
+      await new Promise(r => setTimeout(r, 0));
+    }
+
+    if (processedCount === 0) {
+      if (els.archiveProgressModal) els.archiveProgressModal.style.display = 'none';
+      alert('None of the selected episodes have transcripts available yet.');
+      return;
+    }
+
+    if (els.archiveModalCurrentItem) {
+      els.archiveModalCurrentItem.textContent = 'Finalizing compressed ZIP file...';
+    }
+    if (els.archiveProgressBar) {
+      els.archiveProgressBar.classList.add('complete');
+    }
+
+    const zipBlob = await zip.buildBlob();
+    const today = new Date().toISOString().split('T')[0];
+    const zipFilename = `${today}_deeper_dhamma_${archiveBasename}_${format}.zip`;
+
+    TranscriptExporter.triggerDownload(zipFilename, 'application/zip', zipBlob);
+
+    if (els.archiveModalTitle) els.archiveModalTitle.textContent = '✓ Archive Ready!';
+    if (els.archiveModalSubtitle) els.archiveModalSubtitle.textContent = `Downloaded ${processedCount} transcripts in ${format.toUpperCase()} format.`;
+    if (els.archiveModalCurrentItem) els.archiveModalCurrentItem.textContent = `File: ${zipFilename}`;
+
+    setTimeout(() => {
+      if (els.archiveProgressModal) els.archiveProgressModal.style.display = 'none';
+    }, 1800);
+  }
+
+  async function downloadAllArchive(format) {
+    try {
+      const data = await dbService.getEpisodes({
+        transcribedOnly: true,
+        limit: 10000,
+      });
+      const episodes = data.episodes || [];
+      if (!episodes.length) {
+        alert('No transcribed episodes found in the database.');
+        return;
+      }
+      await compileAndDownloadArchive(episodes, format, 'all_transcripts');
+    } catch (err) {
+      console.error('Failed to load all episodes:', err);
+      alert('Failed to load archive catalog for download.');
+    }
+  }
+
+  function setupDownloadDropdowns() {
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.download-dropdown-btn');
+      if (btn) {
+        e.stopPropagation();
+        const wrapper = btn.closest('.download-dropdown-wrapper');
+        if (!wrapper) return;
+        const isOpen = wrapper.classList.contains('open');
+
+        // Close all other dropdowns
+        document.querySelectorAll('.download-dropdown-wrapper.open').forEach(w => {
+          if (w !== wrapper) w.classList.remove('open');
+        });
+
+        wrapper.classList.toggle('open', !isOpen);
+        return;
+      }
+
+      const opt = e.target.closest('.download-option');
+      if (opt) {
+        e.stopPropagation();
+        const format = opt.dataset.format;
+        const wrapper = opt.closest('.download-dropdown-wrapper');
+        if (wrapper) wrapper.classList.remove('open');
+
+        if (wrapper && wrapper.id === 'filtered-archive-dropdown-wrapper') {
+          const talks = state.currentFilteredTalks || [];
+          compileAndDownloadArchive(talks, format, 'filtered_transcripts');
+        } else if (wrapper && wrapper.id === 'all-archive-dropdown-wrapper') {
+          downloadAllArchive(format);
+        } else if (wrapper && wrapper.id === 'single-talk-dropdown-wrapper') {
+          if (state.currentEpisode) {
+            TranscriptExporter.downloadSingle(state.currentEpisode, format);
+          }
+        } else if (opt.dataset.action === 'download-card-format') {
+          const epId = opt.dataset.epId;
+          TranscriptExporter.downloadSingle(epId, format);
+        }
+        return;
+      }
+
+      // Click outside closes open dropdowns
+      document.querySelectorAll('.download-dropdown-wrapper.open').forEach(w => {
+        w.classList.remove('open');
+      });
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.download-dropdown-wrapper.open').forEach(w => {
+          w.classList.remove('open');
+        });
+      }
+    });
+  }
+
+  function attachCardEventListeners(container, episodes) {
+    container.querySelectorAll('[data-action="play-ep-start"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const epId = btn.dataset.epId;
+        const ep = episodes.find(e => (e.id || e.episode_id) === epId);
+        if (ep) {
+          playAudioSegment({
+            media_url: ep.media_url,
+            title: ep.title,
+            teacher: ep.teacher || ep.primary_display,
+            start_sec: 0,
+          });
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-action="view-transcript"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const epId = btn.dataset.epId || btn.dataset.episodeId;
+        openTranscriptDrawer(epId);
+      });
+    });
   }
 
   // ==========================================================================
@@ -394,6 +984,74 @@
     els.yearFilter.addEventListener('change', () => {
       executeSearch(els.searchInput.value.trim());
     });
+
+    if (els.btnModeYear && els.btnModeRange) {
+      els.btnModeYear.addEventListener('click', () => {
+        state.dateFilterMode = 'year';
+        els.btnModeYear.classList.add('active');
+        els.btnModeRange.classList.remove('active');
+        els.yearFilter.style.display = 'inline-block';
+        els.dateRangeInputs.style.display = 'none';
+        executeSearch(els.searchInput.value.trim());
+      });
+
+      els.btnModeRange.addEventListener('click', () => {
+        state.dateFilterMode = 'range';
+        els.btnModeRange.classList.add('active');
+        els.btnModeYear.classList.remove('active');
+        els.yearFilter.style.display = 'none';
+        els.dateRangeInputs.style.display = 'inline-flex';
+        executeSearch(els.searchInput.value.trim());
+      });
+    }
+
+    if (els.startDateInput) {
+      els.startDateInput.addEventListener('change', () => {
+        executeSearch(els.searchInput.value.trim());
+      });
+    }
+
+    if (els.endDateInput) {
+      els.endDateInput.addEventListener('change', () => {
+        executeSearch(els.searchInput.value.trim());
+      });
+    }
+
+    if (els.sortOrderSelect) {
+      els.sortOrderSelect.addEventListener('change', () => {
+        executeSearch(els.searchInput.value.trim());
+      });
+    }
+
+    if (els.resetFiltersBtn) {
+      els.resetFiltersBtn.addEventListener('click', () => {
+        els.searchInput.value = '';
+        els.clearSearchBtn.style.display = 'none';
+        els.exactCheckbox.checked = false;
+        els.teacherFilter.value = '';
+        els.yearFilter.value = '';
+        if (els.startDateInput) els.startDateInput.value = '';
+        if (els.endDateInput) els.endDateInput.value = '';
+        if (els.sortOrderSelect) els.sortOrderSelect.value = 'date_desc';
+        state.dateFilterMode = 'year';
+        if (els.btnModeYear) els.btnModeYear.classList.add('active');
+        if (els.btnModeRange) els.btnModeRange.classList.remove('active');
+        if (els.yearFilter) els.yearFilter.style.display = 'inline-block';
+        if (els.dateRangeInputs) els.dateRangeInputs.style.display = 'none';
+        executeSearch('');
+      });
+    }
+
+    if (els.archiveCancelBtn) {
+      els.archiveCancelBtn.addEventListener('click', () => {
+        state.archiveCancelRequested = true;
+        if (els.archiveModalCurrentItem) {
+          els.archiveModalCurrentItem.textContent = 'Cancelling download...';
+        }
+      });
+    }
+
+    setupDownloadDropdowns();
 
     if (els.browseTeacherFilter) {
       els.browseTeacherFilter.addEventListener('change', () => {
@@ -484,46 +1142,222 @@
 
   async function executeSearch(query) {
     state.currentQuery = query;
+    const teacherVal = (els.teacherFilter && els.teacherFilter.value) || '';
+    const yearVal = (els.yearFilter && els.yearFilter.value) || '';
+    const startDateVal = (els.startDateInput && els.startDateInput.value) || '';
+    const endDateVal = (els.endDateInput && els.endDateInput.value) || '';
+    const sortVal = (els.sortOrderSelect && els.sortOrderSelect.value) || 'date_desc';
 
-    if (!query) {
+    const hasFilters = Boolean(
+      teacherVal ||
+      (state.dateFilterMode === 'year' && yearVal) ||
+      (state.dateFilterMode === 'range' && (startDateVal || endDateVal)) ||
+      sortVal !== 'date_desc'
+    );
+
+    // If no text query and no filters, show empty state
+    if (!query && !hasFilters) {
       els.searchEmptyState.style.display = 'block';
       els.searchResultsList.style.display = 'none';
       els.searchMetaBar.style.display = 'none';
       els.searchCountBadge.textContent = '0';
+      state.currentFilteredTalks = [];
+      if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = '0';
+      if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = true;
       return;
     }
 
     // Make sure we are on search tab
     switchTab('search-view');
 
-    const searchOpts = {
-      limit: 40,
-      exact: els.exactCheckbox.checked,
-    };
+    // Case 1: Search query provided (FTS search)
+    if (query) {
+      const searchOpts = {
+        limit: 50,
+        exact: els.exactCheckbox.checked,
+        sort: sortVal,
+      };
 
-    if (els.teacherFilter.value) searchOpts.teacher = els.teacherFilter.value;
-    if (els.yearFilter.value) searchOpts.year = els.yearFilter.value;
+      if (teacherVal) searchOpts.teacher = teacherVal;
+      if (state.dateFilterMode === 'year' && yearVal) searchOpts.year = yearVal;
+      if (state.dateFilterMode === 'range') {
+        if (startDateVal) searchOpts.startDate = startDateVal;
+        if (endDateVal) searchOpts.endDate = endDateVal;
+      }
 
-    try {
-      const data = await dbService.search(query, searchOpts);
-      renderSearchResults(data);
-    } catch (err) {
-      console.error('Search failed:', err);
+      try {
+        const data = await dbService.search(query, searchOpts);
+        renderSearchResults(data);
+      } catch (err) {
+        console.error('Search failed:', err);
+      }
+      return;
     }
+
+    // Case 2: No search query, but filters active (Browse by Filter)
+    try {
+      const filterOpts = {
+        transcribedOnly: true,
+        limit: 100,
+        sort: sortVal,
+      };
+      if (teacherVal) filterOpts.teacher = teacherVal;
+      if (state.dateFilterMode === 'year' && yearVal) filterOpts.year = yearVal;
+      if (state.dateFilterMode === 'range') {
+        if (startDateVal) filterOpts.startDate = startDateVal;
+        if (endDateVal) filterOpts.endDate = endDateVal;
+      }
+
+      const data = await dbService.getEpisodes(filterOpts);
+      renderFilterResults(data);
+    } catch (err) {
+      console.error('Filter search failed:', err);
+    }
+  }
+
+  function renderFilterResults(data) {
+    const episodes = data.episodes || [];
+    state.currentFilteredTalks = episodes;
+
+    els.searchEmptyState.style.display = 'none';
+    els.searchResultsList.style.display = 'flex';
+    els.searchMetaBar.style.display = 'flex';
+    els.searchCountBadge.textContent = String(episodes.length);
+
+    els.queryTierBadge.textContent = 'Filtered Catalog';
+    els.queryMetaText.textContent = `Showing ${episodes.length} talk${episodes.length === 1 ? '' : 's'} matching active filters`;
+
+    if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = String(episodes.length);
+    if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = episodes.length === 0;
+
+    if (episodes.length === 0) {
+      els.searchResultsList.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">🔍</div>
+          <h2>No talks match the selected filters</h2>
+          <p>Try clearing or expanding your date range or selecting "All Monastics".</p>
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    episodes.forEach(ep => {
+      const durMin = Math.round((ep.duration_sec || 0) / 60);
+      html += `
+        <div class="episode-card" style="margin-bottom: 0.75rem;">
+          <div>
+            <div class="result-meta-line" style="margin-bottom: 0.5rem;">
+              ${renderTeacherBadgesHtml(ep)}
+              <span>📅 ${escapeHtml(ep.date || '')}</span>
+              <span>• ⏱️ ${durMin} mins</span>
+            </div>
+            <h3 class="episode-title">${escapeHtml(ep.title)}</h3>
+          </div>
+
+          <div class="episode-footer">
+            <button type="button" class="btn-primary" data-action="play-ep-start" data-ep-id="${escapeHtml(ep.id)}">
+              ▶ Play Talk
+            </button>
+            <button type="button" class="btn-secondary" data-action="view-transcript" data-ep-id="${escapeHtml(ep.id)}">
+              📜 Transcript
+            </button>
+            <div class="download-dropdown-wrapper">
+              <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
+                📥 Download ▾
+              </button>
+              <div class="download-dropdown-menu">
+                <div class="dropdown-menu-header">Export Transcript</div>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown</span>
+                    <span class="download-opt-desc">Formatted notes (.md)</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text</span>
+                    <span class="download-opt-desc">Clean transcript text (.txt)</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles</span>
+                    <span class="download-opt-desc">For VLC / media players (.srt)</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions</span>
+                    <span class="download-opt-desc">Web caption track (.vtt)</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data</span>
+                    <span class="download-opt-desc">Structured turn array (.json)</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
+            ${ep.permalink ? `
+              <a href="${getPodbeanUrl(ep.permalink)}" target="_blank" rel="noopener noreferrer" class="link-btn">
+                ↗ Podbean
+              </a>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    });
+
+    els.searchResultsList.innerHTML = html;
+    attachCardEventListeners(els.searchResultsList, episodes);
   }
 
   function renderSearchResults(data) {
     const { results, count, meta, elapsed_ms, query } = data;
+
+    // Extract distinct episodes for archive export
+    const distinctEpisodes = [];
+    const seenIds = new Set();
+    results.forEach(r => {
+      if (r.episode_id && !seenIds.has(r.episode_id)) {
+        seenIds.add(r.episode_id);
+        distinctEpisodes.push({
+          id: r.episode_id,
+          title: r.title,
+          date: r.date,
+          teacher: r.teacher,
+          media_url: r.media_url,
+          duration_sec: r.duration_sec,
+        });
+      }
+    });
+
+    state.currentFilteredTalks = distinctEpisodes;
 
     els.searchEmptyState.style.display = 'none';
     els.searchResultsList.style.display = 'flex';
     els.searchMetaBar.style.display = 'flex';
     els.searchCountBadge.textContent = String(count);
 
+    if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = String(distinctEpisodes.length);
+    if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = distinctEpisodes.length === 0;
+
     // Meta bar
     const tierDisplay = formatTierName(meta ? meta.tier : 'none');
     els.queryTierBadge.textContent = tierDisplay;
-    els.queryMetaText.textContent = `Found ${count} matching speech segment${count === 1 ? '' : 's'} for "${escapeHtml(query)}" in ${elapsed_ms}ms`;
+    els.queryMetaText.textContent = `Found ${count} matching segment${count === 1 ? '' : 's'} across ${distinctEpisodes.length} talk${distinctEpisodes.length === 1 ? '' : 's'} in ${elapsed_ms}ms`;
 
     if (count === 0) {
       els.searchResultsList.innerHTML = `
@@ -568,6 +1402,54 @@
             <button type="button" class="link-btn" data-action="view-transcript" data-episode-id="${escapeHtml(item.episode_id)}">
               📜 View Full Transcript
             </button>
+            <div class="download-dropdown-wrapper">
+              <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
+                📥 Download ▾
+              </button>
+              <div class="download-dropdown-menu">
+                <div class="dropdown-menu-header">Export Transcript</div>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown</span>
+                    <span class="download-opt-desc">Formatted notes (.md)</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text</span>
+                    <span class="download-opt-desc">Clean transcript text (.txt)</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles</span>
+                    <span class="download-opt-desc">For VLC / media players (.srt)</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions</span>
+                    <span class="download-opt-desc">Web caption track (.vtt)</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data</span>
+                    <span class="download-opt-desc">Structured turn array (.json)</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
             ${item.permalink ? `
               <a href="${getPodbeanUrl(item.permalink)}" target="_blank" rel="noopener noreferrer" class="external-link">
                 ↗ Podbean Page
@@ -655,8 +1537,8 @@
             <div>
               <div class="result-meta-line" style="margin-bottom: 0.5rem;">
                 ${renderTeacherBadgesHtml(ep)}
-                <span>${escapeHtml(ep.date || '')}</span>
-                <span>• ${durMin} mins</span>
+                <span>📅 ${escapeHtml(ep.date || '')}</span>
+                <span>• ⏱️ ${durMin} mins</span>
               </div>
               <h3 class="episode-title">${escapeHtml(ep.title)}</h3>
             </div>
@@ -668,6 +1550,54 @@
               <button type="button" class="btn-secondary" data-action="view-transcript" data-ep-id="${escapeHtml(ep.id)}">
                 📜 Transcript
               </button>
+              <div class="download-dropdown-wrapper">
+                <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
+                  📥 Download ▾
+                </button>
+                <div class="download-dropdown-menu">
+                  <div class="dropdown-menu-header">Export Transcript</div>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="md">
+                    <span class="download-opt-icon">📝</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">Markdown</span>
+                      <span class="download-opt-desc">Formatted notes (.md)</span>
+                    </div>
+                    <span class="download-opt-badge">.md</span>
+                  </button>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="txt">
+                    <span class="download-opt-icon">📄</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">Plain Text</span>
+                      <span class="download-opt-desc">Clean transcript text (.txt)</span>
+                    </div>
+                    <span class="download-opt-badge">.txt</span>
+                  </button>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="srt">
+                    <span class="download-opt-icon">🎬</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">SubRip Subtitles</span>
+                      <span class="download-opt-desc">For VLC / media players (.srt)</span>
+                    </div>
+                    <span class="download-opt-badge">.srt</span>
+                  </button>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="vtt">
+                    <span class="download-opt-icon">🌐</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">WebVTT Captions</span>
+                      <span class="download-opt-desc">Web caption track (.vtt)</span>
+                    </div>
+                    <span class="download-opt-badge">.vtt</span>
+                  </button>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="json">
+                    <span class="download-opt-icon">📊</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">JSON Data</span>
+                      <span class="download-opt-desc">Structured turn array (.json)</span>
+                    </div>
+                    <span class="download-opt-badge">.json</span>
+                  </button>
+                </div>
+              </div>
               ${ep.permalink ? `
                 <a href="${getPodbeanUrl(ep.permalink)}" target="_blank" rel="noopener noreferrer" class="link-btn">
                   ↗ Podbean
@@ -679,28 +1609,7 @@
       });
 
       els.browseGrid.innerHTML = html;
-
-      // Event listeners on cards
-      els.browseGrid.querySelectorAll('[data-action="play-ep-start"]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const epId = btn.dataset.epId;
-          const ep = data.episodes.find(e => e.id === epId);
-          if (ep) {
-            playAudioSegment({
-              media_url: ep.media_url,
-              title: ep.title,
-              teacher: ep.teacher,
-              start_sec: 0,
-            });
-          }
-        });
-      });
-
-      els.browseGrid.querySelectorAll('[data-action="view-transcript"]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          openTranscriptDrawer(btn.dataset.epId);
-        });
-      });
+      attachCardEventListeners(els.browseGrid, data.episodes);
     } catch (err) {
       console.error('Failed to load browse catalog:', err);
     }

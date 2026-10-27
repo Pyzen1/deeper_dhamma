@@ -96,16 +96,142 @@
                 <option value="">All Monastics</option>
               </select>
 
-              <select id="year-filter-select" aria-label="Filter by Year">
-                <option value="">All Years</option>
+              <!-- Date Mode Toggle: Year vs Custom Range -->
+              <div class="date-filter-group" id="date-filter-group">
+                <div class="date-mode-toggle" id="date-mode-toggle">
+                  <button type="button" class="date-mode-btn active" id="btn-mode-year" data-mode="year" title="Filter by single year">Year</button>
+                  <button type="button" class="date-mode-btn" id="btn-mode-range" data-mode="range" title="Filter by custom date range">Date Range</button>
+                </div>
+
+                <select id="year-filter-select" aria-label="Filter by Year">
+                  <option value="">All Years</option>
+                </select>
+
+                <div class="date-range-inputs" id="date-range-inputs" style="display: none;">
+                  <input type="date" id="start-date-input" aria-label="Start Date" title="Start Date (YYYY-MM-DD)">
+                  <span class="date-sep">to</span>
+                  <input type="date" id="end-date-input" aria-label="End Date" title="End Date (YYYY-MM-DD)">
+                </div>
+              </div>
+
+              <select id="sort-order-select" aria-label="Sort order">
+                <option value="date_desc">Newest First</option>
+                <option value="date_asc">Oldest First</option>
+                <option value="duration_desc">Longest Duration</option>
+                <option value="rank">Best Match (Relevance)</option>
               </select>
+
+              <button type="button" id="reset-filters-btn" class="btn-secondary btn-reset-filters" title="Reset all filters">✕ Reset</button>
             </div>
           </div>
         </div>
 
         <div class="results-header" id="search-meta-bar" style="display: none;">
-          <div class="query-meta" id="query-meta-text">Found results</div>
-          <div class="query-tier-badge" id="query-tier-badge">Tier 1: Exact</div>
+          <div class="query-meta-group">
+            <div class="query-meta" id="query-meta-text">Found results</div>
+            <div class="query-tier-badge" id="query-tier-badge">Tier 1: Exact</div>
+          </div>
+          <div class="search-actions-bar" id="search-actions-bar">
+            <!-- Filtered Archive Download Dropdown -->
+            <div class="download-dropdown-wrapper" id="filtered-archive-dropdown-wrapper">
+              <button type="button" class="btn-secondary download-dropdown-btn" id="btn-download-filtered-archive" title="Download all matching transcripts into a ZIP archive">
+                📥 Download Filtered Archive (<span id="filtered-archive-count">0</span>) ▾
+              </button>
+              <div class="download-dropdown-menu" id="filtered-archive-menu">
+                <div class="dropdown-menu-header">Export Filtered Results (.zip)</div>
+                <button type="button" class="download-option" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown Archive</span>
+                    <span class="download-opt-desc">Formatted notes with frontmatter & timestamps</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text Archive</span>
+                    <span class="download-opt-desc">Clean transcript text with turn timings</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles Archive</span>
+                    <span class="download-opt-desc">Standard subtitle cues for VLC & media players</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions Archive</span>
+                    <span class="download-opt-desc">Standard web caption track with speaker cues</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data Archive</span>
+                    <span class="download-opt-desc">Structured transcript objects & turns</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Download All Transcripts Archive Dropdown -->
+            <div class="download-dropdown-wrapper" id="all-archive-dropdown-wrapper">
+              <button type="button" class="btn-primary download-dropdown-btn" id="btn-download-all-archive" title="Download all transcribed talks in the library into a ZIP archive">
+                📦 Download All Transcripts ▾
+              </button>
+              <div class="download-dropdown-menu" id="all-archive-menu">
+                <div class="dropdown-menu-header">Export Complete Library (.zip)</div>
+                <button type="button" class="download-option" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown Archive</span>
+                    <span class="download-opt-desc">All transcribed talks in Markdown</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text Archive</span>
+                    <span class="download-opt-desc">All transcribed talks in plain text</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles Archive</span>
+                    <span class="download-opt-desc">All talks formatted for media players</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions Archive</span>
+                    <span class="download-opt-desc">All talks in WebVTT web captions</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data Archive</span>
+                    <span class="download-opt-desc">Full archive as structured JSON files</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Initial Placeholder State -->
@@ -179,6 +305,54 @@
             <button type="button" class="btn-primary" id="drawer-play-full-btn" title="Play talk from beginning">
               ▶ Play Talk
             </button>
+            <div class="download-dropdown-wrapper" id="single-talk-dropdown-wrapper">
+              <button type="button" class="btn-secondary download-dropdown-btn" id="drawer-download-btn" title="Download transcript in selected format">
+                📥 Download Transcript ▾
+              </button>
+              <div class="download-dropdown-menu" id="drawer-download-menu">
+                <div class="dropdown-menu-header">Export Talk Transcript</div>
+                <button type="button" class="download-option" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown</span>
+                    <span class="download-opt-desc">Notes with frontmatter & timestamps</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text</span>
+                    <span class="download-opt-desc">Clean transcript text with turn timings</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles</span>
+                    <span class="download-opt-desc">For VLC, MPV & media players</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions</span>
+                    <span class="download-opt-desc">Standard web caption cues</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data</span>
+                    <span class="download-opt-desc">Raw structured episode & turn array</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
             <a href="#" target="_blank" rel="noopener noreferrer" class="btn-secondary" id="drawer-podbean-link" title="Open episode on Deeper Dhamma Podbean">
               ↗ Podbean Page
             </a>
@@ -289,6 +463,32 @@
     <!-- Hidden Native Audio Engine -->
     <audio id="native-audio" preload="none"></audio>
   </footer>
+
+  <!-- Archive Compilation Progress Modal -->
+  <div class="archive-modal-backdrop" id="archive-progress-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="archive-modal-title">
+    <div class="archive-modal-card">
+      <div class="archive-modal-header">
+        <div class="archive-modal-icon">📦</div>
+        <div class="archive-modal-headings">
+          <h3 class="archive-modal-title" id="archive-modal-title">Compiling Transcript Archive</h3>
+          <p class="archive-modal-subtitle" id="archive-modal-subtitle">Packaging transcripts into ZIP...</p>
+        </div>
+      </div>
+      <div class="archive-progress-wrapper">
+        <div class="archive-progress-track">
+          <div class="archive-progress-bar" id="archive-progress-bar" style="width: 0%;"></div>
+        </div>
+        <div class="archive-progress-labels">
+          <span class="archive-progress-percent" id="archive-progress-percent">0%</span>
+          <span class="archive-progress-count" id="archive-progress-count">0 of 0</span>
+        </div>
+      </div>
+      <div class="archive-modal-current-item" id="archive-modal-current-item">Preparing archive...</div>
+      <div class="archive-modal-actions">
+        <button type="button" class="btn-secondary" id="archive-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/db_client.js?v={{db_version}}"></script>
   <script src="/static/app.js?v={{db_version}}"></script>

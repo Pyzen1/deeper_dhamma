@@ -228,7 +228,7 @@ function handleGetStats() {
   };
 }
 
-function handleGetEpisodes({ teacher, year, transcribedOnly = true, limit = 50, offset = 0 }) {
+function handleGetEpisodes({ teacher, year, startDate, endDate, sort = 'date_desc', transcribedOnly = true, limit = 50, offset = 0 }) {
   let sql = `
     SELECT id, title, date, year, primary_teacher, primary_display AS teacher, identified_teachers, media_url, permalink, duration_sec, is_transcribed 
     FROM episodes 
@@ -243,13 +243,35 @@ function handleGetEpisodes({ teacher, year, transcribedOnly = true, limit = 50, 
     sql += ' AND year = ?';
     params.push(Number(year));
   }
+  if (startDate) {
+    sql += ' AND date >= ?';
+    params.push(startDate);
+  }
+  if (endDate) {
+    sql += ' AND date <= ?';
+    params.push(endDate);
+  }
   if (teacher) {
     sql += ' AND (primary_display LIKE ? OR id IN (SELECT episode_id FROM episode_teachers et JOIN teachers t ON et.teacher_id = t.id WHERE t.display_name LIKE ?))';
     params.push(`%${teacher}%`, `%${teacher}%`);
   }
 
-  sql += ' ORDER BY date DESC, id DESC LIMIT ? OFFSET ?;';
-  params.push(limit, offset);
+  let orderBy = ' ORDER BY date DESC, id DESC';
+  if (sort === 'date_asc') {
+    orderBy = ' ORDER BY date ASC, id ASC';
+  } else if (sort === 'duration_desc') {
+    orderBy = ' ORDER BY duration_sec DESC, date DESC';
+  } else if (sort === 'duration_asc') {
+    orderBy = ' ORDER BY duration_sec ASC, date ASC';
+  }
+  sql += orderBy;
+
+  if (limit > 0) {
+    sql += ' LIMIT ? OFFSET ?;';
+    params.push(limit, offset);
+  } else {
+    sql += ';';
+  }
 
   const episodes = queryAll(sql, params);
 
@@ -258,6 +280,8 @@ function handleGetEpisodes({ teacher, year, transcribedOnly = true, limit = 50, 
   const countParams = [];
   if (transcribedOnly) countSql += ' AND is_transcribed = 1';
   if (year) { countSql += ' AND year = ?'; countParams.push(Number(year)); }
+  if (startDate) { countSql += ' AND date >= ?'; countParams.push(startDate); }
+  if (endDate) { countSql += ' AND date <= ?'; countParams.push(endDate); }
   if (teacher) {
     countSql += ' AND (primary_display LIKE ? OR id IN (SELECT episode_id FROM episode_teachers et JOIN teachers t ON et.teacher_id = t.id WHERE t.display_name LIKE ?))';
     countParams.push(`%${teacher}%`, `%${teacher}%`);
@@ -289,7 +313,7 @@ function handleGetEpisode(episodeId) {
   };
 }
 
-function handleSearchFTS({ query, exact = false, teacher, year, limit = 30 }) {
+function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDate, sort = 'rank', limit = 30 }) {
   const t0 = performance.now();
   const cleanQuery = (query || '').replace(/\\"/g, '"').trim();
   const words = cleanQuery.match(/[a-zA-Z0-9]+/g) || [];
@@ -379,7 +403,7 @@ function handleSearchFTS({ query, exact = false, teacher, year, limit = 30 }) {
     }
   }
 
-  // Filter in JS by teacher or year if requested
+  // Filter in JS by teacher, year, or date range if requested
   if (teacher) {
     const tf = teacher.toLowerCase();
     results = results.filter((r) => (r.teacher || '').toLowerCase().includes(tf));
@@ -387,6 +411,19 @@ function handleSearchFTS({ query, exact = false, teacher, year, limit = 30 }) {
   if (year) {
     const yStr = String(year);
     results = results.filter((r) => (r.date || '').startsWith(yStr));
+  }
+  if (startDate) {
+    results = results.filter((r) => (r.date || '') >= startDate);
+  }
+  if (endDate) {
+    results = results.filter((r) => (r.date || '') <= endDate);
+  }
+
+  // Sort if requested
+  if (sort === 'date_asc') {
+    results.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.start_sec - b.start_sec);
+  } else if (sort === 'date_desc') {
+    results.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.start_sec - b.start_sec);
   }
 
   const elapsed_ms = Math.round((performance.now() - t0) * 100) / 100;

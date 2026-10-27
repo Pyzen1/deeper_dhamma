@@ -29,6 +29,9 @@ class ApiDatabaseClient {
     });
     if (options.teacher) params.set('teacher', options.teacher);
     if (options.year) params.set('year', options.year);
+    if (options.startDate) params.set('start_date', options.startDate);
+    if (options.endDate) params.set('end_date', options.endDate);
+    if (options.sort) params.set('sort', options.sort);
     const res = await fetch(`/api/search?${params.toString()}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}: Search request failed`);
     return res.json();
@@ -37,10 +40,14 @@ class ApiDatabaseClient {
   async getEpisodes(options = {}) {
     const params = new URLSearchParams({
       transcribed_only: options.transcribedOnly ? '1' : '0',
-      limit: String(options.limit || 60),
+      limit: String(options.limit !== undefined ? options.limit : 60),
     });
     if (options.teacher) params.set('teacher', options.teacher);
     if (options.year) params.set('year', options.year);
+    if (options.startDate) params.set('start_date', options.startDate);
+    if (options.endDate) params.set('end_date', options.endDate);
+    if (options.sort) params.set('sort', options.sort);
+    if (options.offset) params.set('offset', String(options.offset));
     const res = await fetch(`/api/episodes?${params.toString()}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch episodes`);
     return res.json();

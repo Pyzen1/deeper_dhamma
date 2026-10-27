@@ -83,7 +83,10 @@ def create_app() -> Bottle:
         limit = min(int(request.query.get("limit", 30)), 100)
         exact = request.query.get("exact", "0").lower() in ("1", "true", "yes")
         year_filter = request.query.get("year")
+        start_date = request.query.get("start_date")
+        end_date = request.query.get("end_date")
         teacher_filter = request.query.get("teacher")
+        sort_filter = request.query.get("sort")
 
         if not q:
             return json_response({
@@ -105,9 +108,20 @@ def create_app() -> Bottle:
             except ValueError:
                 pass
 
+        if start_date:
+            results = [r for r in results if (r.get("date") or "") >= start_date]
+
+        if end_date:
+            results = [r for r in results if (r.get("date") or "") <= end_date]
+
         if teacher_filter:
             tf = teacher_filter.lower()
             results = [r for r in results if tf in (r.get("teacher") or "").lower()]
+
+        if sort_filter == "date_asc":
+            results.sort(key=lambda r: (r.get("date") or "", r.get("episode_id") or ""))
+        elif sort_filter == "date_desc":
+            results.sort(key=lambda r: (r.get("date") or "", r.get("episode_id") or ""), reverse=True)
 
         elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
 
@@ -121,11 +135,15 @@ def create_app() -> Bottle:
 
     @app.route("/api/episodes")
     def api_episodes():
-        """Lists episodes with optional year, teacher, or transcription status filtering."""
+        """Lists episodes with optional year, date range, teacher, or transcription status filtering."""
         year = request.query.get("year")
+        start_date = request.query.get("start_date")
+        end_date = request.query.get("end_date")
         teacher = request.query.get("teacher")
+        sort_order = request.query.get("sort", "date_desc")
         transcribed_only = request.query.get("transcribed_only", "1") in ("1", "true")
-        limit = min(int(request.query.get("limit", 50)), 200)
+        raw_limit = int(request.query.get("limit", 50))
+        limit = raw_limit if raw_limit > 0 else 10000
         offset = max(int(request.query.get("offset", 0)), 0)
 
         query_sql = "SELECT id, title, date, year, primary_teacher, primary_display as teacher, identified_teachers, media_url, permalink, duration_sec, is_transcribed FROM episodes WHERE 1=1"
@@ -139,11 +157,26 @@ def create_app() -> Bottle:
                 params.append(int(year))
             except ValueError:
                 pass
+        if start_date:
+            query_sql += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query_sql += " AND date <= ?"
+            params.append(end_date)
         if teacher:
             query_sql += " AND (primary_display LIKE ? OR id IN (SELECT episode_id FROM episode_teachers et JOIN teachers t ON et.teacher_id = t.id WHERE t.display_name LIKE ?))"
             params.extend([f"%{teacher}%", f"%{teacher}%"])
 
-        query_sql += " ORDER BY date DESC, id DESC LIMIT ? OFFSET ?;"
+        if sort_order == "date_asc":
+            query_sql += " ORDER BY date ASC, id ASC"
+        elif sort_order == "duration_desc":
+            query_sql += " ORDER BY duration_sec DESC, date DESC"
+        elif sort_order == "duration_asc":
+            query_sql += " ORDER BY duration_sec ASC, date ASC"
+        else:
+            query_sql += " ORDER BY date DESC, id DESC"
+
+        query_sql += " LIMIT ? OFFSET ?;"
         params.extend([limit, offset])
 
         with sqlite3.connect(TRANSCRIPTS_DB_PATH) as conn:
@@ -162,6 +195,12 @@ def create_app() -> Bottle:
                     c_params.append(int(year))
                 except ValueError:
                     pass
+            if start_date:
+                count_sql += " AND date >= ?"
+                c_params.append(start_date)
+            if end_date:
+                count_sql += " AND date <= ?"
+                c_params.append(end_date)
             if teacher:
                 count_sql += " AND (primary_display LIKE ? OR id IN (SELECT episode_id FROM episode_teachers et JOIN teachers t ON et.teacher_id = t.id WHERE t.display_name LIKE ?))"
                 c_params.extend([f"%{teacher}%", f"%{teacher}%"])

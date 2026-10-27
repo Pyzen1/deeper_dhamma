@@ -356,13 +356,21 @@ class TranscriptDatabase:
         with self._get_connection() as conn:
             with conn:
                 # Legacy migration for Bhante Sujato: update slug from ajahn_sujato if present
-                conn.execute(
-                    """
-                    UPDATE teachers
-                    SET slug = 'bhante_sujato', display_name = 'Bhante Sujato', color = '#10b981'
-                    WHERE slug = 'ajahn_sujato';
-                    """
-                )
+                sujato_row = conn.execute("SELECT id FROM teachers WHERE slug = 'bhante_sujato'").fetchone()
+                ajahn_row = conn.execute("SELECT id FROM teachers WHERE slug = 'ajahn_sujato'").fetchone()
+                if ajahn_row:
+                    if sujato_row:
+                        conn.execute("UPDATE OR IGNORE episode_teachers SET teacher_id = ? WHERE teacher_id = ?", (sujato_row[0], ajahn_row[0]))
+                        conn.execute("DELETE FROM episode_teachers WHERE teacher_id = ?", (ajahn_row[0],))
+                        conn.execute("DELETE FROM teachers WHERE id = ?", (ajahn_row[0],))
+                    else:
+                        conn.execute(
+                            """
+                            UPDATE teachers
+                            SET slug = 'bhante_sujato', display_name = 'Bhante Sujato', color = '#10b981'
+                            WHERE slug = 'ajahn_sujato';
+                            """
+                        )
                 conn.execute(
                     """
                     UPDATE episodes
