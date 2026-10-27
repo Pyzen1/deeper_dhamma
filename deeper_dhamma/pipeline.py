@@ -198,12 +198,11 @@ class TranscriptionPipeline:
                 "filepath": str(audio_path.resolve()),
             }
 
-            # 3. Speech-to-Text with Teacher-Specific Prompt Steering & Continuous Hotwords
+            # 3. Speech-to-Text with Teacher-Specific Prompt Steering (hotwords disabled to avoid logit-bias looping)
             talk_prompt = self.lexicon_db.get_prompt_steering_terms(teacher_slugs=active_slugs, limit=30)
-            talk_hotwords = self.lexicon_db.get_hotwords_for_teachers(teacher_slugs=active_slugs, limit=50)
             logger.info(f"    Transcribing with faster-whisper (batched, float16, Silero VAD, {len(active_slugs)} teacher profile(s))...")
             t_asr0 = time.time()
-            asr_segments = self.transcriber.transcribe(audio_np, prompt=talk_prompt, hotwords=talk_hotwords)
+            asr_segments = self.transcriber.transcribe(audio_np, prompt=talk_prompt, hotwords=None)
             logger.info(f"    ASR complete in {time.time() - t_asr0:.2f}s ({len(asr_segments)} segments).")
 
             # 4. Speaker Alignment & Identification (in-memory slice attribution)
