@@ -908,6 +908,8 @@ select:hover, select:focus {
 
 #transcript-view {
   display: none;
+  max-width: 900px;
+  margin: 0 auto;
   animation: fadeIn 0.25s ease-out;
 }
 
@@ -981,8 +983,6 @@ select:hover, select:focus {
 }
 
 .transcript-reader-container {
-  max-width: 900px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 2rem;
