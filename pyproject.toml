@@ -31,5 +31,6 @@ where = ["."]
 include = ["deeper_dhamma*"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = ["tests"]
 norecursedirs = ["scratch", "archive", "databases", "dist"]

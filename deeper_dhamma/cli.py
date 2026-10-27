@@ -56,6 +56,7 @@ def cmd_sync(args):
         reorganize=getattr(args, "reorganize", False),
         allow_non_english=getattr(args, "allow_non_english", False),
         retry_errors=getattr(args, "retry_errors", False),
+        repair=getattr(args, "repair", False),
     )
 
 
@@ -665,6 +666,7 @@ def main(argv=None):
     p_sync.add_argument("--reorganize", action="store_true", help="Reorganize existing audio files into their true date/year folders")
     p_sync.add_argument("--allow-non-english", action="store_true", help="Include non-English talks in sync")
     p_sync.add_argument("--retry-errors", action="store_true", help="Retry downloading episodes with previous recorded errors")
+    p_sync.add_argument("--repair", action="store_true", help="Audit local archive against remote CDN bitstream; re-download only corrupted or byte-altered files")
     p_sync.set_defaults(func=cmd_sync, subparser=p_sync)
 
     # 2. Voiceprints

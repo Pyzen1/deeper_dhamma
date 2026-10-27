@@ -119,11 +119,31 @@
   // Initialization
   // ==========================================================================
 
-  function init() {
-    loadArchiveStats();
+  async function init() {
     setupEventListeners();
     setupAudioEngine();
-    loadBrowseCatalog();
+    if (!dbService) return;
+    try {
+      await dbService.init();
+      await Promise.all([
+        loadArchiveStats(),
+        loadBrowseCatalog(),
+      ]);
+    } catch (err) {
+      console.error('[App] Failed to initialize database service:', err);
+      if (els.browseGrid) {
+        els.browseGrid.innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1;">
+            <div class="empty-icon">⚠️</div>
+            <h3>Failed to load audio archive index</h3>
+            <p style="color: var(--text-muted);">${escapeHtml(err.message || String(err))}</p>
+            <button type="button" class="btn-primary" style="margin-top: 1rem;" onclick="window.resetDeeperDhammaCache()">
+              🔄 Reset Cache & Reload
+            </button>
+          </div>
+        `;
+      }
+    }
   }
 
   // ==========================================================================
@@ -290,6 +310,9 @@
     document.querySelectorAll('.view-panel').forEach(panel => {
       panel.classList.toggle('active', panel.id === viewId);
     });
+    if (viewId === 'browse-view' && (!state.catalog || state.catalog.length === 0)) {
+      loadBrowseCatalog();
+    }
   }
 
   // ==========================================================================
@@ -707,12 +730,16 @@
   // ==========================================================================
 
   function setupAudioEngine() {
+    const audio = els.nativeAudio;
     let isScrubbing = false;
+    let scrubCommitted = false;
 
     function safeSeek(targetTime) {
-      const dur = audio.duration || Infinity;
+      const dur = Number.isFinite(audio.duration) ? audio.duration : Infinity;
       const clamped = Math.max(0, Math.min(dur, targetTime));
-      if (audio.readyState >= 2) {
+      // HAVE_METADATA (1) is enough to seek a remote stream; waiting for
+      // HAVE_CURRENT_DATA (2) drops seeks while buffering.
+      if (audio.readyState >= 1) {
         try {
           audio.currentTime = clamped;
         } catch (err) {
@@ -731,14 +758,26 @@
       }
     }
 
-    audio.addEventListener('timeupdate', () => {
+    function syncProgress() {
       if (isScrubbing) return; // Do not overwrite slider while user is dragging
       const cur = audio.currentTime;
-      const dur = audio.duration || 0;
+      const dur = Number.isFinite(audio.duration) ? audio.duration : 0;
       els.timeCurrent.textContent = formatSeconds(cur);
       if (dur > 0) {
         els.timeTotal.textContent = formatSeconds(dur);
         els.scrubber.value = (cur / dur) * 100;
+      }
+    }
+
+    ['timeupdate', 'loadedmetadata', 'durationchange', 'seeked'].forEach(evt => {
+      audio.addEventListener(evt, syncProgress);
+    });
+
+    audio.addEventListener('seeked', () => {
+      if (scrubCommitted) {
+        scrubCommitted = false;
+        isScrubbing = false;
+        syncProgress();
       }
     });
 
@@ -775,7 +814,8 @@
     // Scrubber: show preview during drag, seek only on commit to prevent stream thrashing
     els.scrubber.addEventListener('input', () => {
       isScrubbing = true;
-      const dur = audio.duration || 0;
+      scrubCommitted = false;
+      const dur = Number.isFinite(audio.duration) ? audio.duration : 0;
       if (dur > 0) {
         const previewTime = (parseFloat(els.scrubber.value) / 100) * dur;
         els.timeCurrent.textContent = formatSeconds(previewTime);
@@ -783,13 +823,20 @@
     });
 
     const commitScrub = () => {
-      if (!isScrubbing) return;
-      const dur = audio.duration || 0;
+      if (!isScrubbing || scrubCommitted) return; // change + mouseup both fire; seek once
+      scrubCommitted = true;
+      const dur = Number.isFinite(audio.duration) ? audio.duration : 0;
       if (dur > 0) {
         const target = (parseFloat(els.scrubber.value) / 100) * dur;
         safeSeek(target);
       }
-      setTimeout(() => { isScrubbing = false; }, 150);
+      // Release on 'seeked'; fallback timeout in case the seek is dropped
+      setTimeout(() => {
+        if (scrubCommitted) {
+          scrubCommitted = false;
+          isScrubbing = false;
+        }
+      }, 1500);
     };
 
     els.scrubber.addEventListener('change', commitScrub);
@@ -872,6 +919,9 @@
     }
   }
 
+  // 500ms lead time to first word for any/all seek reference points
+  const SEEK_REF_LEAD_TIME_SEC = 0.50;
+
   function playAudioSegment({ media_url, title, teacher, start_sec }) {
     if (!media_url) {
       alert('Podbean CDN streaming URL is not available for this talk.');
@@ -884,7 +934,10 @@
 
     const isDifferentSource = state.currentMediaUrl !== media_url;
     state.currentMediaUrl = media_url;
-    const targetTime = Math.max(0, start_sec || 0);
+
+    // Apply exactly 500ms lead time to first word for any/all seek ref points (clamped to 0)
+    const rawTarget = typeof start_sec === 'number' ? start_sec : parseFloat(start_sec || 0);
+    const targetTime = Math.max(0, rawTarget > 0 ? (rawTarget - SEEK_REF_LEAD_TIME_SEC) : 0);
 
     function performSeek(sec) {
       if (sec < 0) return;
@@ -895,9 +948,10 @@
           console.warn('Seek error:', e);
         }
       };
-      if (audio.readyState >= 2) {
+      if (audio.readyState >= 1) {
         doSeek();
       } else {
+        audio.addEventListener('loadedmetadata', doSeek, { once: true });
         audio.addEventListener('canplay', doSeek, { once: true });
         audio.addEventListener('loadeddata', doSeek, { once: true });
       }

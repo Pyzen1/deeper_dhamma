@@ -127,7 +127,25 @@ class StreamSeekCalibrator:
                 if t - last_t >= 2.0:
                     last_t = t
                     offset_in_audio = max(0, pos - id3_len)
-                    seek_t = (offset_in_audio / audio_stream_size) * total_dur
+                    frac = (offset_in_audio / audio_stream_size) * 256.0
+                    seek_t = None
+                    if toc and any(x > 0 for x in toc):
+                        if frac <= toc[0]:
+                            seek_t = (frac / toc[0]) * (1.0 / 100.0) * total_dur if toc[0] > 0 else 0.0
+                        else:
+                            for i in range(99):
+                                if toc[i] <= frac <= toc[i + 1]:
+                                    d = toc[i + 1] - toc[i]
+                                    f = (frac - toc[i]) / d if d > 0 else 0.0
+                                    seek_t = ((i + f) / 100.0) * total_dur
+                                    break
+                            if seek_t is None:
+                                d = 256.0 - toc[99]
+                                f = (frac - toc[99]) / d if d > 0 else 0.0
+                                seek_t = ((99 + f) / 100.0) * total_dur
+                    if seek_t is None:
+                        seek_t = (offset_in_audio / audio_stream_size) * total_dur
+
                     pcm_times.append(t)
                     browser_seek_times.append(seek_t)
 
@@ -136,7 +154,7 @@ class StreamSeekCalibrator:
 
             def calibrate(t_pcm: float) -> float:
                 if t_pcm <= pcm_times[0]:
-                    return t_pcm
+                    return browser_seek_times[0]
                 if t_pcm >= pcm_times[-1]:
                     delta = browser_seek_times[-1] - pcm_times[-1]
                     return max(0.0, t_pcm + delta)
