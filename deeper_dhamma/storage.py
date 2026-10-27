@@ -85,6 +85,7 @@ class TranscriptDatabase:
                     slug TEXT UNIQUE NOT NULL,
                     display_name TEXT NOT NULL,
                     default_role TEXT DEFAULT 'monastic_primary',
+                    color TEXT DEFAULT '#f59e0b',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -172,6 +173,12 @@ class TranscriptDatabase:
                 conn.execute("ALTER TABLE episodes ADD COLUMN last_error_at TEXT;")
             if "last_error_op" not in cols:
                 conn.execute("ALTER TABLE episodes ADD COLUMN last_error_op TEXT;")
+
+            # Ensure color column exists on teachers table
+            cur_t = conn.execute("PRAGMA table_info(teachers);")
+            t_cols = {row["name"] for row in cur_t.fetchall()}
+            if "color" not in t_cols:
+                conn.execute("ALTER TABLE teachers ADD COLUMN color TEXT DEFAULT '#f59e0b';")
 
         self.seed_teachers()
 
@@ -337,7 +344,7 @@ class TranscriptDatabase:
         logger.info(f"[✓] Saved '{title}' to database ({len(segment_rows)} turns indexed).")
 
     def seed_teachers(self, teachers: Optional[List[Dict]] = None) -> int:
-        """Seeds the teachers table with known monastics and roles."""
+        """Seeds the teachers table with known monastics, roles, and color palettes."""
         if teachers is None:
             try:
                 from deeper_dhamma.catalog import KNOWN_TEACHERS
@@ -348,27 +355,69 @@ class TranscriptDatabase:
         added = 0
         with self._get_connection() as conn:
             with conn:
+                # Legacy migration for Bhante Sujato: update slug from ajahn_sujato if present
+                conn.execute(
+                    """
+                    UPDATE teachers
+                    SET slug = 'bhante_sujato', display_name = 'Bhante Sujato', color = '#10b981'
+                    WHERE slug = 'ajahn_sujato';
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE episodes
+                    SET primary_teacher = 'bhante_sujato', primary_display = 'Bhante Sujato'
+                    WHERE primary_teacher = 'ajahn_sujato';
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE speech_segments
+                    SET speaker_slug = 'bhante_sujato', speaker_display = 'Bhante Sujato'
+                    WHERE speaker_slug = 'ajahn_sujato';
+                    """
+                )
+
                 for t in teachers:
                     cur = conn.execute(
                         """
-                        INSERT INTO teachers (slug, display_name, default_role)
-                        VALUES (?, ?, ?)
+                        INSERT INTO teachers (slug, display_name, default_role, color)
+                        VALUES (?, ?, ?, ?)
                         ON CONFLICT(slug) DO UPDATE SET
                             display_name = excluded.display_name,
-                            default_role = excluded.default_role;
+                            default_role = excluded.default_role,
+                            color = excluded.color;
                         """,
-                        (t["slug"], t["display_name"], t.get("default_role", "monastic_primary")),
+                        (t["slug"], t["display_name"], t.get("default_role", "monastic_primary"), t.get("color", "#f59e0b")),
                     )
                     if cur.rowcount > 0:
                         added += 1
-                conn.execute(
-                    """
-                    INSERT INTO teachers (slug, display_name, default_role)
-                    VALUES ('unknown_teacher', 'Unknown Teacher', 'unregistered')
-                    ON CONFLICT(slug) DO NOTHING;
-                    """
-                )
+
+                # Special non-monastic dialogue roles
+                special_roles = [
+                    ("questioner", "Questioner", "lay_questioner", "#94a3b8"),
+                    ("unregistered_speaker", "Unregistered Speaker", "unregistered", "#64748b"),
+                    ("unknown_teacher", "Unknown Teacher", "unregistered", "#64748b"),
+                ]
+                for s_slug, s_name, s_role, s_color in special_roles:
+                    conn.execute(
+                        """
+                        INSERT INTO teachers (slug, display_name, default_role, color)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(slug) DO UPDATE SET
+                            display_name = excluded.display_name,
+                            default_role = excluded.default_role,
+                            color = excluded.color;
+                        """,
+                        (s_slug, s_name, s_role, s_color),
+                    )
         return added
+
+    def get_all_teachers(self) -> List[Dict]:
+        """Returns all teachers with id, slug, display_name, default_role, and color."""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT id, slug, display_name, default_role, color FROM teachers ORDER BY id ASC;")
+            return [dict(r) for r in cur.fetchall()]
 
     def associate_teacher(
         self,
@@ -628,9 +677,13 @@ class TranscriptDatabase:
                     e.id as episode_id,
                     e.title,
                     e.date,
+                    e.primary_teacher as teacher_slug,
                     e.primary_display as teacher,
+                    e.identified_teachers,
                     e.media_url,
                     e.permalink,
+                    s.speaker_slug,
+                    s.speaker_display,
                     s.start_sec,
                     s.end_sec,
                     snippet(transcripts_fts, 1, '<b>', '</b>', '...', 15) as snippet_text

@@ -194,12 +194,20 @@ function handleGetStats() {
   const segs = queryOne('SELECT COUNT(*) AS c FROM speech_segments;');
   const dur = queryOne('SELECT SUM(duration_sec) AS s FROM episodes WHERE is_transcribed = 1;');
 
-  const teachers = queryAll(`
-    SELECT display_name 
+  const teachersList = queryAll(`
+    SELECT slug, display_name, color, default_role 
     FROM teachers 
-    WHERE default_role != 'unregistered' AND slug != 'unknown_teacher' 
     ORDER BY display_name;
-  `).map((r) => r.display_name);
+  `);
+
+  const teacherMap = {};
+  teachersList.forEach((t) => {
+    teacherMap[t.slug] = {
+      name: t.display_name,
+      color: t.color || '#f59e0b',
+      role: t.default_role
+    };
+  });
 
   const years = queryAll(`
     SELECT DISTINCT year 
@@ -213,7 +221,8 @@ function handleGetStats() {
     transcribed_episodes: transEp ? transEp.c : 0,
     transcribed_hours: dur && dur.s ? Math.round((dur.s / 3600.0) * 10) / 10 : 0.0,
     total_segments: segs ? segs.c : 0,
-    teachers,
+    teachers: teachersList.filter((r) => r.default_role !== 'unregistered' && r.slug !== 'unknown_teacher').map((r) => r.display_name),
+    teacher_map: teacherMap,
     years,
     db_version: currentDbVersion,
   };
@@ -221,7 +230,7 @@ function handleGetStats() {
 
 function handleGetEpisodes({ teacher, year, transcribedOnly = true, limit = 50, offset = 0 }) {
   let sql = `
-    SELECT id, title, date, year, primary_display AS teacher, media_url, permalink, duration_sec, is_transcribed 
+    SELECT id, title, date, year, primary_teacher, primary_display AS teacher, identified_teachers, media_url, permalink, duration_sec, is_transcribed 
     FROM episodes 
     WHERE 1=1
   `;
@@ -294,9 +303,13 @@ function handleSearchFTS({ query, exact = false, teacher, year, limit = 30 }) {
       e.id AS episode_id,
       e.title,
       e.date,
+      e.primary_teacher AS teacher_slug,
       e.primary_display AS teacher,
+      e.identified_teachers,
       e.media_url,
       e.permalink,
+      s.speaker_slug,
+      s.speaker_display,
       s.start_sec,
       s.end_sec,
       snippet(transcripts_fts, 1, '<b>', '</b>', '...', 15) AS snippet_text

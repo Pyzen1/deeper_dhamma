@@ -128,7 +128,7 @@ def create_app() -> Bottle:
         limit = min(int(request.query.get("limit", 50)), 200)
         offset = max(int(request.query.get("offset", 0)), 0)
 
-        query_sql = "SELECT id, title, date, year, primary_display as teacher, media_url, permalink, duration_sec, is_transcribed FROM episodes WHERE 1=1"
+        query_sql = "SELECT id, title, date, year, primary_teacher, primary_display as teacher, identified_teachers, media_url, permalink, duration_sec, is_transcribed FROM episodes WHERE 1=1"
         params = []
 
         if transcribed_only:
@@ -218,11 +218,21 @@ def create_app() -> Bottle:
             duration_row = conn.execute("SELECT SUM(duration_sec) FROM episodes WHERE is_transcribed = 1;").fetchone()
             total_duration_sec = duration_row[0] if duration_row and duration_row[0] else 0.0
 
-            # Authoritative monastic teachers list from teachers table in DB
+            # Authoritative monastic teachers list and color map from teachers table in DB
+            teachers_rows = conn.execute(
+                "SELECT slug, display_name, color, default_role FROM teachers ORDER BY display_name;"
+            ).fetchall()
+            teacher_map = {
+                r["slug"]: {
+                    "name": r["display_name"],
+                    "color": r["color"] or "#f59e0b",
+                    "role": r["default_role"],
+                }
+                for r in teachers_rows
+            }
             teachers = [
-                r[0] for r in conn.execute(
-                    "SELECT display_name FROM teachers WHERE default_role != 'unregistered' AND slug != 'unknown_teacher' ORDER BY display_name;"
-                ).fetchall()
+                r["display_name"] for r in teachers_rows
+                if r["default_role"] != "unregistered" and r["slug"] != "unknown_teacher"
             ]
 
             years = [
@@ -237,6 +247,7 @@ def create_app() -> Bottle:
             "transcribed_hours": round(total_duration_sec / 3600.0, 1),
             "total_segments": total_segments,
             "teachers": teachers,
+            "teacher_map": teacher_map,
             "years": years,
         })
 

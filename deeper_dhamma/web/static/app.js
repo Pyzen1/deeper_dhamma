@@ -17,6 +17,7 @@
     activeTab: 'search-view',
     previousTab: 'search-view',
     stats: null,
+    teachers: {},
     catalog: [],
   };
 
@@ -107,6 +108,165 @@
   };
 
   // ==========================================================================
+  // Speaker Color & Palette Engine (Theravada Monastic Forest Tradition Inspired)
+  // ==========================================================================
+
+  function hashStringToColor(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const h = Math.abs(hash * 137.508) % 360; // Golden angle for even hue distribution
+    return `hsl(${Math.round(h)}, 75%, 62%)`;
+  }
+
+  function getSpeakerColor(slug, displayName) {
+    if (!slug && !displayName) return '#f59e0b';
+    const cleanSlug = (slug || '').toLowerCase().trim();
+
+    // 1. Direct match in loaded database teacher_map
+    if (state.teachers && state.teachers[cleanSlug] && state.teachers[cleanSlug].color) {
+      return state.teachers[cleanSlug].color;
+    }
+
+    // Check alias for Sujato
+    if (cleanSlug === 'ajahn_sujato' && state.teachers && state.teachers['bhante_sujato']) {
+      return state.teachers['bhante_sujato'].color;
+    }
+
+    // 2. Static monastic defaults for fallback / instant render
+    const defaults = {
+      'ajahn_brahm': '#f59e0b',
+      'ajahn_brahmali': '#ea580c',
+      'bhante_sujato': '#10b981',
+      'ajahn_sujato': '#10b981',
+      'ajahn_hasapanna': '#ec4899',
+      'venerable_sunyo': '#eab308',
+      'ayya_vayama': '#a855f7',
+      'ajahn_khemavaro': '#14b8a6',
+      'questioner': '#94a3b8',
+      'unregistered_speaker': '#64748b',
+      'unknown_teacher': '#64748b',
+    };
+    if (defaults[cleanSlug]) return defaults[cleanSlug];
+
+    // 3. Name lookup in teacher_map
+    if (displayName) {
+      const lowerName = displayName.toLowerCase();
+      if (lowerName.includes('question') || lowerName.includes('audience')) return '#94a3b8';
+      for (const [s, data] of Object.entries(state.teachers || {})) {
+        if (data.name && lowerName.includes(data.name.toLowerCase())) {
+          return data.color;
+        }
+      }
+    }
+
+    // 4. Deterministic golden-ratio HSL generator
+    return hashStringToColor(cleanSlug || displayName);
+  }
+
+  function getSpeakerInitials(name) {
+    if (!name) return '🎙️';
+    const lower = name.toLowerCase();
+    if (lower.includes('question')) return '?';
+    const words = name.replace(/^(ajahn|venerable|ven|bhante|ayya|ayye)\s+/i, '').split(/\s+/).filter(Boolean);
+    if (words.length >= 2) {
+      return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+    }
+    if (words.length === 1 && words[0].length >= 2) {
+      return words[0].slice(0, 2).toUpperCase();
+    }
+    return name.slice(0, 2).toUpperCase();
+  }
+
+  function extractTeachers(item) {
+    if (!item) return [{ name: 'BSWA Monastic', color: '#f59e0b', slug: 'bswa_monastic' }];
+
+    const results = [];
+    const seen = new Set();
+
+    // 1. Check identified_teachers field from database (e.g. "Venerable Bodhidhaja, Ajahn Cunda")
+    const identified = (item.identified_teachers || '').trim();
+    if (identified) {
+      const names = identified.split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+      for (const name of names) {
+        const key = name.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          results.push({
+            name,
+            color: getSpeakerColor('', name),
+            slug: key.replace(/[^a-z0-9]+/g, '_')
+          });
+        }
+      }
+      if (results.length > 0) return results;
+    }
+
+    // 2. Split teacher string on delimiters: '&', 'and', ',', '/'
+    const teacherStr = (item.teacher || item.primary_display || '').trim();
+    if (teacherStr && (/[&,/]|\band\b/i.test(teacherStr))) {
+      const names = teacherStr.split(/\s*(?:&|\band\b|,|\/)\s*/i).map(s => s.trim()).filter(Boolean);
+      for (const name of names) {
+        const key = name.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          results.push({
+            name,
+            color: getSpeakerColor('', name),
+            slug: key.replace(/[^a-z0-9]+/g, '_')
+          });
+        }
+      }
+      if (results.length > 0) return results;
+    }
+
+    // 3. Scan title and teacher string against known monastic teachers in database
+    const textToScan = `${teacherStr} | ${item.title || ''}`.toLowerCase();
+    for (const [slug, data] of Object.entries(state.teachers || {})) {
+      if (data.role === 'unregistered' || slug === 'unknown_teacher' || slug === 'questioner') continue;
+      const lowerName = data.name.toLowerCase();
+      const words = lowerName.replace(/^(ajahn|venerable|ven|bhante|ayya|ayye)\s+/i, '').split(/\s+/);
+      const coreName = words[words.length - 1];
+      if (coreName && coreName.length >= 4 && new RegExp(`\\b${coreName}\\b`, 'i').test(textToScan)) {
+        if (!seen.has(lowerName)) {
+          seen.add(lowerName);
+          results.push({
+            name: data.name,
+            color: data.color || '#f59e0b',
+            slug
+          });
+        }
+      }
+    }
+
+    // 4. Fallback: single teacher
+    if (results.length === 0 && teacherStr) {
+      results.push({
+        name: teacherStr,
+        color: getSpeakerColor(item.primary_teacher || item.teacher_slug, teacherStr),
+        slug: (item.primary_teacher || item.teacher_slug || teacherStr).toLowerCase().replace(/[^a-z0-9]+/g, '_')
+      });
+    }
+
+    return results.length > 0 ? results : [{
+      name: 'BSWA Monastic',
+      color: '#f59e0b',
+      slug: 'bswa_monastic'
+    }];
+  }
+
+  function renderTeacherBadgesHtml(item) {
+    const teachers = extractTeachers(item);
+    return teachers.map(t => `
+      <span class="teacher-badge" style="--spk-color: ${t.color};" title="${escapeHtml(t.name)}">
+        <span class="teacher-badge-dot"></span>
+        ${escapeHtml(t.name)}
+      </span>
+    `).join(' ');
+  }
+
+  // ==========================================================================
   // Database Service (Injected Adapter: ApiDatabaseClient or WasmDatabaseClient)
   // ==========================================================================
 
@@ -154,6 +314,9 @@
     try {
       const data = await dbService.getStats();
       state.stats = data;
+      if (data.teacher_map) {
+        state.teachers = data.teacher_map;
+      }
 
       if (els.statEpisodes) {
         els.statEpisodes.textContent = `${data.transcribed_episodes} transcribed talks • ${data.transcribed_hours} hrs indexed`;
@@ -378,6 +541,7 @@
       const startTime = formatSeconds(item.start_sec);
       const endTime = formatSeconds(item.end_sec);
       const duration = formatSeconds(item.end_sec - item.start_sec);
+      const spkColor = getSpeakerColor(item.speaker_slug || item.teacher_slug, item.teacher || item.speaker_display);
 
       html += `
         <article class="result-card" data-idx="${idx}">
@@ -385,7 +549,7 @@
             <div class="result-title-group">
               <h3 class="result-title">${escapeHtml(item.title)}</h3>
               <div class="result-meta-line">
-                <span class="teacher-badge">${escapeHtml(item.teacher || 'BSWA Monastic')}</span>
+                ${renderTeacherBadgesHtml(item)}
                 <span>📅 ${escapeHtml(item.date || '')}</span>
                 <span>⏱️ Turn at ${startTime}</span>
               </div>
@@ -458,12 +622,12 @@
   // ==========================================================================
 
   async function loadBrowseCatalog() {
-    const opts = {
-      transcribedOnly: true,
-      limit: 60,
-    };
     const teacherVal = (els.browseTeacherFilter && els.browseTeacherFilter.value) || (els.teacherFilter && els.teacherFilter.value) || '';
     const yearVal = (els.browseYearFilter && els.browseYearFilter.value) || (els.yearFilter && els.yearFilter.value) || '';
+    const opts = {
+      transcribedOnly: !teacherVal,
+      limit: 60,
+    };
     if (teacherVal) opts.teacher = teacherVal;
     if (yearVal) opts.year = yearVal;
 
@@ -490,7 +654,7 @@
           <div class="episode-card">
             <div>
               <div class="result-meta-line" style="margin-bottom: 0.5rem;">
-                <span class="teacher-badge">${escapeHtml(ep.teacher || 'Monastic')}</span>
+                ${renderTeacherBadgesHtml(ep)}
                 <span>${escapeHtml(ep.date || '')}</span>
                 <span>• ${durMin} mins</span>
               </div>
@@ -660,7 +824,13 @@
       els.drawerTitle.textContent = ep.title;
       els.drawerDateTag.textContent = ep.date || `Year ${ep.year}`;
       const durMin = Math.round((ep.duration_sec || 0) / 60);
-      els.drawerMetaInfo.textContent = `${ep.primary_display || 'Monastic'} • ${durMin} mins • ${ep.segments ? ep.segments.length : 0} speech turns`;
+      els.drawerMetaInfo.innerHTML = `
+        ${renderTeacherBadgesHtml(ep)}
+        <span class="bullet-sep">•</span>
+        <span>${durMin} mins</span>
+        <span class="bullet-sep">•</span>
+        <span>${ep.segments ? ep.segments.length : 0} speech turns</span>
+      `;
 
       if (ep.permalink) {
         els.drawerPodbeanLink.href = getPodbeanUrl(ep.permalink);
@@ -692,10 +862,15 @@
         const startStr = formatSeconds(seg.start_sec);
         const endStr = formatSeconds(seg.end_sec);
         const formattedText = formatTranscriptParagraphs(seg.text);
+        const spkColor = getSpeakerColor(seg.speaker_slug, seg.speaker_display);
+        const initials = getSpeakerInitials(seg.speaker_display || 'Speaker');
         html += `
-          <div class="transcript-turn" id="turn-${idx}" data-start="${seg.start_sec}">
+          <div class="transcript-turn" id="turn-${idx}" data-start="${seg.start_sec}" style="--spk-color: ${spkColor};">
             <div class="turn-header">
-              <span class="turn-speaker">${escapeHtml(seg.speaker_display || 'Speaker')}</span>
+              <span class="turn-speaker">
+                <span class="turn-speaker-badge" title="${escapeHtml(seg.speaker_display || 'Speaker')}">${escapeHtml(initials)}</span>
+                ${escapeHtml(seg.speaker_display || 'Speaker')}
+              </span>
               <button type="button" class="turn-time-btn" data-start="${seg.start_sec}" title="Seek audio to this turn">
                 ▶ ${startStr}
               </button>
@@ -930,7 +1105,8 @@
 
     const audio = els.nativeAudio;
     els.playerTitle.textContent = title || 'BSWA Dhamma Talk';
-    els.playerSpeaker.textContent = teacher || 'Monastic';
+    const spkColor = getSpeakerColor('', teacher);
+    els.playerSpeaker.innerHTML = `<span class="player-speaker-dot" style="background-color: ${spkColor}; box-shadow: 0 0 8px ${spkColor};"></span> ${escapeHtml(teacher || 'Monastic')}`;
 
     const isDifferentSource = state.currentMediaUrl !== media_url;
     state.currentMediaUrl = media_url;
