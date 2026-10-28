@@ -872,9 +872,18 @@
   }
 
   function setupDownloadDropdowns() {
+    function closeAllDropdowns() {
+      document.querySelectorAll('.download-dropdown-wrapper.open').forEach(w => {
+        w.classList.remove('open');
+        const pc = w.closest('.episode-card, .result-card');
+        if (pc) pc.classList.remove('dropdown-active');
+      });
+    }
+
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('.download-dropdown-btn');
       if (btn) {
+        if (btn.disabled) return;
         e.stopPropagation();
         const wrapper = btn.closest('.download-dropdown-wrapper');
         if (!wrapper) return;
@@ -882,10 +891,19 @@
 
         // Close all other dropdowns
         document.querySelectorAll('.download-dropdown-wrapper.open').forEach(w => {
-          if (w !== wrapper) w.classList.remove('open');
+          if (w !== wrapper) {
+            w.classList.remove('open');
+            const pc = w.closest('.episode-card, .result-card');
+            if (pc) pc.classList.remove('dropdown-active');
+          }
         });
 
-        wrapper.classList.toggle('open', !isOpen);
+        const willOpen = !isOpen;
+        wrapper.classList.toggle('open', willOpen);
+        const parentCard = wrapper.closest('.episode-card, .result-card');
+        if (parentCard) {
+          parentCard.classList.toggle('dropdown-active', willOpen);
+        }
         return;
       }
 
@@ -894,7 +912,11 @@
         e.stopPropagation();
         const format = opt.dataset.format;
         const wrapper = opt.closest('.download-dropdown-wrapper');
-        if (wrapper) wrapper.classList.remove('open');
+        if (wrapper) {
+          wrapper.classList.remove('open');
+          const pc = wrapper.closest('.episode-card, .result-card');
+          if (pc) pc.classList.remove('dropdown-active');
+        }
 
         if (wrapper && wrapper.id === 'filtered-archive-dropdown-wrapper') {
           const talks = state.currentFilteredTalks || [];
@@ -913,16 +935,12 @@
       }
 
       // Click outside closes open dropdowns
-      document.querySelectorAll('.download-dropdown-wrapper.open').forEach(w => {
-        w.classList.remove('open');
-      });
+      closeAllDropdowns();
     });
 
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        document.querySelectorAll('.download-dropdown-wrapper.open').forEach(w => {
-          w.classList.remove('open');
-        });
+        closeAllDropdowns();
       }
     });
   }
@@ -1160,6 +1178,9 @@
       els.searchEmptyState.style.display = 'block';
       els.searchResultsList.style.display = 'none';
       els.searchMetaBar.style.display = 'none';
+      if (els.filteredArchiveDropdownWrapper) {
+        els.filteredArchiveDropdownWrapper.style.display = 'none';
+      }
       els.searchCountBadge.textContent = '0';
       state.currentFilteredTalks = [];
       if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = '0';
@@ -1222,6 +1243,9 @@
     els.searchEmptyState.style.display = 'none';
     els.searchResultsList.style.display = 'flex';
     els.searchMetaBar.style.display = 'flex';
+    if (els.filteredArchiveDropdownWrapper) {
+      els.filteredArchiveDropdownWrapper.style.display = 'inline-block';
+    }
     els.searchCountBadge.textContent = String(episodes.length);
 
     els.queryTierBadge.textContent = 'Filtered Catalog';
@@ -1349,6 +1373,9 @@
     els.searchEmptyState.style.display = 'none';
     els.searchResultsList.style.display = 'flex';
     els.searchMetaBar.style.display = 'flex';
+    if (els.filteredArchiveDropdownWrapper) {
+      els.filteredArchiveDropdownWrapper.style.display = 'inline-block';
+    }
     els.searchCountBadge.textContent = String(count);
 
     if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = String(distinctEpisodes.length);
