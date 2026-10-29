@@ -245,13 +245,34 @@ def export_static_site(output_dir: Path | str = "dist") -> Path:
     return out_path
 
 
-def run_web_preview(host: str = DEFAULT_WEB_HOST, port: int = DEFAULT_WEB_PORT, dist_dir: Path | str = "dist") -> None:
+def _is_dist_stale(dist_path: Path) -> bool:
+    """Checks whether any source asset or database is newer than the built dist/index.html."""
+    index_out = dist_path / "index.html"
+    if not index_out.exists():
+        return True
+    dist_mtime = index_out.stat().st_mtime
+    candidates = [
+        VIEWS_SRC_DIR / "index.html",
+        STATIC_SRC_DIR / "app.js",
+        STATIC_SRC_DIR / "word_sync.js",
+        STATIC_SRC_DIR / "style.css",
+        STATIC_SRC_DIR / "db_worker.js",
+        STATIC_SRC_DIR / "adapters" / "wasm_client.js",
+        TRANSCRIPTS_DB_PATH,
+    ]
+    for src in candidates:
+        if src.exists() and src.stat().st_mtime > dist_mtime:
+            return True
+    return False
+
+
+def run_web_preview(host: str = DEFAULT_WEB_HOST, port: str | int = DEFAULT_WEB_PORT, dist_dir: Path | str = "dist") -> None:
     """
     Serves the static distribution folder using Bottle with native HTTP Range request support.
     """
     dist_path = Path(dist_dir).resolve()
-    if not (dist_path / "index.html").exists():
-        print(f"[-] Static build not found in '{dist_path}'. Building now...")
+    if _is_dist_stale(dist_path):
+        print(f"[*] Rebuilding static bundle in '{dist_path}' to ensure latest assets...")
         export_static_site(dist_path)
 
     app = Bottle()
@@ -260,12 +281,18 @@ def run_web_preview(host: str = DEFAULT_WEB_HOST, port: int = DEFAULT_WEB_PORT, 
     def serve_index():
         res = static_file("index.html", root=str(dist_path))
         res.set_header("Access-Control-Allow-Origin", "*")
+        res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        res.set_header("Pragma", "no-cache")
+        res.set_header("Expires", "0")
         return res
 
     @app.route("/<filepath:path>")
     def serve_static(filepath: str):
         res = static_file(filepath, root=str(dist_path))
         res.set_header("Access-Control-Allow-Origin", "*")
+        res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        res.set_header("Pragma", "no-cache")
+        res.set_header("Expires", "0")
         return res
 
     print("\n" + "=" * 80)

@@ -1892,12 +1892,20 @@
     let isScrubbing = false;
     let scrubCommitted = false;
 
+    function getTotalDuration() {
+      if (window.WordSync && window.WordSync.vbrData && window.WordSync.vbrData.totalDurSec > 0) {
+        return window.WordSync.vbrData.totalDurSec;
+      }
+      return Number.isFinite(audio.duration) ? audio.duration : 0;
+    }
+
     function safeSeek(targetPhysicalTime) {
-      const dur = Number.isFinite(audio.duration) ? audio.duration : Infinity;
+      const totalDur = getTotalDuration();
+      const dur = totalDur > 0 ? totalDur : Infinity;
       const clampedPhys = Math.max(0, Math.min(dur, targetPhysicalTime));
       const doSeek = () => {
         try {
-          const curDur = Number.isFinite(audio.duration) ? audio.duration : Infinity;
+          const curDur = Number.isFinite(audio.duration) ? audio.duration : dur;
           const streamSeek = window.WordSync
             ? window.WordSync.prepareSeek(clampedPhys)
             : clampedPhys;
@@ -1950,8 +1958,15 @@
       if (audio.readyState >= 1) {
         doSeek();
       } else {
-        audio.addEventListener('canplay', doSeek, { once: true });
-        audio.addEventListener('loadeddata', doSeek, { once: true });
+        const onReady = () => {
+          audio.removeEventListener('loadedmetadata', onReady);
+          audio.removeEventListener('loadeddata', onReady);
+          audio.removeEventListener('canplay', onReady);
+          doSeek();
+        };
+        audio.addEventListener('loadedmetadata', onReady);
+        audio.addEventListener('loadeddata', onReady);
+        audio.addEventListener('canplay', onReady);
       }
     }
 
@@ -1959,7 +1974,7 @@
       if (isScrubbing) return; // Do not overwrite slider while user is dragging
       const rawCur = audio.currentTime;
       const physCur = window.WordSync ? window.WordSync.getPhysicalTime(rawCur) : rawCur;
-      const dur = Number.isFinite(audio.duration) ? audio.duration : 0;
+      const dur = getTotalDuration();
       els.timeCurrent.textContent = formatSeconds(physCur);
       if (dur > 0) {
         els.timeTotal.textContent = formatSeconds(dur);
@@ -2045,7 +2060,7 @@
     els.scrubber.addEventListener('input', () => {
       isScrubbing = true;
       scrubCommitted = false;
-      const dur = Number.isFinite(audio.duration) ? audio.duration : 0;
+      const dur = getTotalDuration();
       if (dur > 0) {
         const previewTime = (parseFloat(els.scrubber.value) / 100) * dur;
         els.timeCurrent.textContent = formatSeconds(previewTime);
@@ -2055,7 +2070,7 @@
     const commitScrub = () => {
       if (!isScrubbing || scrubCommitted) return; // change + mouseup both fire; seek once
       scrubCommitted = true;
-      const dur = Number.isFinite(audio.duration) ? audio.duration : 0;
+      const dur = getTotalDuration();
       if (dur > 0) {
         const target = (parseFloat(els.scrubber.value) / 100) * dur;
         safeSeek(target);
@@ -2211,13 +2226,33 @@
       if (audio.readyState >= 1) {
         doSeek();
       } else {
-        audio.addEventListener('loadedmetadata', doSeek, { once: true });
-        audio.addEventListener('canplay', doSeek, { once: true });
-        audio.addEventListener('loadeddata', doSeek, { once: true });
+        const onReady = () => {
+          audio.removeEventListener('loadedmetadata', onReady);
+          audio.removeEventListener('loadeddata', onReady);
+          audio.removeEventListener('canplay', onReady);
+          doSeek();
+        };
+        audio.addEventListener('loadedmetadata', onReady);
+        audio.addEventListener('loadeddata', onReady);
+        audio.addEventListener('canplay', onReady);
+      }
+    }
+
+    function unlockAudioGestureSync() {
+      if (state.audioGestureUnlocked) return;
+      state.audioGestureUnlocked = true;
+      if (!audio.src || audio.src === window.location.href || audio.src.endsWith('/')) {
+        try {
+          audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+          const p = audio.play();
+          if (p !== undefined) p.catch(() => {});
+          audio.pause();
+        } catch (_) {}
       }
     }
 
     function launchStreamAndSeek(streamUrl, mode) {
+      state.audioGestureUnlocked = true;
       if (window.WordSync) {
         window.WordSync.streamMode = mode;
       }
@@ -2254,6 +2289,7 @@
           launchStreamAndSeek(readyBlobUrl, 'patched_blob');
           return;
         }
+        unlockAudioGestureSync();
         window.WordSync.waitForFirefoxBlobUrl(media_url, targetTime).then(blobUrl => {
           if (state.currentMediaUrl !== media_url) return;
           if (blobUrl) {
@@ -2272,6 +2308,7 @@
     // If WordSync has not loaded this episode's VBR profile yet (e.g. playing from Search tab),
     // load the compact .bin sidecar first and then start playback/seek.
     if (window.WordSync && epId && window.WordSync.currentEpisodeId !== epId) {
+      unlockAudioGestureSync();
       window.WordSync.ensureEpisodeLoaded(epId).then(() => {
         startWithLoadedProfile();
       });

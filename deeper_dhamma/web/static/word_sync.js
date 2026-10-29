@@ -500,10 +500,10 @@
         this.vbrData.pcmTimes,
         this.vbrData.byteOffsets
       );
-      // Include ID3 header + target audio byte offset + 384 KB read-ahead (~28s of audio)
+      // Include ID3 header + target audio byte offset + 128 KB read-ahead (~10s of audio)
       return Math.min(
         this.vbrData.id3Len + this.vbrData.bytesLen,
-        Math.ceil(this.vbrData.id3Len + audioByteOff + 393216)
+        Math.ceil(this.vbrData.id3Len + audioByteOff + 131072)
       );
     },
 
@@ -612,7 +612,7 @@
       }
 
       if (this.streamMode === 'patched_blob') {
-        // Client-side Info-patched Blob uses exact linear byte-offset seeking in Firefox & Chrome
+        // Client-side Info-patched Blob uses exact linear byte-offset seeking
         const seekTime = this._interp(clampedPhys, this.vbrData.pcmTimes, this.vbrData.linearSeekTimes);
         this.seekOffset = clampedPhys - seekTime;
         return Math.max(0, seekTime);
@@ -632,7 +632,9 @@
           const sMax = (k + 1) * bucketWidth - 0.02;
           const candidateS = Math.max(sMin, Math.min(sMax, clampedPhys - delta));
           const landedPhys = candidateS + delta;
-          const err = Math.abs(landedPhys - clampedPhys);
+          const overJump = landedPhys - clampedPhys;
+          // Strongly penalize jumping forward past the target word into mid-sentence
+          const err = overJump > 0.35 ? overJump * 20.0 : Math.abs(overJump);
           if (err < bestErr) {
             bestErr = err;
             bestS = candidateS;
@@ -797,10 +799,10 @@
      * Binary search to find the active word matching physical currentTime.
      */
     findWordIndex: function (time) {
-      // If currently in the 500ms lead-in right before a specifically sought word, highlight that word
+      // If currently in the lead-in before a specifically sought word, highlight that word
       if (
         this._seekTargetWordTime !== null &&
-        time >= this._seekTargetWordTime - 0.60 &&
+        time >= this._seekTargetWordTime - 10.0 &&
         time < this._seekTargetWordTime
       ) {
         const leadIdx = this._findExactWordAtStart(this._seekTargetWordTime);

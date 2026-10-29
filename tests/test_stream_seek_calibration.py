@@ -147,3 +147,50 @@ def test_vbr_trailer_and_firefox_chrome_linear_calibration():
     assert patched[xing_off : xing_off + 8] == b"Info\x00\x00\x00\x03"
 
 
+def test_detect_xing_patch_offset_and_in_memory_patching_edge_cases():
+    """
+    Tests detect_xing_patch_offset and patch_xing_chunk_in_memory across boundary
+    and edge cases (short buffers, CBR streams without Xing, ID3v2 synchsafe offsets,
+    and chunk boundaries splitting the 8-byte Xing header).
+    """
+    from deeper_dhamma.calibration import (
+        detect_xing_patch_offset,
+        patch_xing_chunk_in_memory,
+    )
+
+    # 1. Short or empty buffers return None
+    assert detect_xing_patch_offset(b"") is None
+    assert detect_xing_patch_offset(b"ID3\x04\x00") is None
+    assert detect_xing_patch_offset(b"\x00" * 35) is None
+
+    # 2. CBR stream without Xing tag returns None
+    cbr_header = b"ID3\x03\x00\x00\x00\x00\x01\x00" + (b"\x00" * 128) + b"\xff\xfb\x90\x64" + (b"\x00" * 200)
+    assert detect_xing_patch_offset(cbr_header) is None
+
+    # 3. Synthetic ID3v2 (size = 128 -> synchsafe 0x00 0x00 0x01 0x00, total id3_len = 138) + Xing at +36 = 174
+    vbr_header = (
+        b"ID3\x03\x00\x00\x00\x00\x01\x00"
+        + (b"\x00" * 128)
+        + (b"\xff\xfb\x90\x64" + b"\x00" * 32)
+        + b"Xing\x00\x00\x00\x0f"
+        + (b"\x00" * 200)
+    )
+    xing_off = detect_xing_patch_offset(vbr_header)
+    assert xing_off == 174
+
+    # 4. Chunk before, after, andNone xing_abs_offset remain untouched
+    assert patch_xing_chunk_in_memory(vbr_header[:100], 0, xing_off) == vbr_header[:100]
+    assert patch_xing_chunk_in_memory(vbr_header[200:], 200, xing_off) == vbr_header[200:]
+    assert patch_xing_chunk_in_memory(vbr_header, 0, None) == vbr_header
+    assert patch_xing_chunk_in_memory(b"", 0, xing_off) == b""
+
+    # 5. Split chunk boundary right inside the 8-byte "Xing\x00\x00\x00\x0f" sequence (at offset 174 + 3 = 177)
+    part1 = patch_xing_chunk_in_memory(vbr_header[:177], 0, xing_off)
+    part2 = patch_xing_chunk_in_memory(vbr_header[177:], 177, xing_off)
+    reassembled = part1 + part2
+    assert reassembled[xing_off : xing_off + 8] == b"Info\x00\x00\x00\x03"
+    assert reassembled[:xing_off] == vbr_header[:xing_off]
+    assert reassembled[xing_off + 8 :] == vbr_header[xing_off + 8 :]
+
+
+

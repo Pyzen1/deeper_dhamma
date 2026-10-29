@@ -61,6 +61,7 @@ Furthermore, because Firefox's `VBRHeader::Offset()` is a non-interpolated step 
 - In `pb27802310`, bucket `k=2` (`128.78s <= S < 193.17s`, `TOC[2] = 4`, `delta_2 = +14.74s`) covers physical audio `[143.52s .. 207.89s]`.
 - Bucket `k=3` (`193.17s <= S < 257.56s`, `TOC[3] = 7`, `delta_3 = +28.75s`) jumps immediately to physical audio `[221.90s .. 286.29s]`.
 - The 14-second physical window **`[207.89s .. 221.90s]`**—which contains Turn 0 (`"Everyone, so just a little bit of instructions again"`, `216.30s`)—cannot be reached by *any* `audio.currentTime` seek value in Firefox when the `Xing` TOC flag (`0x04`) is active.
+- If a raw `'cdn'` fallback bucket search evaluates `Math.abs(landedPhys - clampedPhys)` without penalizing forward jumps past the target word (`215.80s`), Bucket `k=3` (`221.91s` physical, error `6.11s`) beats the end of Bucket `k=2` (`207.89s` physical, error `7.91s`), jumping forward `6.11s` to **`3:42` (`221.91s`, highlighting `"on"` in `"on how to proceed"`)** and skipping the first 9 words (`"Everyone, so just a little bit of instructions again"`). `WordSync.prepareSeek` therefore also guards raw `'cdn'` fallback mode with a `20x` penalty on `overJump > 0.35s` so it never skips forward into mid-sentence.
 
 #### Cause B: Pre-Warping Word Timestamps vs. the 1:1 44.1 kHz Playback Clock
 Previously, `StreamSeekCalibrator` pre-warped all segment and word timestamps in `databases/dhamma_transcripts.db` and `words/*.bin` using Chromium's `Xing` seek curve $S_{\text{xing}}(t_{\text{phys}})$.
@@ -149,7 +150,10 @@ Whenever `dhamma_transcripts.db`, `words/*.bin`, `word_sync.js`, or `app.js` are
 python main.py web --build
 ```
 
-Each build stamps a fresh Unix timestamp into `PRAGMA user_version` in `dist/dhamma_web.db`. If a browser tab has cached old static scripts:
+Each build stamps a fresh Unix timestamp into `PRAGMA user_version` in `dist/dhamma_web.db`. Additionally, `python main.py web --run` automatically checks `_is_dist_stale(dist_path)` and rebuilds `dist/` whenever `word_sync.js`, `app.js`, `index.html`, or `dhamma_transcripts.db` is newer than `dist/index.html`, and serves static preview assets with `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` headers.
+
+If a browser tab has cached old OPFS database state:
 1. Perform a hard reload (`Ctrl+Shift+R` in Firefox / Chrome), or
 2. Run `window.resetDeeperDhammaCache()` in the browser developer console to purge the Origin Private File System (OPFS) SQLite cache and reload.
+
 

@@ -364,3 +364,227 @@ def test_headless_firefox_and_chrome_word_sync_parity():
         assert 231.2 <= rep["phys2"] <= 232.5, f"{bname} phys2 out of range: {rep['phys2']}"
         assert 29 <= rep["activeIdx2"] <= 33, f"{bname} activeIdx2 unexpected: {rep['activeIdx2']}"
         assert rep["sumSq"] > 0.01, f"{bname} produced silent audio buffer"
+
+
+def test_static_dist_bundle_parity_staleness_and_no_local_audio_route():
+    """
+    Verifies that:
+    1. `_is_dist_stale` detects missing or outdated `dist/` bundles and returns False
+       when `dist/` is freshly compiled.
+    2. `dist/word_sync.js`, `dist/app.js`, and `dist/words/*.bin` match `deeper_dhamma/web/static/`
+       byte-for-byte.
+    3. Neither `deeper_dhamma.web.app` nor `deeper_dhamma.export_web` exposes a local
+       `/audio/<episode_id>` fallback route, ensuring local testing matches static hosting.
+    """
+    import os
+    from deeper_dhamma.export_web import _is_dist_stale, export_static_site
+    from deeper_dhamma.web.app import create_app
+
+    dist_dir = PROJECT_ROOT / "dist"
+    static_dir = PROJECT_ROOT / "deeper_dhamma" / "web" / "static"
+
+    if not (dist_dir / "index.html").exists() or _is_dist_stale(dist_dir):
+        export_static_site(dist_dir)
+
+    assert not _is_dist_stale(dist_dir), "Freshly built dist/ should not be marked stale"
+
+    # Byte-for-byte asset parity between source static/ and compiled dist/
+    assert (dist_dir / "word_sync.js").read_bytes() == (static_dir / "word_sync.js").read_bytes()
+    assert (dist_dir / "app.js").read_bytes() == (static_dir / "app.js").read_bytes()
+    for ep_id in VBR_EPISODES | CBR_EPISODES:
+        src_bin = static_dir / "words" / f"{ep_id}.bin"
+        if src_bin.exists():
+            assert (dist_dir / "words" / f"{ep_id}.bin").read_bytes() == src_bin.read_bytes()
+
+    # Verify _is_dist_stale detects missing directory or outdated index.html mtime
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        tmp_path = Path(tmp)
+        assert _is_dist_stale(tmp_path) is True
+        idx = tmp_path / "index.html"
+        idx.write_text("<html></html>", encoding="utf-8")
+        os.utime(idx, (1000.0, 1000.0))
+        assert _is_dist_stale(tmp_path) is True
+
+    # Verify /audio/<episode_id> is NOT present on web app (returns 404)
+    app = create_app()
+    status_box = []
+    environ = {
+        "REQUEST_METHOD": "GET",
+        "PATH_INFO": "/audio/pb27802310.mp3",
+        "QUERY_STRING": "",
+        "SERVER_NAME": "localhost",
+        "SERVER_PORT": "80",
+        "wsgi.version": (1, 0),
+        "wsgi.url_scheme": "http",
+        "wsgi.input": io.BytesIO(),
+        "wsgi.errors": io.StringIO(),
+        "wsgi.multithread": False,
+        "wsgi.multiprocess": False,
+        "wsgi.run_once": False,
+    }
+    list(app(environ, lambda s, h, e=None: status_box.append(s)))
+    assert status_box[0].startswith("404"), f"Expected 404 on /audio/ route, got {status_box[0]}"
+
+
+def test_firefox_raw_cdn_fallback_and_native_seek_regression():
+    """
+    Regression test for:
+    1. The `pb27802310` Turn 0 (`3:36`, `216.30s` physical) regression where Firefox in
+       raw `'cdn'` fallback mode previously jumped forward to Bucket `k = 3` (`221.91s` = `3:42`,
+       highlighting Word 9 `"on"` in `"on how to proceed"` instead of Word 0 `"Everyone,"`).
+    2. External/native `<audio>` seeking (`onSeeked` when `_pendingProgrammaticSeek` is false)
+       in both `'patched_blob'` and `'cdn'` modes, plus failed progressive fetch fallback.
+    """
+    firefox_path = Path(r"C:\Program Files\Mozilla Firefox\firefox.exe")
+    bin_path = WORDS_STATIC_DIR / "pb27802310.bin"
+    word_sync_js_path = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "word_sync.js"
+
+    if not (firefox_path.exists() and bin_path.exists()):
+        pytest.skip("Headless Firefox or pb27802310.bin not present")
+
+    bin_bytes = bin_path.read_bytes()
+    word_sync_js = word_sync_js_path.read_bytes()
+    report = {}
+
+    class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
+        daemon_threads = True
+
+    class RegressionHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            report["data"] = json.loads(body.decode("utf-8"))
+            self.send_response(200)
+            self.end_headers()
+
+        def do_GET(self):
+            if self.path == "/word_sync.js":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+                self.send_header("Content-Length", str(len(word_sync_js)))
+                self.end_headers()
+                self.wfile.write(word_sync_js)
+                return
+
+            if self.path == "/words/pb27802310.bin":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(bin_bytes)))
+                self.end_headers()
+                self.wfile.write(bin_bytes)
+                return
+
+            if self.path == "/broken_cdn.mp3":
+                self.send_response(503)
+                self.end_headers()
+                return
+
+            html = b"""<!DOCTYPE html><html><body>
+            <div id="turn-0"></div>
+            <audio id="a"></audio>
+            <script src="/word_sync.js"></script>
+            <script>
+            (async () => {
+                await WordSync.ensureEpisodeLoaded('pb27802310');
+                const container = document.getElementById('turn-0');
+                for (let i = 0; i < 35; i++) {
+                    const sp = document.createElement('span');
+                    sp.id = 'tw-' + i;
+                    container.appendChild(sp);
+                }
+
+                // 1. Test failed progressive fetch cleanly resolves to null without hanging
+                const brokenBlob = await WordSync.waitForFirefoxBlobUrl('/broken_cdn.mp3', 215.80);
+
+                // 2. Test Firefox raw 'cdn' fallback at Turn 0 (3:36 -> 215.80s physical, word 0 at 216.30s)
+                // Must NEVER select Bucket k=3 (delta=+28.74s, landedPhys=221.91s = 3:42 "on how to proceed" = word 9)
+                WordSync.streamMode = 'cdn';
+                const seekCdn = WordSync.prepareSeek(215.80, 216.30);
+                const landedPhysCdn = WordSync.getPhysicalTime(seekCdn);
+                WordSync.update(seekCdn);
+                const activeWordCdn = WordSync.activeWordIdx;
+
+                // 3. Test external/native seek inference in 'patched_blob' mode
+                WordSync.streamMode = 'patched_blob';
+                const sLinear = WordSync.prepareSeek(216.30, 216.30);
+                const offsetLinear = WordSync.seekOffset;
+
+                // 4. Test toggle() and clearHighlights()
+                WordSync.toggle(false);
+                const disabledState = WordSync.enabled;
+                const clearedIdx = WordSync.activeWordIdx;
+                WordSync.toggle(true);
+
+                await fetch('/report', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        brokenBlob,
+                        seekCdn,
+                        landedPhysCdn,
+                        activeWordCdn,
+                        sLinear,
+                        offsetLinear,
+                        disabledState,
+                        clearedIdx,
+                        totalDurSec: WordSync.vbrData.totalDurSec
+                    })
+                });
+            })();
+            </script></body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+
+    server = ThreadedHTTPServer(("127.0.0.1", 0), RegressionHandler)
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as f_dir:
+            p_ff = subprocess.Popen(
+                [
+                    str(firefox_path),
+                    "-headless",
+                    "-profile",
+                    f_dir,
+                    f"http://127.0.0.1:{port}/",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            t0 = time.time()
+            while time.time() - t0 < 20:
+                if "data" in report:
+                    break
+                time.sleep(0.2)
+            p_ff.kill()
+    finally:
+        server.shutdown()
+
+    assert "data" in report, "Headless Firefox regression runner did not report back"
+    data = report["data"]
+
+    # Broken upstream CDN must return null without hanging
+    assert data["brokenBlob"] is None
+
+    # In raw CDN fallback mode, landed physical time must be <= 216.15s (before "Everyone," at 216.30s)
+    # and MUST NOT jump to 221.91s (3:42 "on how to proceed", word 9)
+    assert data["landedPhysCdn"] <= 216.15, (
+        f"Firefox raw CDN fallback jumped forward past Turn 0 to {data['landedPhysCdn']}s!"
+    )
+    assert data["activeWordCdn"] == 0, (
+        f"Expected Word 0 ('Everyone,') to be highlighted on Turn 0 seek, got word {data['activeWordCdn']}"
+    )
+
+    # Linear patched_blob seek for 216.30s must be ~183.85s with offset ~+32.45s
+    assert 183.5 <= data["sLinear"] <= 184.5
+    assert 31.8 <= data["offsetLinear"] <= 33.0
+    assert data["disabledState"] is False
+    assert data["clearedIdx"] == -1
+    assert 6438.0 <= data["totalDurSec"] <= 6440.0
+

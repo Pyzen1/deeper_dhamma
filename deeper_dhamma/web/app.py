@@ -53,11 +53,15 @@ def create_app() -> Bottle:
     @app.route("/static/db_client.js")
     @app.route("/db_client.js")
     def serve_db_client():
-        return static_file("api_client.js", root=str(STATIC_DIR / "adapters"), mimetype="application/javascript")
+        res = static_file("api_client.js", root=str(STATIC_DIR / "adapters"), mimetype="application/javascript")
+        res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        return res
 
     @app.route("/static/<filepath:path>", name="static")
     def serve_static(filepath: str):
-        return static_file(filepath, root=str(STATIC_DIR))
+        res = static_file(filepath, root=str(STATIC_DIR))
+        res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        return res
 
     @app.route("/")
     def index():
