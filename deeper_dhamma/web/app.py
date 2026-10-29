@@ -258,6 +258,25 @@ def create_app() -> Bottle:
             "count": len(results),
         })
 
+    @app.route("/api/lexicon/page")
+    def api_lexicon_page():
+        """Returns paginated and filtered Buddhist lexicon terms."""
+        mode = request.query.get("mode", "core").strip()
+        category = request.query.get("category", "").strip() or None
+        letter = request.query.get("letter", "").strip() or None
+        sort = request.query.get("sort", "pali_asc").strip()
+        page = int(request.query.get("page", 1))
+        limit = min(int(request.query.get("limit", 25)), 100)
+        data = lexicon_db.get_paged_terms(
+            mode=mode,
+            category=category,
+            letter=letter,
+            sort=sort,
+            page=page,
+            limit=limit,
+        )
+        return json_response(data)
+
     @app.route("/api/stats")
     def api_stats():
         """Returns archive catalog status, transcription progress, and filter options."""

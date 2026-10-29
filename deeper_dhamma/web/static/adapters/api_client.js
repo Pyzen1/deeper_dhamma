@@ -71,6 +71,19 @@ class ApiDatabaseClient {
     if (!res.ok) return { term, found: false, data: null };
     return res.json();
   }
+
+  async getLexiconPage(options = {}) {
+    const params = new URLSearchParams();
+    if (options.mode) params.set('mode', options.mode);
+    if (options.category) params.set('category', options.category);
+    if (options.letter) params.set('letter', options.letter);
+    if (options.sort) params.set('sort', options.sort);
+    if (options.page) params.set('page', String(options.page));
+    if (options.limit) params.set('limit', String(options.limit));
+    const res = await fetch(`/api/lexicon/page?${params.toString()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch lexicon page`);
+    return res.json();
+  }
 }
 
 window.DeeperDhammaDB = ApiDatabaseClient;

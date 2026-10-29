@@ -10,6 +10,7 @@ over canonical Pali terms and English descriptions from:
 
 import json
 import logging
+import math
 import re
 import sqlite3
 import unicodedata
@@ -46,6 +47,30 @@ class BuddhismLexiconDatabase:
             logger.info(f"Lexicon database {self.db_path} not found. Building now...")
             from deeper_dhamma.build_lexicon import build_buddhism_lexicon_db
             build_buddhism_lexicon_db()
+        else:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    CREATE VIEW IF NOT EXISTS v_terms AS
+                    SELECT
+                        t.id,
+                        t.pali_plain,
+                        t.pali_diacritic,
+                        t.category,
+                        t.translation_bodhi,
+                        t.translation_sujato,
+                        t.translation_brahm,
+                        t.translation_brahmali,
+                        t.english_description,
+                        t.context_keywords,
+                        t.phonetic_variants,
+                        t.source,
+                        t.source_document_id,
+                        s.url AS source_url,
+                        s.title AS source_title,
+                        s.author AS source_author
+                    FROM terms t
+                    LEFT JOIN source_documents s ON t.source_document_id = s.id;
+                """)
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -96,6 +121,74 @@ class BuddhismLexiconDatabase:
                 d["phonetic_variants"] = json.loads(d.get("phonetic_variants") or "[]")
                 results.append(d)
             return results
+
+    def get_paged_terms(
+        self,
+        mode: str = "core",
+        category: Optional[str] = None,
+        letter: Optional[str] = None,
+        sort: str = "pali_asc",
+        page: int = 1,
+        limit: int = 25,
+    ) -> Dict:
+        """
+        Retrieves paginated terms with optional filtering by mode (core/all),
+        category, and starting letter.
+        """
+        CORE_CANONICAL_TERMS = [
+            "samadhi", "sati", "kamma", "nibbana", "panna", "sila", "bhavana", "sangha",
+            "dhamma", "buddha", "metta", "brahmavihara", "vipassana", "samatha",
+            "paticcasamuppada", "tilakkhana", "khandha", "tanha", "avijja", "ariya"
+        ]
+        where_clauses = ["1=1"]
+        params = []
+
+        if mode == "core":
+            placeholders = ", ".join(["?"] * len(CORE_CANONICAL_TERMS))
+            where_clauses.append(
+                f"(translation_brahm IS NOT NULL OR category != 'sutta_canon' OR pali_plain IN ({placeholders}))"
+            )
+            params.extend(CORE_CANONICAL_TERMS)
+
+        if category and category != "all":
+            where_clauses.append("category = ?")
+            params.append(category)
+
+        if letter and letter != "all":
+            where_clauses.append("pali_plain LIKE ?")
+            params.append(f"{letter.lower()}%")
+
+        where_sql = " AND ".join(where_clauses)
+
+        order_sql = "pali_plain ASC"
+        if sort == "teacher_first":
+            order_sql = "(translation_brahm IS NOT NULL) DESC, pali_plain ASC"
+
+        p = max(1, int(page))
+        lim = max(1, int(limit))
+        offset = (p - 1) * lim
+
+        with self._get_connection() as conn:
+            cur = conn.execute(f"SELECT COUNT(*) FROM v_terms WHERE {where_sql};", params)
+            total = cur.fetchone()[0]
+
+            cur = conn.execute(
+                f"SELECT * FROM v_terms WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?;",
+                [*params, lim, offset],
+            )
+            items = []
+            for r in cur.fetchall():
+                d = dict(r)
+                d["phonetic_variants"] = json.loads(d.get("phonetic_variants") or "[]")
+                items.append(d)
+
+        return {
+            "items": items,
+            "total": total,
+            "page": p,
+            "limit": lim,
+            "total_pages": math.ceil(total / lim) if total > 0 else 1,
+        }
 
     def get_phrase_rules(self) -> List[Dict]:
         """Returns all compiled phonetic phrase rules."""

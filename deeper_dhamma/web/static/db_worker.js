@@ -432,10 +432,10 @@ function damerauLevenshtein(a, b, maxDist = 2) {
 }
 
 function correctFuzzyWord(w) {
-  if (!w || w.length <= 3) return w;
+  if (!w || w.length <= 4) return w;
   if (vocabSet.has(w)) return w;
 
-  const maxDist = w.length <= 6 ? 1 : 2;
+  const maxDist = w.length <= 8 ? 1 : 2;
   let bestCandidate = w;
   let bestDist = maxDist + 1;
   let bestCount = -1;
@@ -752,6 +752,79 @@ function handleLookupLexicon(term) {
   `, [clean, raw]);
 }
 
+const CORE_CANONICAL_TERMS = [
+  'samadhi', 'sati', 'kamma', 'nibbana', 'panna', 'sila', 'bhavana', 'sangha',
+  'dhamma', 'buddha', 'metta', 'brahmavihara', 'vipassana', 'samatha',
+  'paticcasamuppada', 'tilakkhana', 'khandha', 'tanha', 'avijja', 'ariya'
+];
+
+function handleGetLexiconPage({
+  mode = 'core',
+  category = null,
+  letter = null,
+  sort = 'pali_asc',
+  page = 1,
+  limit = 25
+} = {}) {
+  const whereParts = ['1=1'];
+  const params = [];
+
+  if (mode === 'core') {
+    const placeholders = CORE_CANONICAL_TERMS.map(() => '?').join(', ');
+    whereParts.push(`(translation_brahm IS NOT NULL OR category != 'sutta_canon' OR pali_plain IN (${placeholders}))`);
+    params.push(...CORE_CANONICAL_TERMS);
+  }
+
+  if (category && category !== 'all') {
+    whereParts.push('category = ?');
+    params.push(category);
+  }
+
+  if (letter && letter !== 'all') {
+    whereParts.push('pali_plain LIKE ?');
+    params.push(`${letter.toLowerCase()}%`);
+  }
+
+  const whereSql = whereParts.join(' AND ');
+
+  const countRow = queryOne(`SELECT COUNT(*) as cnt FROM v_terms WHERE ${whereSql};`, params);
+  const total = countRow ? (countRow.cnt || 0) : 0;
+
+  let orderSql = 'pali_plain ASC';
+  if (sort === 'teacher_first') {
+    orderSql = '(translation_brahm IS NOT NULL) DESC, pali_plain ASC';
+  }
+
+  const p = Math.max(1, parseInt(page, 10) || 1);
+  const lim = Math.max(1, parseInt(limit, 10) || 25);
+  const offset = (p - 1) * lim;
+
+  const items = queryAll(`
+    SELECT * FROM v_terms
+    WHERE ${whereSql}
+    ORDER BY ${orderSql}
+    LIMIT ? OFFSET ?;
+  `, [...params, lim, offset]);
+
+  items.forEach(item => {
+    if (typeof item.phonetic_variants === 'string') {
+      try {
+        item.phonetic_variants = JSON.parse(item.phonetic_variants);
+      } catch (_) {
+        item.phonetic_variants = [];
+      }
+    }
+  });
+
+  return {
+    items,
+    total,
+    page: p,
+    limit: lim,
+    totalPages: Math.ceil(total / lim) || 1
+  };
+}
+
 // ============================================================================
 // Worker Message Router
 // ============================================================================
@@ -794,6 +867,11 @@ self.onmessage = async (e) => {
       case 'lookup_lexicon': {
         const term = handleLookupLexicon(payload && payload.term);
         self.postMessage({ id, success: true, data: term });
+        break;
+      }
+      case 'get_lexicon_page': {
+        const pageData = handleGetLexiconPage(payload || {});
+        self.postMessage({ id, success: true, data: pageData });
         break;
       }
       default:

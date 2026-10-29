@@ -807,6 +807,7 @@ def build_buddhism_lexicon_db():
     for entry in brahmali_entries:
         key = entry["pali_plain"]
         if key in all_terms:
+            all_terms[key]["category"] = entry.get("category", all_terms[key]["category"])
             all_terms[key]["translation_brahmali"] = entry["translation_brahmali"]
             all_terms[key]["english_description"] += f" | Vinaya (Brahmali): {entry['translation_brahmali']}"
             all_terms[key]["context_keywords"] += f", {entry['context_keywords']}"
@@ -819,6 +820,7 @@ def build_buddhism_lexicon_db():
     for entry in brahm_entries:
         key = entry["pali_plain"]
         if key in all_terms:
+            all_terms[key]["category"] = entry.get("category", all_terms[key]["category"])
             all_terms[key]["translation_brahm"] = entry["translation_brahm"]
             all_terms[key]["english_description"] = entry["english_description"] + f" [Bodhi: {all_terms[key]['translation_bodhi']}] [Sujato: {all_terms[key]['translation_sujato']}]"
             all_terms[key]["context_keywords"] += f", {entry['context_keywords']}"

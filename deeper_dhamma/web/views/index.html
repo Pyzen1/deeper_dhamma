@@ -282,9 +282,86 @@
           <div class="lexicon-search-bar">
             <input type="search" id="lexicon-search-input" placeholder="Look up Pali or English term (e.g. samadhi, kamma, nibbidā)..." autocomplete="off">
           </div>
+
+          <!-- Mode Switcher & Sort Controls -->
+          <div class="lexicon-controls-bar">
+            <div class="lexicon-mode-toggle" id="lexicon-mode-toggle">
+              <button type="button" class="lexicon-mode-btn active" id="btn-lexicon-core" data-mode="core" title="Curated core meditation and doctrinal vocabulary">⭐ Standard Core Terms</button>
+              <button type="button" class="lexicon-mode-btn" id="btn-lexicon-all" data-mode="all" title="Browse all canonical Pali terms">📖 Browse All Terms</button>
+            </div>
+
+            <div class="lexicon-sort-wrapper">
+              <select id="lexicon-sort-select" aria-label="Sort terms">
+                <option value="pali_asc">Pali (A → Z)</option>
+                <option value="teacher_first">Teacher Glosses First</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Category Filter Bar -->
+          <div class="lexicon-category-bar" id="lexicon-category-bar">
+            <span class="filter-label">Category:</span>
+            <button type="button" class="cat-pill active" data-cat="all">All</button>
+            <button type="button" class="cat-pill" data-cat="meditation">Meditation</button>
+            <button type="button" class="cat-pill" data-cat="hindrance">Hindrances</button>
+            <button type="button" class="cat-pill" data-cat="doctrine">Doctrine</button>
+            <button type="button" class="cat-pill" data-cat="vinaya">Vinaya</button>
+            <button type="button" class="cat-pill" data-cat="monastic_life">Monastic Life</button>
+            <button type="button" class="cat-pill" data-cat="monastery">Monasteries</button>
+          </div>
+
+          <!-- Alphabet A-Z Bar (for Browse All mode) -->
+          <div class="lexicon-alphabet-bar" id="lexicon-alphabet-bar" style="display: none;">
+            <span class="filter-label">Letter:</span>
+            <button type="button" class="alpha-btn active" data-letter="all">All</button>
+            <button type="button" class="alpha-btn" data-letter="a">A</button>
+            <button type="button" class="alpha-btn" data-letter="b">B</button>
+            <button type="button" class="alpha-btn" data-letter="c">C</button>
+            <button type="button" class="alpha-btn" data-letter="d">D</button>
+            <button type="button" class="alpha-btn" data-letter="e">E</button>
+            <button type="button" class="alpha-btn" data-letter="g">G</button>
+            <button type="button" class="alpha-btn" data-letter="h">H</button>
+            <button type="button" class="alpha-btn" data-letter="i">I</button>
+            <button type="button" class="alpha-btn" data-letter="j">J</button>
+            <button type="button" class="alpha-btn" data-letter="k">K</button>
+            <button type="button" class="alpha-btn" data-letter="m">M</button>
+            <button type="button" class="alpha-btn" data-letter="n">N</button>
+            <button type="button" class="alpha-btn" data-letter="p">P</button>
+            <button type="button" class="alpha-btn" data-letter="r">R</button>
+            <button type="button" class="alpha-btn" data-letter="s">S</button>
+            <button type="button" class="alpha-btn" data-letter="t">T</button>
+            <button type="button" class="alpha-btn" data-letter="u">U</button>
+            <button type="button" class="alpha-btn" data-letter="v">V</button>
+            <button type="button" class="alpha-btn" data-letter="y">Y</button>
+          </div>
+
+          <!-- Status / Count Meta -->
+          <div class="lexicon-meta-bar" id="lexicon-meta-bar">
+            <span id="lexicon-count-text">Loading canonical terms...</span>
+          </div>
         </div>
+
         <div class="lexicon-results" id="lexicon-results-list">
-          <div class="empty-state-subtle">Enter a Buddhist term above to view canonical definitions and phonetic rules.</div>
+          <div class="loading-spinner">Loading doctrinal terms...</div>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="lexicon-pagination" id="lexicon-pagination" style="display: none;">
+          <div class="page-nav-group">
+            <button type="button" class="btn-page" id="btn-lex-first" title="First Page">« First</button>
+            <button type="button" class="btn-page" id="btn-lex-prev" title="Previous Page">‹ Prev</button>
+            <span class="page-indicator" id="lex-page-indicator">Page 1 of 1</span>
+            <button type="button" class="btn-page" id="btn-lex-next" title="Next Page">Next ›</button>
+            <button type="button" class="btn-page" id="btn-lex-last" title="Last Page">Last »</button>
+          </div>
+          <div class="page-size-group">
+            <label for="lex-limit-select">Show:</label>
+            <select id="lex-limit-select" class="limit-select" title="Items per page">
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
         </div>
       </div>
 

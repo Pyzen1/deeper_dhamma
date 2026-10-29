@@ -5,7 +5,7 @@ Verifies:
 1. SQLite Database Schema & Integrity: search_vocab table compliance (integer PK 'id', uniqueness, counts).
 2. Exhaustive Pali & Unicode Diacritic Folding (macrons, retroflex dots, tildes, anusvara).
 3. Damerau-Levenshtein Edit Distance (insertions, deletions, substitutions, adjacent transpositions, early bailout).
-4. Adaptive Fuzzy Word Correction Thresholds (<=3 chars strict, 4-6 dist 1, 7+ dist 2, frequency tie-breaking).
+4. Adaptive Fuzzy Word Correction Thresholds (<=4 chars strict, 5-8 dist 1, 9+ dist 2, frequency tie-breaking).
 5. Quorum Soft-AND Multi-Word Generation (N-1 term combinations for >=3 words, SQLite expression safety limit).
 6. Stopword Filtering for Tier 6 OR fallback queries.
 7. Headless Google Chrome execution of db_worker.js verifying V8 runtime parity.
@@ -342,7 +342,7 @@ def test_headless_browser_worker_fuzzy_logic():
                 const c1 = correctFuzzyWord('countng');      // dist 1 on 7-letter word -> counting
                 const c2 = correctFuzzyWord('anapanasaty');  // dist 1 on 11-letter word -> anapanasati
                 const c3 = correctFuzzyWord('nobel');        // transposition dist 1 on 5-letter word -> noble
-                const c4 = correctFuzzyWord('the');          // short word <= 3 chars must NOT be altered
+                const c4 = correctFuzzyWord('the');          // short word <= 4 chars must NOT be altered
                 const c5 = correctFuzzyWord('meditaton');    // dist 1 on 9-letter word -> meditation
 
                 // 5. Frequency tie-breaking test
@@ -353,6 +353,12 @@ def test_headless_browser_worker_fuzzy_logic():
                 vocabSet.add('brake');
                 const c6 = correctFuzzyWord('brase'); // distance 1 to both, brake has higher count -> brake
 
+                // 6. Strict threshold tests: 7-letter word at distance 2 must NOT be altered
+                vocabList.push({{ word: 'success', count: 100 }});
+                vocabSet.add('success');
+                const c7 = correctFuzzyWord('succeed'); // distance 2 to 'success' on 7-letter word -> untouched ('succeed')
+                const c8 = correctFuzzyWord('mind');    // 4-letter word <= 4 chars -> untouched ('mind')
+
                 await fetch('/report', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
@@ -360,7 +366,7 @@ def test_headless_browser_worker_fuzzy_logic():
                         f1, f2, f3, f4, f5,
                         d1, d2, d3, d4, d5,
                         qCombos,
-                        c1, c2, c3, c4, c5, c6
+                        c1, c2, c3, c4, c5, c6, c7, c8
                     }})
                 }});
             }}
@@ -418,6 +424,8 @@ def test_headless_browser_worker_fuzzy_logic():
         assert report.get("c4") == "the"
         assert report.get("c5") == "meditation"
         assert report.get("c6") == "brake"
+        assert report.get("c7") == "succeed"
+        assert report.get("c8") == "mind"
 
     finally:
         server.shutdown()

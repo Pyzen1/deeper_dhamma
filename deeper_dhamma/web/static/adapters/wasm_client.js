@@ -105,6 +105,11 @@ class WasmDatabaseClient {
     const data = await this.send('lookup_lexicon', { term });
     return { term, found: !!data, data };
   }
+
+  async getLexiconPage(options = {}) {
+    await this.init();
+    return this.send('get_lexicon_page', options);
+  }
 }
 
 window.DeeperDhammaDB = WasmDatabaseClient;

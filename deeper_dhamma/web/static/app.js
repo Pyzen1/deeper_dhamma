@@ -22,6 +22,17 @@
     currentFilteredTalks: [],
     dateFilterMode: 'year',
     archiveCancelRequested: false,
+    lexicon: {
+      mode: 'core',
+      category: 'all',
+      letter: 'all',
+      sort: 'pali_asc',
+      page: 1,
+      limit: 25,
+      total: 0,
+      totalPages: 1,
+      loadedOnce: false,
+    },
   };
 
   // ==========================================================================
@@ -110,6 +121,19 @@
     // Lexicon Content
     lexiconInput: document.getElementById('lexicon-search-input'),
     lexiconResults: document.getElementById('lexicon-results-list'),
+    btnLexCore: document.getElementById('btn-lexicon-core'),
+    btnLexAll: document.getElementById('btn-lexicon-all'),
+    lexSortSelect: document.getElementById('lexicon-sort-select'),
+    lexCategoryBar: document.getElementById('lexicon-category-bar'),
+    lexAlphabetBar: document.getElementById('lexicon-alphabet-bar'),
+    lexCountText: document.getElementById('lexicon-count-text'),
+    lexPagination: document.getElementById('lexicon-pagination'),
+    btnLexFirst: document.getElementById('btn-lex-first'),
+    btnLexPrev: document.getElementById('btn-lex-prev'),
+    btnLexNext: document.getElementById('btn-lex-next'),
+    btnLexLast: document.getElementById('btn-lex-last'),
+    lexPageIndicator: document.getElementById('lex-page-indicator'),
+    lexLimitSelect: document.getElementById('lex-limit-select'),
 
     // Transcript View Elements
     transcriptBackBtn: document.getElementById('transcript-back-btn'),
@@ -1128,14 +1152,144 @@
 
 
 
-    // Lexicon Search
+    // Lexicon Search & Controls
     if (els.lexiconInput) {
       els.lexiconInput.addEventListener('input', () => {
         const term = els.lexiconInput.value.trim();
         clearTimeout(state.lexiconDebounceTimer);
         state.lexiconDebounceTimer = setTimeout(() => {
-          executeLexiconSearch(term);
+          if (!term) {
+            if (els.lexCategoryBar) els.lexCategoryBar.style.display = 'flex';
+            if (els.lexAlphabetBar && state.lexicon.mode === 'all') els.lexAlphabetBar.style.display = 'flex';
+            loadLexiconView();
+          } else {
+            if (els.lexAlphabetBar) els.lexAlphabetBar.style.display = 'none';
+            if (els.lexPagination) els.lexPagination.style.display = 'none';
+            if (els.lexCountText) els.lexCountText.textContent = `Search results for "${term}"`;
+            executeLexiconSearch(term);
+          }
         }, 250);
+      });
+    }
+
+    // Lexicon Mode Toggling
+    if (els.btnLexCore) {
+      els.btnLexCore.addEventListener('click', () => {
+        if (state.lexicon.mode === 'core') return;
+        state.lexicon.mode = 'core';
+        state.lexicon.page = 1;
+        els.btnLexCore.classList.add('active');
+        if (els.btnLexAll) els.btnLexAll.classList.remove('active');
+        if (els.lexAlphabetBar) els.lexAlphabetBar.style.display = 'none';
+        loadLexiconView();
+      });
+    }
+
+    if (els.btnLexAll) {
+      els.btnLexAll.addEventListener('click', () => {
+        if (state.lexicon.mode === 'all') return;
+        state.lexicon.mode = 'all';
+        state.lexicon.page = 1;
+        els.btnLexAll.classList.add('active');
+        if (els.btnLexCore) els.btnLexCore.classList.remove('active');
+        if (els.lexAlphabetBar) els.lexAlphabetBar.style.display = 'flex';
+        loadLexiconView();
+      });
+    }
+
+    // Lexicon Sort Select
+    if (els.lexSortSelect) {
+      els.lexSortSelect.addEventListener('change', () => {
+        state.lexicon.sort = els.lexSortSelect.value;
+        state.lexicon.page = 1;
+        loadLexiconView();
+      });
+    }
+
+    // Lexicon Category Bar
+    if (els.lexCategoryBar) {
+      els.lexCategoryBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.cat-pill');
+        if (!btn) return;
+        els.lexCategoryBar.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        state.lexicon.category = btn.dataset.cat || 'all';
+        state.lexicon.page = 1;
+        loadLexiconView();
+      });
+    }
+
+    // Lexicon Alphabet Bar
+    if (els.lexAlphabetBar) {
+      els.lexAlphabetBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.alpha-btn');
+        if (!btn) return;
+        els.lexAlphabetBar.querySelectorAll('.alpha-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.lexicon.letter = btn.dataset.letter || 'all';
+        state.lexicon.page = 1;
+        loadLexiconView();
+      });
+    }
+
+    // Lexicon Pagination Controls
+    if (els.btnLexFirst) {
+      els.btnLexFirst.addEventListener('click', () => {
+        if (state.lexicon.page > 1) {
+          state.lexicon.page = 1;
+          loadLexiconView();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    }
+    if (els.btnLexPrev) {
+      els.btnLexPrev.addEventListener('click', () => {
+        if (state.lexicon.page > 1) {
+          state.lexicon.page--;
+          loadLexiconView();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    }
+    if (els.btnLexNext) {
+      els.btnLexNext.addEventListener('click', () => {
+        if (state.lexicon.page < state.lexicon.totalPages) {
+          state.lexicon.page++;
+          loadLexiconView();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    }
+    if (els.btnLexLast) {
+      els.btnLexLast.addEventListener('click', () => {
+        if (state.lexicon.page < state.lexicon.totalPages) {
+          state.lexicon.page = state.lexicon.totalPages;
+          loadLexiconView();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    }
+    if (els.lexLimitSelect) {
+      els.lexLimitSelect.addEventListener('change', () => {
+        state.lexicon.limit = parseInt(els.lexLimitSelect.value, 10) || 25;
+        state.lexicon.page = 1;
+        loadLexiconView();
+      });
+    }
+
+    // Delegated "Find Talks" click on lexicon cards
+    if (els.lexiconResults) {
+      els.lexiconResults.addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn-lexicon-talks');
+        if (!btn) return;
+        const term = btn.dataset.term;
+        if (term) {
+          switchTab('search-view');
+          if (els.searchInput) {
+            els.searchInput.value = term;
+            executeSearch(term);
+          }
+        }
       });
     }
 
@@ -1169,6 +1323,9 @@
     });
     if (viewId === 'browse-view' && (!state.catalog || state.catalog.length === 0)) {
       loadBrowseCatalog();
+    }
+    if (viewId === 'lexicon-view' && (!state.lexicon || !state.lexicon.loadedOnce)) {
+      loadLexiconView();
     }
   }
 
@@ -1958,9 +2115,133 @@
   // Pali Lexicon View
   // ==========================================================================
 
+  function renderLexiconCard(item) {
+    const diacritic = item.pali_diacritic ? `(${escapeHtml(item.pali_diacritic)})` : '';
+    const english = item.english_description || item.english_translation || item.preferred_translation || '';
+    const isCore = !!item.translation_brahm || (item.category && item.category !== 'sutta_canon');
+
+    // Build teacher translations gloss if present
+    const teacherGloss = [];
+    if (item.translation_brahm) {
+      teacherGloss.push(`<div class="lexicon-gloss-item"><span class="gloss-teacher">Ajahn Brahm:</span> <span class="gloss-quote">“${escapeHtml(item.translation_brahm)}”</span></div>`);
+    }
+    if (item.translation_sujato) {
+      teacherGloss.push(`<div class="lexicon-gloss-item"><span class="gloss-teacher">Bhikkhu Sujato:</span> <span class="gloss-quote">“${escapeHtml(item.translation_sujato)}”</span></div>`);
+    }
+    if (item.translation_bodhi) {
+      teacherGloss.push(`<div class="lexicon-gloss-item"><span class="gloss-teacher">Bhikkhu Bodhi:</span> <span class="gloss-quote">“${escapeHtml(item.translation_bodhi)}”</span></div>`);
+    }
+    if (item.translation_brahmali) {
+      teacherGloss.push(`<div class="lexicon-gloss-item"><span class="gloss-teacher">Ajahn Brahmali:</span> <span class="gloss-quote">“${escapeHtml(item.translation_brahmali)}”</span></div>`);
+    }
+
+    const notes = item.context_keywords || item.doctrinal_notes || '';
+    const source = item.source_title ? `${item.source_title}${item.source_author ? ' — ' + item.source_author : ''}` : (item.source || 'SuttaCentral / Bodhinyana Reference');
+
+    return `
+      <div class="lexicon-card">
+        <div class="lexicon-term-title">
+          <span class="pali-term">${escapeHtml(item.pali_plain)}</span>
+          <span class="lexicon-diacritic">${diacritic}</span>
+          ${item.category ? `<span class="category-badge">${escapeHtml(item.category.replace(/_/g, ' '))}</span>` : ''}
+          ${isCore ? `<span class="core-badge">⭐ CORE</span>` : ''}
+        </div>
+        ${english ? `
+          <div class="lexicon-meaning">
+            <strong>Doctrinal Definition:</strong> ${escapeHtml(english)}
+          </div>
+        ` : ''}
+        ${teacherGloss.length > 0 ? `
+          <div class="lexicon-teacher-glosses">
+            <div class="glosses-title">Teacher Translations:</div>
+            ${teacherGloss.join('')}
+          </div>
+        ` : ''}
+        ${notes ? `<div class="lexicon-meta"><strong>Context / Keywords:</strong> ${escapeHtml(notes)}</div>` : ''}
+        <div class="lexicon-meta"><strong>Authority Source:</strong> ${escapeHtml(source)}</div>
+        <div class="lexicon-actions">
+          <button type="button" class="btn-lexicon-talks" data-term="${escapeHtml(item.pali_plain)}" title="Search transcripts for this Pali term">
+            🔍 Find Talks Mentioning "${escapeHtml(item.pali_plain)}"
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  async function loadLexiconView() {
+    if (!els.lexiconResults) return;
+    els.lexiconResults.innerHTML = '<div class="loading-spinner">Loading doctrinal terms...</div>';
+
+    try {
+      const pageData = await dbService.getLexiconPage({
+        mode: state.lexicon.mode,
+        category: state.lexicon.category,
+        letter: state.lexicon.letter,
+        sort: state.lexicon.sort,
+        page: state.lexicon.page,
+        limit: state.lexicon.limit,
+      });
+
+      state.lexicon.total = pageData.total || 0;
+      state.lexicon.totalPages = pageData.totalPages || 1;
+      state.lexicon.page = pageData.page || 1;
+      state.lexicon.loadedOnce = true;
+
+      // Update count text
+      if (els.lexCountText) {
+        if (state.lexicon.mode === 'core') {
+          const filterSuffix = (state.lexicon.category && state.lexicon.category !== 'all')
+            ? ` in "${state.lexicon.category.replace(/_/g, ' ')}"`
+            : '';
+          els.lexCountText.textContent = `Showing ${pageData.items.length} of ${pageData.total} Standard Core Terms${filterSuffix}`;
+        } else {
+          const start = pageData.total > 0 ? (state.lexicon.page - 1) * state.lexicon.limit + 1 : 0;
+          const end = Math.min(state.lexicon.page * state.lexicon.limit, pageData.total);
+          const filterSuffix = (state.lexicon.category && state.lexicon.category !== 'all')
+            ? ` in "${state.lexicon.category.replace(/_/g, ' ')}"`
+            : '';
+          const letterSuffix = (state.lexicon.letter && state.lexicon.letter !== 'all')
+            ? ` starting with "${state.lexicon.letter.toUpperCase()}"`
+            : '';
+          els.lexCountText.textContent = `Showing ${start}–${end} of ${pageData.total.toLocaleString()} Canonical Terms${filterSuffix}${letterSuffix}`;
+        }
+      }
+
+      // Render cards
+      if (!pageData.items || pageData.items.length === 0) {
+        els.lexiconResults.innerHTML = `
+          <div class="empty-state" style="padding: 2.5rem;">
+            <p>No matching doctrinal terms found for current filters.</p>
+          </div>
+        `;
+      } else {
+        els.lexiconResults.innerHTML = pageData.items.map(item => renderLexiconCard(item)).join('');
+      }
+
+      // Update Pagination Controls
+      if (els.lexPagination) {
+        if (state.lexicon.totalPages > 1 || state.lexicon.mode === 'all') {
+          els.lexPagination.style.display = 'flex';
+          if (els.lexPageIndicator) {
+            els.lexPageIndicator.textContent = `Page ${state.lexicon.page} of ${state.lexicon.totalPages}`;
+          }
+          if (els.btnLexFirst) els.btnLexFirst.disabled = state.lexicon.page <= 1;
+          if (els.btnLexPrev) els.btnLexPrev.disabled = state.lexicon.page <= 1;
+          if (els.btnLexNext) els.btnLexNext.disabled = state.lexicon.page >= state.lexicon.totalPages;
+          if (els.btnLexLast) els.btnLexLast.disabled = state.lexicon.page >= state.lexicon.totalPages;
+        } else {
+          els.lexPagination.style.display = 'none';
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load lexicon terms:', err);
+      els.lexiconResults.innerHTML = '<div class="empty-state"><p>Failed to load lexicon terms.</p></div>';
+    }
+  }
+
   async function executeLexiconSearch(term) {
     if (!term) {
-      els.lexiconResults.innerHTML = '<div class="empty-state-subtle">Enter a Buddhist term above to view canonical definitions and phonetic rules.</div>';
+      loadLexiconView();
       return;
     }
 
@@ -1972,7 +2253,7 @@
       const searchResults = await dbService.searchLexicon(term, 10);
 
       let entries = [];
-      if (lookupData.found && lookupData.data) {
+      if (lookupData && lookupData.found && lookupData.data) {
         entries.push(lookupData.data);
       }
       if (searchResults && searchResults.length) {
@@ -1984,6 +2265,7 @@
       }
 
       if (entries.length === 0) {
+        if (els.lexCountText) els.lexCountText.textContent = `No results found for "${term}"`;
         els.lexiconResults.innerHTML = `
           <div class="empty-state" style="padding: 2rem;">
             <p>No lexicon entry found for "${escapeHtml(term)}".</p>
@@ -1992,54 +2274,10 @@
         return;
       }
 
-      let html = '';
-      entries.forEach(item => {
-        const diacritic = item.pali_diacritic ? `(${escapeHtml(item.pali_diacritic)})` : '';
-        const english = item.english_description || item.english_translation || item.preferred_translation || '';
-        
-        // Build teacher translations gloss if present
-        const teacherGloss = [];
-        if (item.translation_brahm) {
-          teacherGloss.push(`<div class="lexicon-gloss-item"><span class="gloss-teacher">Ajahn Brahm:</span> <span class="gloss-quote">“${escapeHtml(item.translation_brahm)}”</span></div>`);
-        }
-        if (item.translation_sujato) {
-          teacherGloss.push(`<div class="lexicon-gloss-item"><span class="gloss-teacher">Bhikkhu Sujato:</span> <span class="gloss-quote">“${escapeHtml(item.translation_sujato)}”</span></div>`);
-        }
-        if (item.translation_bodhi) {
-          teacherGloss.push(`<div class="lexicon-gloss-item"><span class="gloss-teacher">Bhikkhu Bodhi:</span> <span class="gloss-quote">“${escapeHtml(item.translation_bodhi)}”</span></div>`);
-        }
-        if (item.translation_brahmali) {
-          teacherGloss.push(`<div class="lexicon-gloss-item"><span class="gloss-teacher">Ajahn Brahmali:</span> <span class="gloss-quote">“${escapeHtml(item.translation_brahmali)}”</span></div>`);
-        }
-
-        const notes = item.context_keywords || item.doctrinal_notes || '';
-        const source = item.source_title ? `${item.source_title}${item.source_author ? ' — ' + item.source_author : ''}` : (item.source || 'SuttaCentral / Bodhinyana Reference');
-
-        html += `
-          <div class="lexicon-card">
-            <div class="lexicon-term-title">
-              <span class="pali-term">${escapeHtml(item.pali_plain)}</span>
-              <span class="lexicon-diacritic">${diacritic}</span>
-              ${item.category ? `<span class="category-badge">${escapeHtml(item.category.replace(/_/g, ' '))}</span>` : ''}
-            </div>
-            ${english ? `
-              <div class="lexicon-meaning">
-                <strong>Doctrinal Definition:</strong> ${escapeHtml(english)}
-              </div>
-            ` : ''}
-            ${teacherGloss.length > 0 ? `
-              <div class="lexicon-teacher-glosses">
-                <div class="glosses-title">Teacher Translations:</div>
-                ${teacherGloss.join('')}
-              </div>
-            ` : ''}
-            ${notes ? `<div class="lexicon-meta"><strong>Context / Keywords:</strong> ${escapeHtml(notes)}</div>` : ''}
-            <div class="lexicon-meta"><strong>Authority Source:</strong> ${escapeHtml(source)}</div>
-          </div>
-        `;
-      });
-
-      els.lexiconResults.innerHTML = html;
+      if (els.lexCountText) {
+        els.lexCountText.textContent = `Found ${entries.length} matching term${entries.length > 1 ? 's' : ''} for "${term}"`;
+      }
+      els.lexiconResults.innerHTML = entries.map(item => renderLexiconCard(item)).join('');
     } catch (err) {
       console.error('Lexicon search failed:', err);
     }
