@@ -84,7 +84,7 @@ def create_app() -> Bottle:
         and direct Podbean CDN streaming URLs.
         """
         q = request.query.get("q", "").strip()
-        limit = min(int(request.query.get("limit", 30)), 100)
+        limit = min(int(request.query.get("limit", 500)), 1000)
         exact = request.query.get("exact", "0").lower() in ("1", "true", "yes")
         year_filter = request.query.get("year")
         start_date = request.query.get("start_date")

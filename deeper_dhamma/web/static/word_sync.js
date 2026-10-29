@@ -667,7 +667,8 @@
       this.turnWordMap = {};
       let wordCursor = 0;
 
-      segments.forEach((seg, turnIdx) => {
+      segments.forEach((seg, idx) => {
+        const turnIdx = seg.turn_index !== undefined ? Number(seg.turn_index) : idx;
         const segSt = parseFloat(seg.start_sec || 0);
         const segEn = parseFloat(seg.end_sec || 0);
         const turnWords = [];
@@ -734,27 +735,40 @@
       }
 
       const turnWords = this.turnWordMap[turnIdx] || [];
+      let sentCursorInTurn = 0;
 
-      // If no exact word timings exist for this talk, render clean original paragraphs
+      // If no exact word timings exist for this talk, render clean original paragraphs with sentence spans
       if (turnWords.length === 0) {
-        return paragraphs.map(p => `<p class="turn-p">${this.escapeHtml(p)}</p>`).join('');
+        return paragraphs.map(pText => {
+          const sents = pText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [pText];
+          const wrappedSents = sents.map(sent => {
+            const sIdx = sentCursorInTurn++;
+            return `<span class="transcript-sentence" id="turn-${turnIdx}-sent-${sIdx}" data-turn-idx="${turnIdx}" data-sent-idx="${sIdx}">${this.escapeHtml(sent)}</span>`;
+          });
+          return `<p class="turn-p">${wrappedSents.join('')}</p>`;
+        }).join('');
       }
 
       // If exact word timings ARE available, wrap words inline without changing any whitespace
       let wordCursorInTurn = 0;
       return paragraphs.map(pText => {
-        const tokens = pText.split(/(\s+)/);
-        const wrappedTokens = tokens.map(token => {
-          if (!token || /^\s+$/.test(token)) {
-            return token; // Preserves exact whitespace
-          }
-          if (wordCursorInTurn < turnWords.length) {
-            const w = turnWords[wordCursorInTurn++];
-            return `<span class="transcript-word" id="${w.id}" data-start="${w.s}" data-end="${w.e}" title="Click to seek to ${this.formatSeconds(w.s)}">${this.escapeHtml(token)}</span>`;
-          }
-          return this.escapeHtml(token);
+        const sents = pText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [pText];
+        const wrappedSents = sents.map(sent => {
+          const sIdx = sentCursorInTurn++;
+          const tokens = sent.split(/(\s+)/);
+          const wrappedTokens = tokens.map(token => {
+            if (!token || /^\s+$/.test(token)) {
+              return token; // Preserves exact whitespace
+            }
+            if (wordCursorInTurn < turnWords.length) {
+              const w = turnWords[wordCursorInTurn++];
+              return `<span class="transcript-word" id="${w.id}" data-turn-idx="${turnIdx}" data-word-idx="${w.wordIdxInTurn}" data-start="${w.s}" data-end="${w.e}" title="Click to seek to ${this.formatSeconds(w.s)}">${this.escapeHtml(token)}</span>`;
+            }
+            return this.escapeHtml(token);
+          });
+          return `<span class="transcript-sentence" id="turn-${turnIdx}-sent-${sIdx}" data-turn-idx="${turnIdx}" data-sent-idx="${sIdx}">${wrappedTokens.join('')}</span>`;
         });
-        return `<p class="turn-p">${wrappedTokens.join('')}</p>`;
+        return `<p class="turn-p">${wrappedSents.join('')}</p>`;
       }).join('');
     },
 

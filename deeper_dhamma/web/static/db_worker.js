@@ -313,7 +313,7 @@ function handleGetEpisode(episodeId) {
   };
 }
 
-function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDate, sort = 'rank', limit = 30 }) {
+function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDate, sort = 'rank', limit = 500 }) {
   const t0 = performance.now();
   const cleanQuery = (query || '').replace(/\\"/g, '"').trim();
   const words = cleanQuery.match(/[a-zA-Z0-9]+/g) || [];
@@ -327,15 +327,18 @@ function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDa
       e.id AS episode_id,
       e.title,
       e.date,
+      e.duration_sec,
       e.primary_teacher AS teacher_slug,
       e.primary_display AS teacher,
       e.identified_teachers,
       e.media_url,
       e.permalink,
+      s.turn_index,
       s.speaker_slug,
       s.speaker_display,
       s.start_sec,
       s.end_sec,
+      s.text,
       snippet(transcripts_fts, 1, '<b>', '</b>', '...', 15) AS snippet_text
     FROM transcripts_fts
     JOIN speech_segments s ON transcripts_fts.rowid = s.id

@@ -24,7 +24,7 @@ class ApiDatabaseClient {
   async search(query, options = {}) {
     const params = new URLSearchParams({
       q: query,
-      limit: String(options.limit || 40),
+      limit: String(options.limit || 500),
       exact: options.exact ? '1' : '0',
     });
     if (options.teacher) params.set('teacher', options.teacher);

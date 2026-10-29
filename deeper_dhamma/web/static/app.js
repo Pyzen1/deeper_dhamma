@@ -1212,7 +1212,7 @@
     // Case 1: Search query provided (FTS search)
     if (query) {
       const searchOpts = {
-        limit: 50,
+        limit: 500,
         exact: els.exactCheckbox.checked,
         sort: sortVal,
       };
@@ -1366,27 +1366,243 @@
     attachCardEventListeners(els.searchResultsList, episodes);
   }
 
-  function renderSearchResults(data) {
-    const { results, count, meta, elapsed_ms, query } = data;
+  /**
+   * Extracts sentence-level matches from a segment turn's full text,
+   * preserving sentence index, word offset within the turn, and estimated word timestamp.
+   */
+  function extractSentenceMatchesFromSegment(segItem, query, effectiveQuery) {
+    const rawText = (segItem.text || '').trim();
+    const startSec = parseFloat(segItem.start_sec || 0);
+    const endSec = parseFloat(segItem.end_sec || startSec);
+    const turnDur = Math.max(0, endSec - startSec);
+    const turnIndex = segItem.turn_index !== undefined ? Number(segItem.turn_index) : 0;
 
-    // Extract distinct episodes for archive export
-    const distinctEpisodes = [];
-    const seenIds = new Set();
-    results.forEach(r => {
-      if (r.episode_id && !seenIds.has(r.episode_id)) {
-        seenIds.add(r.episode_id);
-        distinctEpisodes.push({
-          id: r.episode_id,
-          title: r.title,
-          date: r.date,
-          teacher: r.teacher,
-          media_url: r.media_url,
-          duration_sec: r.duration_sec,
+    if (!rawText) {
+      return [{
+        episode_id: segItem.episode_id,
+        turn_index: turnIndex,
+        sent_idx_in_turn: 0,
+        word_offset_in_turn: 0,
+        sent_start_word_offset: 0,
+        est_word_sec: startSec,
+        speaker_display: segItem.speaker_display || segItem.teacher,
+        speaker_slug: segItem.speaker_slug || segItem.teacher_slug,
+        sentence_html: segItem.snippet_text || '',
+        sentence_text: (segItem.snippet_text || '').replace(/<\/?b>/gi, ''),
+      }];
+    }
+
+    // Build regex terms from query and effectiveQuery
+    const rawTerms = [];
+    const sourceQ = `${query || ''} ${effectiveQuery || ''}`;
+    const STOP_OPS = new Set(['and', 'or', 'not', 'near']);
+    const parsedWords = sourceQ.match(/[a-zA-Z0-9]+/g) || [];
+    parsedWords.forEach(w => {
+      const lw = w.toLowerCase();
+      if (!STOP_OPS.has(lw) && lw.length >= 2 && !/^\d+$/.test(lw)) {
+        if (!rawTerms.includes(lw)) rawTerms.push(lw);
+      }
+    });
+
+    // Also inspect any <b>...</b> highlighted words in snippet_text (handles Tier 4 fuzzy corrections)
+    if (segItem.snippet_text) {
+      const bMatches = segItem.snippet_text.match(/<b>([^<]+)<\/b>/gi) || [];
+      bMatches.forEach(bm => {
+        const cleanW = bm.replace(/<\/?b>/gi, '').trim().toLowerCase();
+        if (cleanW && !rawTerms.includes(cleanW)) rawTerms.push(cleanW);
+      });
+    }
+
+    // Sort longest first so multi-char stems don't get shadowed
+    rawTerms.sort((a, b) => b.length - a.length);
+
+    const escapedTerms = rawTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    // Match exact word or prefix stem
+    const wordMatchRegex = escapedTerms.length > 0
+      ? new RegExp(`\\b(${escapedTerms.join('|')})[a-zA-Z]*\\b`, 'gi')
+      : null;
+
+    // Split turn text into sentences using the same boundary rule as WordSync.formatTurnParagraphs
+    let paragraphs = [];
+    if (rawText.includes('\n\n')) {
+      paragraphs = rawText
+        .split(/\n\s*\n/)
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
+    } else {
+      const rawSentences = rawText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [rawText];
+      let currentChunk = [];
+      let wordCount = 0;
+
+      rawSentences.forEach(s => {
+        const sent = s.trim();
+        if (!sent) return;
+        currentChunk.push(sent);
+        wordCount += sent.split(/\s+/).length;
+
+        if (wordCount >= 50 || currentChunk.length >= 3) {
+          paragraphs.push(currentChunk.join(' '));
+          currentChunk = [];
+          wordCount = 0;
+        }
+      });
+      if (currentChunk.length > 0) {
+        paragraphs.push(currentChunk.join(' '));
+      }
+    }
+    if (paragraphs.length === 0) paragraphs = [rawText];
+
+    // Flatten paragraphs into sentences exactly as formatTurnParagraphs does
+    const allSentences = [];
+    let globalWordCursor = 0;
+    let sentCursor = 0;
+
+    paragraphs.forEach(pText => {
+      const sents = pText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [pText];
+      sents.forEach(sText => {
+        const tokens = sText.split(/(\s+)/);
+        const nonWsTokens = [];
+        tokens.forEach(tok => {
+          if (tok && !/^\s+$/.test(tok)) {
+            nonWsTokens.push({
+              token: tok,
+              wordIdxInTurn: globalWordCursor++,
+            });
+          }
+        });
+        allSentences.push({
+          sentIdxInTurn: sentCursor++,
+          text: sText.trim(),
+          rawSent: sText,
+          words: nonWsTokens,
+          startWordIdx: nonWsTokens.length > 0 ? nonWsTokens[0].wordIdxInTurn : globalWordCursor,
+        });
+      });
+    });
+
+    const totalTurnWords = Math.max(1, globalWordCursor);
+    const matchedSentences = [];
+
+    allSentences.forEach(sObj => {
+      if (!sObj.text) return;
+      let firstMatchedWordIdx = -1;
+
+      if (wordMatchRegex) {
+        for (const wEntry of sObj.words) {
+          wordMatchRegex.lastIndex = 0;
+          if (wordMatchRegex.test(wEntry.token)) {
+            firstMatchedWordIdx = wEntry.wordIdxInTurn;
+            break;
+          }
+        }
+      }
+
+      if (firstMatchedWordIdx >= 0) {
+        const escapedSent = escapeHtml(sObj.text);
+        const highlightedHtml = wordMatchRegex
+          ? escapedSent.replace(wordMatchRegex, '<b>$&</b>')
+          : escapedSent;
+
+        const wordRatio = firstMatchedWordIdx / totalTurnWords;
+        const estWordSec = startSec + wordRatio * turnDur;
+
+        matchedSentences.push({
+          episode_id: segItem.episode_id,
+          turn_index: turnIndex,
+          sent_idx_in_turn: sObj.sentIdxInTurn,
+          word_offset_in_turn: firstMatchedWordIdx,
+          sent_start_word_offset: sObj.startWordIdx,
+          est_word_sec: estWordSec,
+          turn_start_sec: startSec,
+          turn_end_sec: endSec,
+          speaker_display: segItem.speaker_display || segItem.teacher,
+          speaker_slug: segItem.speaker_slug || segItem.teacher_slug,
+          sentence_html: highlightedHtml,
+          sentence_text: sObj.text,
         });
       }
     });
 
-    state.currentFilteredTalks = distinctEpisodes;
+    // Fallback if FTS matched the turn (e.g. speaker name or stem) but regex didn't catch a sentence
+    if (matchedSentences.length === 0 && allSentences.length > 0) {
+      const firstS = allSentences[0];
+      matchedSentences.push({
+        episode_id: segItem.episode_id,
+        turn_index: turnIndex,
+        sent_idx_in_turn: 0,
+        word_offset_in_turn: firstS.startWordIdx || 0,
+        sent_start_word_offset: firstS.startWordIdx || 0,
+        est_word_sec: startSec,
+        turn_start_sec: startSec,
+        turn_end_sec: endSec,
+        speaker_display: segItem.speaker_display || segItem.teacher,
+        speaker_slug: segItem.speaker_slug || segItem.teacher_slug,
+        sentence_html: segItem.snippet_text || escapeHtml(firstS.text),
+        sentence_text: firstS.text,
+      });
+    }
+
+    return matchedSentences;
+  }
+
+  function renderSearchResults(data) {
+    const { results, count, meta, elapsed_ms, query } = data;
+    const effectiveQuery = (meta && meta.effective_query) || query || '';
+
+    // Group matching segments & extracted sentences by transcript (episode_id)
+    const episodeGroupsMap = new Map();
+    const episodeGroups = [];
+    let totalSentenceMatches = 0;
+
+    (results || []).forEach(r => {
+      const epId = r.episode_id;
+      if (!epId) return;
+
+      let group = episodeGroupsMap.get(epId);
+      if (!group) {
+        group = {
+          id: epId,
+          episode_id: epId,
+          title: r.title,
+          date: r.date,
+          teacher: r.teacher,
+          teacher_slug: r.teacher_slug,
+          identified_teachers: r.identified_teachers,
+          media_url: r.media_url,
+          permalink: r.permalink,
+          duration_sec: r.duration_sec,
+          matches: [],
+        };
+        episodeGroupsMap.set(epId, group);
+        episodeGroups.push(group);
+      }
+
+      const sentMatches = extractSentenceMatchesFromSegment(r, query, effectiveQuery);
+      sentMatches.forEach(m => {
+        group.matches.push(m);
+        totalSentenceMatches++;
+      });
+    });
+
+    // Sort matches chronologically within each transcript card so the listener sees them in talk order
+    episodeGroups.forEach(group => {
+      group.matches.sort((a, b) => (a.turn_index - b.turn_index) || (a.word_offset_in_turn - b.word_offset_in_turn));
+    });
+
+    // Sort transcript cards according to user's selected sort order
+    const sortVal = (els.sortOrderSelect && els.sortOrderSelect.value) || 'date_desc';
+    if (sortVal === 'date_asc') {
+      episodeGroups.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.id.localeCompare(b.id));
+    } else if (sortVal === 'date_desc') {
+      episodeGroups.sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id.localeCompare(a.id));
+    } else if (sortVal === 'duration_desc') {
+      episodeGroups.sort((a, b) => (b.duration_sec || 0) - (a.duration_sec || 0));
+    } else if (sortVal === 'rank') {
+      episodeGroups.sort((a, b) => b.matches.length - a.matches.length);
+    }
+
+    state.currentFilteredTalks = episodeGroups;
+    state.currentSearchGroups = episodeGroups;
 
     els.searchEmptyState.style.display = 'none';
     els.searchResultsList.style.display = 'flex';
@@ -1394,17 +1610,17 @@
     if (els.filteredArchiveDropdownWrapper) {
       els.filteredArchiveDropdownWrapper.style.display = 'inline-block';
     }
-    els.searchCountBadge.textContent = String(count);
+    els.searchCountBadge.textContent = String(totalSentenceMatches);
 
-    if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = String(distinctEpisodes.length);
-    if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = distinctEpisodes.length === 0;
+    if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = String(episodeGroups.length);
+    if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = episodeGroups.length === 0;
 
     // Meta bar
     const tierDisplay = formatTierName(meta ? meta.tier : 'none');
     els.queryTierBadge.textContent = tierDisplay;
-    els.queryMetaText.textContent = `Found ${count} matching segment${count === 1 ? '' : 's'} across ${distinctEpisodes.length} talk${distinctEpisodes.length === 1 ? '' : 's'} in ${elapsed_ms}ms`;
+    els.queryMetaText.textContent = `Found ${totalSentenceMatches} match${totalSentenceMatches === 1 ? '' : 'es'} across ${episodeGroups.length} talk${episodeGroups.length === 1 ? '' : 's'} in ${elapsed_ms}ms`;
 
-    if (count === 0) {
+    if (episodeGroups.length === 0) {
       els.searchResultsList.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">🔍</div>
@@ -1415,37 +1631,78 @@
       return;
     }
 
+    const INITIAL_VISIBLE_MATCHES = 5;
     let html = '';
-    results.forEach((item, idx) => {
-      const startTime = formatSeconds(item.start_sec);
-      const endTime = formatSeconds(item.end_sec);
-      const duration = formatSeconds(item.end_sec - item.start_sec);
-      const spkColor = getSpeakerColor(item.speaker_slug || item.teacher_slug, item.teacher || item.speaker_display);
+
+    episodeGroups.forEach((group, gIdx) => {
+      const matchCount = group.matches.length;
+      const durMin = group.duration_sec ? Math.round(group.duration_sec / 60) : 0;
+      const hiddenCount = Math.max(0, matchCount - INITIAL_VISIBLE_MATCHES);
+
+      const sentencesHtml = group.matches.map((m, mIdx) => {
+        const isHidden = mIdx >= INITIAL_VISIBLE_MATCHES;
+        const timeStr = formatSeconds(m.est_word_sec);
+        return `
+          <div
+            class="sentence-match-row${isHidden ? ' sentence-match-hidden' : ''}"
+            role="button"
+            tabindex="0"
+            data-action="jump-sentence-match"
+            data-group-idx="${gIdx}"
+            data-match-idx="${mIdx}"
+            data-ep-id="${escapeHtml(group.id)}"
+            data-turn-idx="${m.turn_index}"
+            data-word-offset="${m.word_offset_in_turn}"
+            title="Open transcript at this sentence and stream from this word (${timeStr})"
+          >
+            <span class="sentence-time-pill" data-est-time="${m.est_word_sec}">▶ ${timeStr}</span>
+            <span class="sentence-context-text">${m.sentence_html}</span>
+          </div>
+        `;
+      }).join('');
 
       html += `
-        <article class="result-card" data-idx="${idx}">
+        <article class="result-card transcript-group-card" data-group-idx="${gIdx}" data-ep-id="${escapeHtml(group.id)}">
           <div class="result-header">
             <div class="result-title-group">
-              <h3 class="result-title">${escapeHtml(item.title)}</h3>
+              <h3 class="result-title">${escapeHtml(group.title)}</h3>
               <div class="result-meta-line">
-                ${renderTeacherBadgesHtml(item)}
-                <span>📅 ${escapeHtml(item.date || '')}</span>
-                <span>⏱️ Turn at ${startTime}</span>
+                ${renderTeacherBadgesHtml(group)}
+                <span>📅 ${escapeHtml(group.date || '')}</span>
+                ${durMin > 0 ? `<span>• ⏱️ ${durMin} mins</span>` : ''}
               </div>
             </div>
 
-            <button type="button" class="play-timestamp-btn" data-action="play-result" data-idx="${idx}" title="Stream from this turn on Podbean CDN">
-              ▶ Play (${startTime})
-            </button>
+            <div class="result-header-badges">
+              <span class="match-count-badge" title="${matchCount} search match${matchCount === 1 ? '' : 'es'} in this transcript">
+                ${matchCount} match${matchCount === 1 ? '' : 'es'}
+              </span>
+            </div>
           </div>
 
-          <div class="result-snippet">
-            ${item.snippet_text}
+          <div class="sentence-matches-list" id="matches-list-${gIdx}">
+            ${sentencesHtml}
           </div>
+
+          ${hiddenCount > 0 ? `
+            <button
+              type="button"
+              class="btn-expand-matches"
+              data-action="toggle-more-matches"
+              data-group-idx="${gIdx}"
+              data-hidden-count="${hiddenCount}"
+              data-expanded="false"
+            >
+              + Show ${hiddenCount} more match${hiddenCount === 1 ? '' : 'es'} in this transcript
+            </button>
+          ` : ''}
 
           <div class="result-actions">
-            <button type="button" class="link-btn" data-action="view-transcript" data-episode-id="${escapeHtml(item.episode_id)}">
+            <button type="button" class="link-btn" data-action="view-transcript" data-episode-id="${escapeHtml(group.id)}">
               📜 View Full Transcript
+            </button>
+            <button type="button" class="link-btn" data-action="play-ep-start" data-ep-id="${escapeHtml(group.id)}" title="Play talk from the beginning">
+              ▶ Play Talk from Start
             </button>
             <div class="download-dropdown-wrapper">
               <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
@@ -1453,7 +1710,7 @@
               </button>
               <div class="download-dropdown-menu">
                 <div class="dropdown-menu-header">Export Transcript</div>
-                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="md">
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="md">
                   <span class="download-opt-icon">📝</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Markdown</span>
@@ -1461,7 +1718,7 @@
                   </div>
                   <span class="download-opt-badge">.md</span>
                 </button>
-                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="txt">
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="txt">
                   <span class="download-opt-icon">📄</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Plain Text</span>
@@ -1469,7 +1726,7 @@
                   </div>
                   <span class="download-opt-badge">.txt</span>
                 </button>
-                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="srt">
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="srt">
                   <span class="download-opt-icon">🎬</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">SubRip Subtitles</span>
@@ -1477,7 +1734,7 @@
                   </div>
                   <span class="download-opt-badge">.srt</span>
                 </button>
-                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="vtt">
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="vtt">
                   <span class="download-opt-icon">🌐</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">WebVTT Captions</span>
@@ -1485,7 +1742,7 @@
                   </div>
                   <span class="download-opt-badge">.vtt</span>
                 </button>
-                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(item.episode_id)}" data-format="json">
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="json">
                   <span class="download-opt-icon">📊</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">JSON Data</span>
@@ -1495,8 +1752,8 @@
                 </button>
               </div>
             </div>
-            ${item.permalink ? `
-              <a href="${getPodbeanUrl(item.permalink)}" target="_blank" rel="noopener noreferrer" class="external-link">
+            ${group.permalink ? `
+              <a href="${getPodbeanUrl(group.permalink)}" target="_blank" rel="noopener noreferrer" class="external-link">
                 ↗ Podbean Page
               </a>
             ` : ''}
@@ -1507,29 +1764,59 @@
 
     els.searchResultsList.innerHTML = html;
 
-    // Attach click events on results list
-    els.searchResultsList.querySelectorAll('[data-action="play-result"]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const idx = parseInt(btn.dataset.idx, 10);
-        const item = results[idx];
-        if (item) {
-          playAudioSegment({
-            episode_id: item.episode_id,
-            media_url: item.media_url,
-            title: item.title,
-            teacher: item.teacher,
-            start_sec: item.start_sec,
+    // Attach click & keyboard events on sentence context rows
+    els.searchResultsList.querySelectorAll('[data-action="jump-sentence-match"]').forEach(row => {
+      const triggerJump = () => {
+        const gIdx = parseInt(row.dataset.groupIdx, 10);
+        const mIdx = parseInt(row.dataset.matchIdx, 10);
+        const group = episodeGroups[gIdx];
+        const match = group && group.matches[mIdx];
+        if (group && match) {
+          openTranscriptDrawer(group.id, {
+            turnIndex: match.turn_index,
+            sentIdxInTurn: match.sent_idx_in_turn,
+            wordOffsetInTurn: match.word_offset_in_turn,
+            fallbackSec: match.est_word_sec,
+            autoPlay: true,
           });
+        }
+      };
+
+      row.addEventListener('click', triggerJump);
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          triggerJump();
         }
       });
     });
 
-    els.searchResultsList.querySelectorAll('[data-action="view-transcript"]').forEach(btn => {
+    // Attach expand/collapse handler for cards with > 5 matches
+    els.searchResultsList.querySelectorAll('[data-action="toggle-more-matches"]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const epId = btn.dataset.episodeId;
-        openTranscriptDrawer(epId);
+        const gIdx = btn.dataset.groupIdx;
+        const hiddenCount = btn.dataset.hiddenCount;
+        const isExpanded = btn.dataset.expanded === 'true';
+        const listEl = document.getElementById(`matches-list-${gIdx}`);
+        if (!listEl) return;
+
+        const extraRows = listEl.querySelectorAll('.sentence-match-row');
+        extraRows.forEach((r, idx) => {
+          if (idx >= INITIAL_VISIBLE_MATCHES) {
+            r.classList.toggle('sentence-match-hidden', isExpanded);
+          }
+        });
+
+        const nextExpanded = !isExpanded;
+        btn.dataset.expanded = nextExpanded ? 'true' : 'false';
+        btn.textContent = nextExpanded
+          ? '− Show fewer matches'
+          : `+ Show ${hiddenCount} more match${Number(hiddenCount) === 1 ? '' : 'es'} in this transcript`;
       });
     });
+
+    // Attach View Full Transcript & Play from Start handlers
+    attachCardEventListeners(els.searchResultsList, episodeGroups);
   }
 
   function formatTierName(tier) {
@@ -1756,7 +2043,7 @@
   // Transcript Drawer / Modal
   // ==========================================================================
 
-  async function openTranscriptDrawer(episodeId) {
+  async function openTranscriptDrawer(episodeId, targetOpts = null) {
     if (state.activeTab !== 'transcript-view') {
       state.previousTab = state.activeTab;
     }
@@ -1764,7 +2051,9 @@
       els.tabTranscriptBtn.style.display = 'inline-flex';
     }
     switchTab('transcript-view');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (!targetOpts) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 
     els.drawerTurns.innerHTML = '<div class="loading-spinner">Loading transcript turns...</div>';
 
@@ -1816,14 +2105,15 @@
       function renderDrawerTurns() {
         let html = '';
         ep.segments.forEach((seg, idx) => {
+          const tIdx = seg.turn_index !== undefined ? Number(seg.turn_index) : idx;
           const startStr = formatSeconds(seg.start_sec);
           const formattedText = window.WordSync
-            ? window.WordSync.formatTurnParagraphs(seg.text, idx)
+            ? window.WordSync.formatTurnParagraphs(seg.text, tIdx)
             : formatTranscriptParagraphs(seg.text);
           const spkColor = getSpeakerColor(seg.speaker_slug, seg.speaker_display);
           const initials = getSpeakerInitials(seg.speaker_display || 'Speaker');
           html += `
-            <div class="transcript-turn" id="turn-${idx}" data-start="${seg.start_sec}" style="--spk-color: ${spkColor};">
+            <div class="transcript-turn" id="turn-${tIdx}" data-turn-idx="${tIdx}" data-start="${seg.start_sec}" style="--spk-color: ${spkColor};">
               <div class="turn-header">
                 <span class="turn-speaker">
                   <span class="turn-speaker-badge" title="${escapeHtml(seg.speaker_display || 'Speaker')}">${escapeHtml(initials)}</span>
@@ -1877,6 +2167,68 @@
       }
 
       renderDrawerTurns();
+
+      // If opened from a sentence context match, scroll to that sentence/word and start audio at exact word time!
+      if (targetOpts && typeof targetOpts.turnIndex === 'number') {
+        const tIdx = targetOpts.turnIndex;
+        const sIdx = typeof targetOpts.sentIdxInTurn === 'number' ? targetOpts.sentIdxInTurn : 0;
+        const wOffset = typeof targetOpts.wordOffsetInTurn === 'number' ? targetOpts.wordOffsetInTurn : 0;
+
+        let exactWordSec = typeof targetOpts.fallbackSec === 'number' ? targetOpts.fallbackSec : 0;
+        let targetWordEl = null;
+
+        // 1. Resolve exact word timestamp and DOM element from WordSync turnWordMap if available
+        if (window.WordSync && window.WordSync.turnWordMap && window.WordSync.turnWordMap[tIdx]) {
+          const turnWords = window.WordSync.turnWordMap[tIdx];
+          if (turnWords.length > 0) {
+            const clampedIdx = Math.max(0, Math.min(turnWords.length - 1, wOffset));
+            const matchedW = turnWords[clampedIdx];
+            if (matchedW && typeof matchedW.s === 'number') {
+              exactWordSec = matchedW.s;
+              targetWordEl = document.getElementById(matchedW.id);
+            }
+          }
+        }
+
+        // 2. Locate target sentence element and turn element for smooth scrolling & highlight
+        const sentEl = document.getElementById(`turn-${tIdx}-sent-${sIdx}`);
+        const turnEl = document.getElementById(`turn-${tIdx}`);
+        const scrollTarget = sentEl || targetWordEl || turnEl;
+
+        if (scrollTarget) {
+          requestAnimationFrame(() => {
+            scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          });
+        }
+
+        if (sentEl) {
+          sentEl.classList.add('target-sentence-flash');
+          setTimeout(() => sentEl.classList.remove('target-sentence-flash'), 4000);
+        } else if (turnEl) {
+          turnEl.classList.add('target-turn-flash');
+          setTimeout(() => turnEl.classList.remove('target-turn-flash'), 4000);
+        }
+
+        if (targetWordEl) {
+          if (window.WordSync) {
+            window.WordSync.clearHighlights();
+            targetWordEl.classList.add('active-word');
+            window.WordSync.activeWordEl = targetWordEl;
+          } else {
+            targetWordEl.classList.add('active-word');
+          }
+        }
+
+        if (targetOpts.autoPlay !== false && ep.media_url) {
+          playAudioSegment({
+            episode_id: ep.id,
+            media_url: ep.media_url,
+            title: ep.title,
+            teacher: ep.primary_display,
+            start_sec: exactWordSec,
+          });
+        }
+      }
     } catch (err) {
       els.drawerTurns.innerHTML = '<div class="empty-state"><p>Failed to load transcript.</p></div>';
       console.error(err);
