@@ -146,7 +146,7 @@ def cmd_transcribe(args):
     pipeline = TranscriptionPipeline(
         device=args.device,
         model_size=getattr(args, "model_size", "large-v3"),
-        batch_size=getattr(args, "batch_size", 16),
+        batch_size=getattr(args, "batch_size", 1),
     )
 
     # Collect target files
@@ -479,7 +479,7 @@ def cmd_test(args):
     pipeline = TranscriptionPipeline(
         device=args.device,
         model_size=getattr(args, "model_size", "large-v3"),
-        batch_size=getattr(args, "batch_size", 16),
+        batch_size=getattr(args, "batch_size", 1),
     )
 
     result = pipeline.process_file(

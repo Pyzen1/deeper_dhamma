@@ -99,3 +99,51 @@ def test_lead_time_to_first_word_calculation():
     clamped_target = max(0.0, early_word_seek - lead_time_sec)
     assert clamped_target == 0.0
 
+
+def test_vbr_trailer_and_firefox_chrome_linear_calibration():
+    """
+    Verifies that VBR1 trailer generation covers the entire talk duration (>3600s)
+    and that linear byte-offset calibration aligns both Firefox and Chromium when
+    the Xing TOC bit is neutralized in memory.
+    """
+    import struct
+    from deeper_dhamma.calibration import (
+        VBR_TRAILER_MAGIC,
+        detect_xing_patch_offset,
+        patch_xing_chunk_in_memory,
+    )
+
+    cal = StreamSeekCalibrator()
+    sample_mp3 = Path(
+        r"archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
+    )
+    if not sample_mp3.exists():
+        pytest.skip("Archive sample not found on disk")
+
+    trailer = cal.build_vbr_trailer(sample_mp3)
+    assert trailer.startswith(VBR_TRAILER_MAGIC)
+    total_dur_ms, id3_len, bytes_len = struct.unpack("<III", trailer[4:16])
+    sample_count = struct.unpack("<I", trailer[116:120])[0]
+
+    assert total_dur_ms > 6400_000
+    assert id3_len == 176128
+    assert sample_count > 3000  # Full 107-minute talk (not truncated at 3600s)
+
+    # Last sample must reach the end of the talk (>6400s)
+    last_pcm_ms, _ = struct.unpack("<II", trailer[-8:])
+    assert last_pcm_ms > 6400_000
+
+    # Linear calibrator for "Everyone," (physical 216.30s -> linear 184.13s)
+    lin_fn = cal.get_linear_calibrator(sample_mp3)
+    lin_seek = lin_fn(216.30)
+    assert 183.8 <= lin_seek <= 184.5
+
+    # In-memory Xing -> Info neutralization check
+    with open(sample_mp3, "rb") as f:
+        head = f.read(200000)
+    xing_off = detect_xing_patch_offset(head)
+    assert xing_off == 176164
+    patched = patch_xing_chunk_in_memory(head, 0, xing_off)
+    assert patched[xing_off : xing_off + 8] == b"Info\x00\x00\x00\x03"
+
+

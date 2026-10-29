@@ -194,6 +194,15 @@ def export_static_site(output_dir: Path | str = "dist") -> Path:
         shutil.copytree(icons_src, icons_dst)
         copied_files += len(list(icons_src.glob("*.svg")))
 
+    # Copy words directory if present (compact binary BLOB word sidecars)
+    words_src = STATIC_SRC_DIR / "words"
+    if words_src.exists() and words_src.is_dir():
+        words_dst = out_path / "words"
+        if words_dst.exists():
+            shutil.rmtree(words_dst)
+        shutil.copytree(words_src, words_dst)
+        copied_files += len(list(words_src.glob("*.bin")))
+
     # Deploy pure SQLite WASM client adapter to dist/db_client.js
     wasm_adapter = STATIC_SRC_DIR / "adapters" / "wasm_client.js"
     if wasm_adapter.exists():
@@ -247,21 +256,52 @@ def run_web_preview(host: str = DEFAULT_WEB_HOST, port: int = DEFAULT_WEB_PORT, 
 
     app = Bottle()
 
+    @app.route("/audio/<episode_id>", method=["GET", "HEAD"])
+    def serve_audio_stream(episode_id: str):
+        from deeper_dhamma.calibration import serve_episode_audio_stream
+        return serve_episode_audio_stream(episode_id, db_path=TRANSCRIPTS_DB_PATH)
+
     @app.route("/")
     def serve_index():
-        return static_file("index.html", root=str(dist_path))
+        res = static_file("index.html", root=str(dist_path))
+        res.set_header("Access-Control-Allow-Origin", "*")
+        return res
 
     @app.route("/<filepath:path>")
     def serve_static(filepath: str):
-        return static_file(filepath, root=str(dist_path))
+        res = static_file(filepath, root=str(dist_path))
+        res.set_header("Access-Control-Allow-Origin", "*")
+        return res
 
     print("\n" + "=" * 80)
     print("BSWA Deeper Dhamma: Static Web Preview Server")
     print("=" * 80)
     print(f"[*] Serving static bundle:  {dist_path}")
     print(f"[*] Local URL:              http://{host}:{port}/")
-    print(f"[*] HTTP Range Support:     Enabled (for SQLite WASM header probes)")
+    print(f"[*] HTTP Range Support:     Enabled (for SQLite WASM & VBR Audio Streams)")
     print("=" * 80)
     print("Press Ctrl+C to stop.\n")
 
-    app.run(host=host, port=port, server="wsgiref")
+    from socketserver import ThreadingMixIn
+    from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
+    from bottle import ServerAdapter
+
+    class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
+        daemon_threads = True
+
+    class QuietWSGIRequestHandler(WSGIRequestHandler):
+        def address_string(self):
+            return self.client_address[0]
+
+    class ThreadedWSGIRefServer(ServerAdapter):
+        def run(self, handler):
+            srv = make_server(
+                self.host,
+                self.port,
+                handler,
+                server_class=ThreadingWSGIServer,
+                handler_class=QuietWSGIRequestHandler,
+            )
+            srv.serve_forever()
+
+    app.run(host=host, port=port, server=ThreadedWSGIRefServer)

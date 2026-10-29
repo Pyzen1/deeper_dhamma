@@ -1,22 +1,338 @@
 """
-Stream Seek Calibration Engine.
+Stream Seek Calibration & VBR Neutralization Engine.
 
 Aligns physical uncompressed PCM timestamps produced by Whisper with the
-browser's HTML5 <audio> HTTP streaming timeline.
-Accounts for Variable Bit Rate (VBR) compression density variations (e.g. low-bitrate
-lead-in silence) and Xing seek table offsets so that web player scrubbers and
-transcript turn buttons match with millisecond precision across all episodes.
+browser's HTML5 <audio> HTTP streaming timeline across both Mozilla Firefox
+(Gecko MP3TrackDemuxer) and Chromium (FFmpeg mp3dec).
+
+See `docs/troubleshooting_guide.md` for full root-cause analysis and diagrams.
+
+Key Mechanisms & Invariants:
+1. Canonical Physical Timestamps:
+   True physical 44.1 kHz PCM timestamps are stored in SQLite (`speech_segments`)
+   and compact binary word sidecars (`words/<episode_id>.bin`). Never pre-warp
+   database or `.bin` word timestamps by the non-linear `Xing` TOC curve, because
+   after any seek completes, the browser's audio decoder advances `audio.currentTime`
+   at a constant 1:1 rate (`1152 / 44100` seconds per frame) rather than along
+   the VBR bitrate curve.
+2. Full-Duration `VBR1` Seek Trailer:
+   For VBR MP3 files with a `Xing` header, a compact `VBR1` seek calibration
+   trailer is appended to `words/<episode_id>.bin` containing `(pcm_ms, audio_byte_offset)`
+   sample points and the 100-byte TOC across 100% of the file duration.
+3. Non-Destructive In-Memory `Xing -> Info` (`flags = 3`) Neutralization:
+   In Mozilla Firefox (`dom/media/mp3/MP3Demuxer.cpp`), `VBRHeader::Offset()` uses
+   an un-interpolated step function `TOC[floor(100 * aTime / D)]` and estimates
+   `mFrameIndex` at that byte offset via `AverageFrameLength`, followed by
+   `ScanUntil(aTime)`. On VBR talks with low-bitrate lead-in silence (such as
+   `pb27802310`), this creates 14-second un-seekable dead zones at bucket
+   boundaries (`k=2 -> k=3` at `193.17s`, jumping from `207.9s` to `221.9s` over
+   Turn 0 at `216.30s`) and up to 239s of mid-talk drift.
+   When streaming via `/audio/<episode_id>.mp3`, the 8-byte `Xing` signature
+   and flags are neutralized in-memory to `Info` (`flags = 3`, retaining `Frames=1`
+   and `Bytes=2` while clearing the `TOC=4` bit) without modifying the raw archive
+   file on disk. This forces both Firefox and Chromium into identical, continuous,
+   dead-zone-free linear byte-offset seeking.
 """
 
 import bisect
 import json
 import logging
+import sqlite3
 import struct
 import subprocess
+import urllib.request
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("seek_calibrator")
+
+VBR_TRAILER_MAGIC = b"VBR1"
+
+# Process-wide caches for fast Range request serving
+_EPISODE_AUDIO_META_CACHE: Dict[str, Dict[str, Any]] = {}
+_XING_PATCH_OFFSET_CACHE: Dict[str, Optional[int]] = {}
+
+
+def detect_xing_patch_offset(header_bytes: bytes) -> Optional[int]:
+    """
+    Inspects the initial bytes of an MP3 stream (including any ID3v2 tag) and
+    returns the exact absolute byte offset of the `b"Xing"` header if present,
+    or None for CBR / `Info` files.
+    """
+    if len(header_bytes) < 10:
+        return None
+    id3_len = 0
+    if header_bytes[:3] == b"ID3":
+        id3_len = (
+            (header_bytes[6] << 21)
+            | (header_bytes[7] << 14)
+            | (header_bytes[8] << 7)
+            | header_bytes[9]
+        ) + 10
+    if len(header_bytes) <= id3_len + 40:
+        return None
+    search_window = header_bytes[id3_len : min(len(header_bytes), id3_len + 4096)]
+    rel_pos = search_window.find(b"Xing")
+    if rel_pos == -1:
+        return None
+    return id3_len + rel_pos
+
+
+def patch_xing_chunk_in_memory(
+    chunk: bytes | bytearray,
+    chunk_start_offset: int,
+    xing_abs_offset: Optional[int],
+) -> bytes:
+    """
+    Neutralizes `b"Xing"` + flags (`8 bytes` at `xing_abs_offset`) to
+    `b"Info\\x00\\x00\\x00\\x03"` in memory if the byte range overlaps `xing_abs_offset`.
+    Never modifies files on disk.
+    """
+    if xing_abs_offset is None or not chunk:
+        return bytes(chunk)
+    chunk_end_offset = chunk_start_offset + len(chunk)
+    patch_end = xing_abs_offset + 8
+    if chunk_end_offset <= xing_abs_offset or chunk_start_offset >= patch_end:
+        return bytes(chunk)
+
+    buf = bytearray(chunk)
+    replacement = b"Info\x00\x00\x00\x03"
+    for i, b_val in enumerate(replacement):
+        pos_in_buf = (xing_abs_offset + i) - chunk_start_offset
+        if 0 <= pos_in_buf < len(buf):
+            buf[pos_in_buf] = b_val
+    return bytes(buf)
+
+
+def resolve_episode_audio_source(
+    episode_id: str,
+    db_path: Optional[Path | str] = None,
+    archive_dir: Optional[Path | str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Resolves an episode's local archive MP3 path (if available) and remote Podbean
+    CDN `media_url`, along with its cached `xing_abs_offset`.
+    """
+    from deeper_dhamma.config import ARCHIVE_DIR, PROJECT_ROOT, TRANSCRIPTS_DB_PATH
+
+    clean_id = episode_id.strip()
+    if clean_id.lower().endswith(".mp3"):
+        clean_id = clean_id[:-4]
+
+    if clean_id in _EPISODE_AUDIO_META_CACHE:
+        return _EPISODE_AUDIO_META_CACHE[clean_id]
+
+    target_db = Path(db_path) if db_path else TRANSCRIPTS_DB_PATH
+    target_archive = Path(archive_dir) if archive_dir else ARCHIVE_DIR
+
+    local_path: Optional[Path] = None
+    media_url: Optional[str] = None
+
+    if target_db.exists():
+        try:
+            with sqlite3.connect(target_db) as conn:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(episodes)").fetchall()]
+                if "filepath" in cols:
+                    row = conn.execute(
+                        "SELECT filepath, media_url FROM episodes WHERE id = ?",
+                        (clean_id,),
+                    ).fetchone()
+                    if row:
+                        if row[0]:
+                            candidate = Path(row[0])
+                            if not candidate.is_absolute():
+                                candidate = PROJECT_ROOT / candidate
+                            if candidate.exists():
+                                local_path = candidate
+                        media_url = row[1]
+                else:
+                    row = conn.execute(
+                        "SELECT media_url FROM episodes WHERE id = ?",
+                        (clean_id,),
+                    ).fetchone()
+                    if row:
+                        media_url = row[0]
+        except Exception as e:
+            logger.warning(f"DB lookup failed for episode audio {clean_id}: {e}")
+
+    if local_path is None and target_archive.exists():
+        matches = list(target_archive.rglob(f"*{clean_id}*.mp3"))
+        if matches:
+            local_path = matches[0]
+
+    if local_path is None and not media_url:
+        return None
+
+    xing_abs_offset: Optional[int] = None
+    if local_path and local_path.exists():
+        key = str(local_path.resolve())
+        if key in _XING_PATCH_OFFSET_CACHE:
+            xing_abs_offset = _XING_PATCH_OFFSET_CACHE[key]
+        else:
+            try:
+                with open(local_path, "rb") as f:
+                    head10 = f.read(10)
+                    id3_len = 0
+                    if len(head10) >= 10 and head10[:3] == b"ID3":
+                        id3_len = (
+                            (head10[6] << 21)
+                            | (head10[7] << 14)
+                            | (head10[8] << 7)
+                            | head10[9]
+                        ) + 10
+                    f.seek(0)
+                    header_bytes = f.read(id3_len + 4096)
+                xing_abs_offset = detect_xing_patch_offset(header_bytes)
+                _XING_PATCH_OFFSET_CACHE[key] = xing_abs_offset
+            except Exception as e:
+                logger.warning(f"Failed inspecting MP3 header for {local_path}: {e}")
+
+    info = {
+        "episode_id": clean_id,
+        "local_path": local_path,
+        "media_url": media_url,
+        "xing_abs_offset": xing_abs_offset,
+    }
+    _EPISODE_AUDIO_META_CACHE[clean_id] = info
+    return info
+
+
+def serve_episode_audio_stream(
+    episode_id: str,
+    db_path: Optional[Path | str] = None,
+):
+    """
+    Bottle route handler for `/audio/<episode_id>.mp3`.
+    Serves HTTP Range requests from the pristine local archive MP3 (or proxies
+    Podbean CDN if local file is absent) while neutralizing `Xing` -> `Info`
+    (`flags = 3`) in memory so both Firefox and Chrome seek with 0.00s discrepancy.
+    """
+    from bottle import HTTPResponse, request
+
+    info = resolve_episode_audio_source(episode_id, db_path=db_path)
+    if not info:
+        return HTTPResponse(status=404, body="Episode audio not found.")
+
+    local_path: Optional[Path] = info.get("local_path")
+    media_url: Optional[str] = info.get("media_url")
+    xing_abs_offset: Optional[int] = info.get("xing_abs_offset")
+    range_header = request.headers.get("Range")
+
+    if local_path and local_path.exists():
+        file_size = local_path.stat().st_size
+        start = 0
+        end = file_size - 1
+        status = 200
+
+        if range_header and range_header.startswith("bytes="):
+            status = 206
+            spec = range_header[6:].strip().split(",")[0].strip()
+            parts = spec.split("-")
+            try:
+                if parts[0] == "":
+                    suffix = int(parts[1])
+                    start = max(0, file_size - suffix)
+                    end = file_size - 1
+                else:
+                    start = int(parts[0])
+                    if len(parts) > 1 and parts[1]:
+                        end = min(int(parts[1]), file_size - 1)
+            except ValueError:
+                return HTTPResponse(
+                    status=416,
+                    headers={"Content-Range": f"bytes */{file_size}"},
+                )
+
+            if start >= file_size or start > end:
+                return HTTPResponse(
+                    status=416,
+                    headers={"Content-Range": f"bytes */{file_size}"},
+                )
+
+        length = end - start + 1
+        headers = {
+            "Content-Type": "audio/mpeg",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache",
+        }
+        if status == 206:
+            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+
+        if request.method == "HEAD":
+            return HTTPResponse(body=b"", status=status, headers=headers)
+
+        def _file_iterator():
+            with open(local_path, "rb") as f:
+                f.seek(start)
+                remaining = length
+                cur_offset = start
+                while remaining > 0:
+                    raw_chunk = f.read(min(65536, remaining))
+                    if not raw_chunk:
+                        break
+                    patched = patch_xing_chunk_in_memory(raw_chunk, cur_offset, xing_abs_offset)
+                    yield patched
+                    cur_offset += len(raw_chunk)
+                    remaining -= len(raw_chunk)
+
+        return HTTPResponse(body=_file_iterator(), status=status, headers=headers)
+
+    if media_url:
+        req_headers = {"User-Agent": "DeeperDhamma/1.0"}
+        if range_header:
+            req_headers["Range"] = range_header
+        req = urllib.request.Request(media_url, headers=req_headers, method=request.method)
+        try:
+            resp = urllib.request.urlopen(req, timeout=15)
+            status = resp.getcode() or (206 if range_header else 200)
+            headers = {
+                "Content-Type": resp.headers.get("Content-Type", "audio/mpeg"),
+                "Accept-Ranges": "bytes",
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "no-cache",
+            }
+            for h_name in ("Content-Length", "Content-Range"):
+                val = resp.headers.get(h_name)
+                if val:
+                    headers[h_name] = val
+
+            if request.method == "HEAD":
+                resp.close()
+                return HTTPResponse(body=b"", status=status, headers=headers)
+
+            # Parse start offset from Content-Range if 206
+            start_offset = 0
+            cr = resp.headers.get("Content-Range", "")
+            if cr.startswith("bytes "):
+                try:
+                    start_offset = int(cr[6:].split("-")[0])
+                except ValueError:
+                    start_offset = 0
+
+            def _remote_iterator():
+                nonlocal xing_abs_offset
+                cur = start_offset
+                try:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        if cur == 0 and xing_abs_offset is None:
+                            xing_abs_offset = detect_xing_patch_offset(chunk)
+                            info["xing_abs_offset"] = xing_abs_offset
+                        yield patch_xing_chunk_in_memory(chunk, cur, xing_abs_offset)
+                        cur += len(chunk)
+                finally:
+                    resp.close()
+
+            return HTTPResponse(body=_remote_iterator(), status=status, headers=headers)
+        except Exception as e:
+            logger.error(f"Remote audio proxy failed for {episode_id}: {e}")
+            return HTTPResponse(status=502, body="Upstream CDN error.")
+
+    return HTTPResponse(status=404, body="Audio source unavailable.")
 
 
 class StreamSeekCalibrator:
@@ -24,29 +340,29 @@ class StreamSeekCalibrator:
 
     def __init__(self):
         self._cache: Dict[str, Callable[[float], float]] = {}
+        self._linear_cache: Dict[str, Callable[[float], float]] = {}
+        self._profile_cache: Dict[str, Optional[Dict[str, Any]]] = {}
 
-    def get_calibrator(self, audio_path: Path | str) -> Callable[[float], float]:
+    def _analyze_vbr_profile(self, audio_path: Path) -> Optional[Dict[str, Any]]:
         """
-        Returns a callable mapping uncompressed PCM timestamps (seconds) to browser
-        HTTP seek time (seconds). For CBR audio, returns an identity lambda.
+        Inspects an MP3 file and extracts its full-duration VBR packet profile:
+        `(id3_len, xing_abs_offset, frames, bytes_len, total_dur, toc, pcm_times,
+        byte_offsets, linear_seek_times, xing_seek_times)`.
+        Returns None for CBR / Info files or non-MP3 files.
         """
-        path_str = str(Path(audio_path).resolve())
-        if path_str in self._cache:
-            return self._cache[path_str]
+        path_str = str(audio_path.resolve())
+        if path_str in self._profile_cache:
+            return self._profile_cache[path_str]
 
-        calibrator = self._build_calibrator(Path(path_str))
-        self._cache[path_str] = calibrator
-        return calibrator
-
-    def _build_calibrator(self, audio_path: Path) -> Callable[[float], float]:
         if not audio_path.exists() or audio_path.suffix.lower() != ".mp3":
-            return lambda t: t
+            self._profile_cache[path_str] = None
+            return None
 
         try:
             with open(audio_path, "rb") as f:
                 header_peek = f.read(10)
                 id3_len = 0
-                if header_peek[:3] == b"ID3":
+                if len(header_peek) >= 10 and header_peek[:3] == b"ID3":
                     id3_len = (
                         (header_peek[6] << 21)
                         | (header_peek[7] << 14)
@@ -62,7 +378,8 @@ class StreamSeekCalibrator:
 
             # CBR files use an "Info" header or fixed frame sizes: 100% linear, zero skew
             if xing_pos == -1 or has_info:
-                return lambda t: t
+                self._profile_cache[path_str] = None
+                return None
 
             flags = struct.unpack(">I", head[xing_pos + 4 : xing_pos + 8])[0]
             offset = xing_pos + 8
@@ -80,17 +397,20 @@ class StreamSeekCalibrator:
                 toc = list(head[offset : offset + 100])
 
             if not toc or not bytes_len or not frames:
-                return lambda t: t
+                self._profile_cache[path_str] = None
+                return None
 
             total_dur = (frames * 1152) / 44100.0
             if total_dur <= 0:
-                return lambda t: t
+                self._profile_cache[path_str] = None
+                return None
 
             audio_stream_size = float(bytes_len or (audio_path.stat().st_size - id3_len))
             if audio_stream_size <= 0:
-                return lambda t: t
+                self._profile_cache[path_str] = None
+                return None
 
-            # Sample packet positions across the audio file using ffprobe
+            # Sample packet positions across the FULL audio file using ffprobe
             cmd = [
                 "ffprobe",
                 "-v",
@@ -100,8 +420,6 @@ class StreamSeekCalibrator:
                 "-show_packets",
                 "-show_entries",
                 "packet=pts_time,pos",
-                "-read_intervals",
-                "%+3600",
                 "-of",
                 "json",
                 str(audio_path),
@@ -109,10 +427,13 @@ class StreamSeekCalibrator:
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             pkts = json.loads(proc.stdout).get("packets", [])
             if not pkts:
-                return lambda t: t
+                self._profile_cache[path_str] = None
+                return None
 
-            pcm_times = []
-            browser_seek_times = []
+            pcm_times: List[float] = []
+            byte_offsets: List[int] = []
+            linear_seek_times: List[float] = []
+            xing_seek_times: List[float] = []
             last_t = -10.0
 
             for p in pkts:
@@ -127,6 +448,7 @@ class StreamSeekCalibrator:
                 if t - last_t >= 2.0:
                     last_t = t
                     offset_in_audio = max(0, pos - id3_len)
+                    linear_t = (offset_in_audio / audio_stream_size) * total_dur
                     frac = (offset_in_audio / audio_stream_size) * 256.0
                     seek_t = None
                     if toc and any(x > 0 for x in toc):
@@ -136,38 +458,132 @@ class StreamSeekCalibrator:
                             for i in range(99):
                                 if toc[i] <= frac <= toc[i + 1]:
                                     d = toc[i + 1] - toc[i]
-                                    f = (frac - toc[i]) / d if d > 0 else 0.0
-                                    seek_t = ((i + f) / 100.0) * total_dur
+                                    f_ratio = (frac - toc[i]) / d if d > 0 else 0.0
+                                    seek_t = ((i + f_ratio) / 100.0) * total_dur
                                     break
                             if seek_t is None:
                                 d = 256.0 - toc[99]
-                                f = (frac - toc[99]) / d if d > 0 else 0.0
-                                seek_t = ((99 + f) / 100.0) * total_dur
+                                f_ratio = (frac - toc[99]) / d if d > 0 else 0.0
+                                seek_t = ((99 + f_ratio) / 100.0) * total_dur
                     if seek_t is None:
-                        seek_t = (offset_in_audio / audio_stream_size) * total_dur
+                        seek_t = linear_t
 
                     pcm_times.append(t)
-                    browser_seek_times.append(seek_t)
+                    byte_offsets.append(offset_in_audio)
+                    linear_seek_times.append(linear_t)
+                    xing_seek_times.append(seek_t)
 
             if not pcm_times:
-                return lambda t: t
+                self._profile_cache[path_str] = None
+                return None
 
-            def calibrate(t_pcm: float) -> float:
-                if t_pcm <= pcm_times[0]:
-                    return browser_seek_times[0]
-                if t_pcm >= pcm_times[-1]:
-                    delta = browser_seek_times[-1] - pcm_times[-1]
-                    return max(0.0, t_pcm + delta)
-                idx = bisect.bisect_right(pcm_times, t_pcm) - 1
-                t0, t1 = pcm_times[idx], pcm_times[idx + 1]
-                s0, s1 = browser_seek_times[idx], browser_seek_times[idx + 1]
-                ratio = (t_pcm - t0) / (t1 - t0) if t1 > t0 else 0
-                return max(0.0, s0 + ratio * (s1 - s0))
-
-            return calibrate
+            profile = {
+                "id3_len": int(id3_len),
+                "xing_abs_offset": int(id3_len + xing_pos),
+                "frames": int(frames),
+                "bytes_len": int(audio_stream_size),
+                "total_dur": float(total_dur),
+                "toc": toc[:100],
+                "pcm_times": pcm_times,
+                "byte_offsets": byte_offsets,
+                "linear_seek_times": linear_seek_times,
+                "xing_seek_times": xing_seek_times,
+            }
+            self._profile_cache[path_str] = profile
+            return profile
         except Exception as e:
-            logger.warning(f"Failed to build VBR calibrator for {audio_path.name}: {e}")
+            logger.warning(f"Failed to analyze VBR profile for {audio_path.name}: {e}")
+            self._profile_cache[path_str] = None
+            return None
+
+    def get_calibrator(self, audio_path: Path | str) -> Callable[[float], float]:
+        """
+        Returns a callable mapping uncompressed PCM timestamps (seconds) to browser
+        Xing TOC seek time (seconds). For CBR audio, returns an identity lambda.
+        """
+        path_obj = Path(audio_path)
+        path_str = str(path_obj.resolve()) if path_obj.exists() else str(path_obj)
+        if path_str in self._cache:
+            return self._cache[path_str]
+
+        calibrator = self._build_calibrator(path_obj, use_linear=False)
+        self._cache[path_str] = calibrator
+        return calibrator
+
+    def get_linear_calibrator(self, audio_path: Path | str) -> Callable[[float], float]:
+        """
+        Returns a callable mapping uncompressed PCM timestamps (seconds) to linear
+        byte-offset seek time (seconds) matching the `Xing -> Info` neutralized stream
+        across both Mozilla Firefox and Chromium.
+        """
+        path_obj = Path(audio_path)
+        path_str = str(path_obj.resolve()) if path_obj.exists() else str(path_obj)
+        if path_str in self._linear_cache:
+            return self._linear_cache[path_str]
+
+        calibrator = self._build_calibrator(path_obj, use_linear=True)
+        self._linear_cache[path_str] = calibrator
+        return calibrator
+
+    def _build_calibrator(self, audio_path: Path, use_linear: bool = False) -> Callable[[float], float]:
+        profile = self._analyze_vbr_profile(audio_path)
+        if not profile:
             return lambda t: t
+
+        pcm_times = profile["pcm_times"]
+        target_times = profile["linear_seek_times"] if use_linear else profile["xing_seek_times"]
+
+        def calibrate(t_pcm: float) -> float:
+            if t_pcm <= pcm_times[0]:
+                return target_times[0]
+            if t_pcm >= pcm_times[-1]:
+                delta = target_times[-1] - pcm_times[-1]
+                return max(0.0, t_pcm + delta)
+            idx = bisect.bisect_right(pcm_times, t_pcm) - 1
+            t0, t1 = pcm_times[idx], pcm_times[idx + 1]
+            s0, s1 = target_times[idx], target_times[idx + 1]
+            ratio = (t_pcm - t0) / (t1 - t0) if t1 > t0 else 0.0
+            return max(0.0, s0 + ratio * (s1 - s0))
+
+        return calibrate
+
+    def build_vbr_trailer(self, audio_path: Path | str) -> bytes:
+        """
+        Builds the compact `VBR1` binary trailer to append to `words/<episode_id>.bin`
+        for VBR MP3 files. Returns `b""` for CBR files.
+
+        Binary Layout:
+        - 4B: `b"VBR1"` magic
+        - 4B uint32: `total_dur_ms`
+        - 4B uint32: `id3_len`
+        - 4B uint32: `bytes_len`
+        - 100B uint8[100]: `toc`
+        - 4B uint32: `sample_count` (M)
+        - M * 8B: `(uint32 pcm_ms, uint32 audio_byte_offset)`
+        """
+        profile = self._analyze_vbr_profile(Path(audio_path))
+        if not profile:
+            return b""
+
+        total_dur_ms = int(round(profile["total_dur"] * 1000.0))
+        id3_len = int(profile["id3_len"])
+        bytes_len = int(profile["bytes_len"])
+        toc = profile["toc"]
+        pcm_times = profile["pcm_times"]
+        byte_offsets = profile["byte_offsets"]
+
+        buf = bytearray()
+        buf.extend(VBR_TRAILER_MAGIC)
+        buf.extend(struct.pack("<III", total_dur_ms, id3_len, bytes_len))
+        buf.extend(bytes(toc[:100]))
+        buf.extend(struct.pack("<I", len(pcm_times)))
+
+        for t_sec, b_off in zip(pcm_times, byte_offsets):
+            t_ms = max(0, int(round(t_sec * 1000.0)))
+            b_val = max(0, int(b_off))
+            buf.extend(struct.pack("<II", t_ms, b_val))
+
+        return bytes(buf)
 
     def calibrate_segments(
         self,

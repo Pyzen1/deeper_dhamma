@@ -20,7 +20,11 @@ PALI_PROMPT = (
 
 
 class Transcriber:
-    """Wrapper around faster-whisper Large-v3."""
+    """
+    Wrapper around faster-whisper Large-v3.
+    Prioritizes data quality and speech completeness over raw speed by defaulting
+    to sequential inference (batch_size=1) with contemplative Silero VAD settings.
+    """
 
     def __init__(
         self,
@@ -28,7 +32,7 @@ class Transcriber:
         device: str = "cuda",
         compute_type: str = "float16",
         initial_prompt: Optional[str] = PALI_PROMPT,
-        batch_size: int = 16,
+        batch_size: int = 1,
     ):
         self.device = device
         self.compute_type = compute_type
@@ -44,7 +48,7 @@ class Transcriber:
         if self.batch_size > 1:
             from faster_whisper import BatchedInferencePipeline
             self.batched_pipeline = BatchedInferencePipeline(model=self.model)
-            logger.info("BatchedInferencePipeline active.")
+            logger.info("BatchedInferencePipeline active (note: batched mode may drop quiet segments near boundaries).")
         else:
             self.batched_pipeline = None
         logger.info("Whisper model ready.")
@@ -65,10 +69,10 @@ class Transcriber:
         """
         active_prompt = prompt or self.initial_prompt
         vad_params = dict(
-            threshold=0.30,
+            threshold=0.20,
             min_speech_duration_ms=100,
-            min_silence_duration_ms=500,
-            speech_pad_ms=400,
+            min_silence_duration_ms=800,
+            speech_pad_ms=600,
         )
         if self.batched_pipeline is not None and vad_filter:
             segments_gen, _ = self.batched_pipeline.transcribe(

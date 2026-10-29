@@ -273,65 +273,6 @@ class TranscriptDatabase:
                     segment_rows,
                 )
 
-                # If the episode ID differs from filename_stem, synchronize the filename row with full metadata
-                if filename_stem and filename_stem != ep_id:
-                    conn.execute(
-                        """
-                        INSERT INTO episodes (
-                            id, title, date, year, primary_teacher, primary_display,
-                            identified_teachers, is_transcribed,
-                            media_url, permalink, duration_sec, is_multi_speaker,
-                            speaker_shares, terminology_changelog, filepath
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(id) DO UPDATE SET
-                            title = excluded.title,
-                            date = excluded.date,
-                            year = excluded.year,
-                            primary_teacher = excluded.primary_teacher,
-                            primary_display = excluded.primary_display,
-                            identified_teachers = COALESCE(episodes.identified_teachers, excluded.identified_teachers),
-                            is_transcribed = 1,
-                            media_url = excluded.media_url,
-                            permalink = excluded.permalink,
-                            duration_sec = excluded.duration_sec,
-                            is_multi_speaker = excluded.is_multi_speaker,
-                            speaker_shares = excluded.speaker_shares,
-                            terminology_changelog = excluded.terminology_changelog,
-                            filepath = COALESCE(NULLIF(excluded.filepath, ''), episodes.filepath),
-                            last_error = NULL,
-                            last_error_at = NULL,
-                            last_error_op = NULL;
-                        """,
-                        (
-                            filename_stem, title, date_display, year_int, primary_slug, primary_display,
-                            primary_display,
-                            media_url, permalink, duration_sec, is_multi,
-                            shares_json, changelog_json, filepath,
-                        ),
-                    )
-                    conn.execute("DELETE FROM speech_segments WHERE episode_id = ?;", (filename_stem,))
-                    segment_rows_stem = [
-                        (
-                            filename_stem,
-                            idx,
-                            round(float(seg["start"]), 3),
-                            round(float(seg["end"]), 3),
-                            seg.get("speaker", "unknown"),
-                            seg.get("speaker_display", seg.get("speaker", "Unknown")),
-                            seg.get("text", "").strip(),
-                        )
-                        for idx, seg in enumerate(attributed_segments)
-                    ]
-                    conn.executemany(
-                        """
-                        INSERT INTO speech_segments (
-                            episode_id, turn_index, start_sec, end_sec,
-                            speaker_slug, speaker_display, text
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?);
-                        """,
-                        segment_rows_stem,
-                    )
-
         if primary_slug and primary_slug != "unknown_teacher":
             self.associate_teacher(
                 episode_id=ep_id,
@@ -619,17 +560,21 @@ class TranscriptDatabase:
     def has_episode(self, episode_id: str) -> bool:
         with self._get_connection() as conn:
             cur = conn.execute(
-                "SELECT 1 FROM episodes WHERE id = ? AND is_transcribed = 1 LIMIT 1;",
-                (episode_id,),
+                "SELECT 1 FROM episodes WHERE (id = ? OR filepath LIKE ?) AND is_transcribed = 1 LIMIT 1;",
+                (episode_id, f"%{episode_id}%"),
             )
             return cur.fetchone() is not None
 
     def get_episode(self, episode_id: str) -> Optional[Dict]:
         with self._get_connection() as conn:
-            ep = conn.execute("SELECT * FROM episodes WHERE id = ?;", (episode_id,)).fetchone()
+            ep = conn.execute(
+                "SELECT * FROM episodes WHERE id = ? OR filepath LIKE ? LIMIT 1;",
+                (episode_id, f"%{episode_id}%"),
+            ).fetchone()
             if not ep:
                 return None
             ep_dict = dict(ep)
+            resolved_id = ep_dict["id"]
             try:
                 ep_dict["speaker_shares"] = json.loads(ep_dict.get("speaker_shares") or "{}")
             except Exception:
@@ -641,7 +586,7 @@ class TranscriptDatabase:
 
             segs = conn.execute(
                 "SELECT * FROM speech_segments WHERE episode_id = ? ORDER BY turn_index ASC;",
-                (episode_id,),
+                (resolved_id,),
             ).fetchall()
             ep_dict["segments"] = [dict(s) for s in segs]
             return ep_dict

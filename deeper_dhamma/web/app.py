@@ -59,6 +59,11 @@ def create_app() -> Bottle:
     def serve_static(filepath: str):
         return static_file(filepath, root=str(STATIC_DIR))
 
+    @app.route("/audio/<episode_id>", method=["GET", "HEAD"])
+    def serve_audio_stream(episode_id: str):
+        from deeper_dhamma.calibration import serve_episode_audio_stream
+        return serve_episode_audio_stream(episode_id, db_path=TRANSCRIPTS_DB_PATH)
+
     @app.route("/")
     def index():
         index_file = VIEWS_DIR / "index.html"
@@ -221,6 +226,14 @@ def create_app() -> Bottle:
             return json_response({"error": "Episode not found"}, status=404)
         return json_response(ep)
 
+    @app.route("/api/episodes/<episode_id>/words")
+    def api_episode_words(episode_id: str):
+        """Returns on-demand word timing sidecar (.bin) for an episode if available."""
+        bin_path = STATIC_DIR / "words" / f"{episode_id}.bin"
+        if bin_path.exists():
+            return static_file(f"{episode_id}.bin", root=str(STATIC_DIR / "words"), mimetype="application/octet-stream")
+        return json_response({"available": False, "episode_id": episode_id}, status=404)
+
     @app.route("/api/lexicon/lookup")
     def api_lexicon_lookup():
         """Looks up a Pali Buddhist doctrinal term."""
@@ -299,9 +312,31 @@ def run_server(
     reloader: bool = False,
 ):
     """Starts the Bottle WSGI server."""
+    from socketserver import ThreadingMixIn
+    from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
+    from bottle import ServerAdapter
+
+    class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
+        daemon_threads = True
+
+    class QuietWSGIRequestHandler(WSGIRequestHandler):
+        def address_string(self):
+            return self.client_address[0]
+
+    class ThreadedWSGIRefServer(ServerAdapter):
+        def run(self, handler):
+            srv = make_server(
+                self.host,
+                self.port,
+                handler,
+                server_class=ThreadingWSGIServer,
+                handler_class=QuietWSGIRequestHandler,
+            )
+            srv.serve_forever()
+
     app = create_app()
     logger.info("Starting Deeper Dhamma Web UI on http://%s:%d", host, port)
-    app.run(host=host, port=port, reloader=reloader, server="wsgiref")
+    app.run(host=host, port=port, reloader=reloader, server=ThreadedWSGIRefServer)
 
 
 if __name__ == "__main__":

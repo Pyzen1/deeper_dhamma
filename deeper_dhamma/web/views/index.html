@@ -305,6 +305,11 @@
             <button type="button" class="btn-primary" id="drawer-play-full-btn" title="Play talk from beginning">
               ▶ Play Talk
             </button>
+            <button type="button" class="word-sync-toggle-btn active" id="btn-toggle-word-sync" title="Toggle synchronized word highlighting">
+              <span class="toggle-indicator-dot"></span>
+              <span class="toggle-btn-label">Word Follow: <strong class="toggle-state-text">ON</strong></span>
+            </button>
+            <span class="word-sync-metrics-badge" id="word-sync-metrics-badge" style="display: none;"></span>
             <div class="download-dropdown-wrapper" id="single-talk-dropdown-wrapper">
               <button type="button" class="btn-secondary download-dropdown-btn" id="drawer-download-btn" title="Download transcript in selected format">
                 📥 Download Transcript ▾
@@ -491,6 +496,7 @@
   </div>
 
   <script src="/static/db_client.js?v={{db_version}}"></script>
+  <script src="/static/word_sync.js?v={{db_version}}"></script>
   <script src="/static/app.js?v={{db_version}}"></script>
 </body>
 </html>

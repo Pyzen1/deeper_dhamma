@@ -7,10 +7,11 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from deeper_dhamma.config import (
     CATALOG_PATH,
+    PROJECT_ROOT,
     TRANSCRIPTS_DB_PATH,
     VOICEPRINTS_DB_PATH,
 )
@@ -44,7 +45,7 @@ class TranscriptionPipeline:
         catalog_path: Optional[Path | str] = CATALOG_PATH,
         device: str = "cuda:0",
         model_size: str = "large-v3",
-        batch_size: int = 16,
+        batch_size: int = 1,
     ):
         logger.info(f"[*] Initializing TranscriptionPipeline components (model={model_size}, batch_size={batch_size})...")
         self.voiceprints_db = VoiceprintDatabase(voiceprints_db_path)
@@ -200,7 +201,7 @@ class TranscriptionPipeline:
 
             # 3. Speech-to-Text with Teacher-Specific Prompt Steering (hotwords disabled to avoid logit-bias looping)
             talk_prompt = self.lexicon_db.get_prompt_steering_terms(teacher_slugs=active_slugs, limit=30)
-            logger.info(f"    Transcribing with faster-whisper (batched, float16, Silero VAD, {len(active_slugs)} teacher profile(s))...")
+            logger.info(f"    Transcribing with faster-whisper (sequential, float16, Silero VAD, {len(active_slugs)} teacher profile(s))...")
             t_asr0 = time.time()
             asr_segments = self.transcriber.transcribe(audio_np, prompt=talk_prompt, hotwords=None)
             logger.info(f"    ASR complete in {time.time() - t_asr0:.2f}s ({len(asr_segments)} segments).")
@@ -226,8 +227,8 @@ class TranscriptionPipeline:
             if term_changelog:
                 logger.info(f"    [+] Terminology editor applied {len(term_changelog)} standardization rule(s).")
 
-            # 6. Stream Seek Calibration (aligns uncompressed PCM time to browser HTTP seek timeline)
-            attributed = self.calibrator.calibrate_segments(audio_path=audio_path, segments=attributed)
+            # 6. Preserve exact physical PCM timestamps in SQLite and export VBR seek trailer in .bin
+            # (Prevents intra-turn VBR bitrate drift and ensures cross-browser Firefox/Chrome parity)
 
             # 7. Commit to Unified SQLite Database
             logger.info("    Committing to unified SQLite database & updating FTS5 index...")
@@ -239,6 +240,16 @@ class TranscriptionPipeline:
                 filename_stem=audio_path.stem,
                 terminology_changelog=term_changelog,
             )
+
+            # 8. Export Compact Word Synchronization Binary BLOB (.bin) with VBR1 seek trailer
+            words = [w for seg in attributed for w in seg.get("words", [])]
+            if words:
+                self._save_words_blob(
+                    words,
+                    ep_id=meta["id"],
+                    filename_stem=audio_path.stem,
+                    audio_path=audio_path,
+                )
 
             elapsed = time.time() - t0
             logger.info(f"[✓] Episode committed in {elapsed:.2f}s: {meta['id']}")
@@ -266,3 +277,35 @@ class TranscriptionPipeline:
                 title=ep_title,
             )
             raise
+
+    def _save_words_blob(
+        self,
+        words: List[Dict],
+        ep_id: str,
+        filename_stem: str,
+        audio_path: Optional[Path] = None,
+    ) -> None:
+        """Serializes physical word timestamps and optional VBR1 seek trailer into compact binary BLOB (.bin)."""
+        import struct
+        words_sorted = sorted(words, key=lambda w: float(w["start"]))
+        buf = bytearray()
+        buf.extend(struct.pack("<I", len(words_sorted)))
+        for w in words_sorted:
+            st_ms = int(round(float(w["start"]) * 1000.0))
+            en_ms = int(round(float(w["end"]) * 1000.0))
+            dur_ms = max(1, min(65535, en_ms - st_ms))
+            buf.extend(struct.pack("<IH", st_ms, dur_ms))
+
+        if audio_path is not None:
+            vbr_trailer = self.calibrator.build_vbr_trailer(audio_path)
+            if vbr_trailer:
+                buf.extend(vbr_trailer)
+
+        target_dirs = [
+            PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "words",
+            PROJECT_ROOT / "dist" / "words",
+        ]
+        for d in target_dirs:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{ep_id}.bin").write_bytes(buf)
+        logger.info(f"    [✓] Exported {len(words_sorted):,} word timings ({len(buf)/1024:.1f} KB binary BLOB) for {ep_id}")

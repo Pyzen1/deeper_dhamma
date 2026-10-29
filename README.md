@@ -111,6 +111,7 @@ deeper_dhamma/
 │   ├── lexicon.py              # BuddhismLexiconDatabase interface & FTS5 search
 │   ├── terminology.py          # Context-aware Buddhist lexicon normalizer & audit tracking
 │   ├── self_correction.py      # Dual-pass prompt steering & anti-drift guardrail engine
+│   ├── calibration.py          # VBR stream seek calibration & in-memory Xing->Info neutralization
 │   ├── storage.py              # Unified SQLite archive & on-demand generators
 │   ├── pipeline.py             # End-to-end TranscriptionPipeline orchestrator
 │   ├── downloader.py           # Podbean RSS feed sync
@@ -118,9 +119,13 @@ deeper_dhamma/
 │   ├── benchmark.py            # Gold-standard accuracy benchmarks
 │   ├── export_web.py           # Static site & SQLite WASM bundle compiler
 │   └── web/                    # Frontend assets, views & Web Worker
-│       ├── static/             # CSS, app.js, db_worker.js, sqlite3.wasm
-│       │   └── adapters/       # Pluggable data adapters (api_client.js, wasm_client.js)
+│       ├── static/             # CSS, app.js, word_sync.js, db_worker.js, sqlite3.wasm
+│       │   ├── adapters/       # Pluggable data adapters (api_client.js, wasm_client.js)
+│       │   └── words/          # Compact binary word timing sidecars (.bin + VBR1 trailer)
 │       └── views/              # Bottle templates (index.html)
+├── docs/
+│   ├── design/                 # Pipeline architecture specifications
+│   └── troubleshooting_guide.md # Cross-browser VBR audio & word sync troubleshooting guide
 └── benchmarks/
     └── reference_transcripts/  # Verified word-for-word human reference transcripts
 ```

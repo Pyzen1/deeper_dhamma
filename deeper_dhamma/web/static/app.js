@@ -314,6 +314,9 @@
   async function init() {
     setupEventListeners();
     setupAudioEngine();
+    if (window.WordSync) {
+      window.WordSync.init();
+    }
     if (!dbService) return;
     try {
       await dbService.init();
@@ -952,6 +955,7 @@
         const ep = episodes.find(e => (e.id || e.episode_id) === epId);
         if (ep) {
           playAudioSegment({
+            episode_id: ep.id || ep.episode_id,
             media_url: ep.media_url,
             title: ep.title,
             teacher: ep.teacher || ep.primary_display,
@@ -1109,6 +1113,20 @@
         switchTab(state.previousTab || 'search-view');
       });
     }
+
+    const btnToggleWordSync = document.getElementById('btn-toggle-word-sync');
+    if (btnToggleWordSync) {
+      btnToggleWordSync.addEventListener('click', () => {
+        if (window.WordSync) {
+          const isEnabled = window.WordSync.toggle();
+          if (isEnabled && !els.nativeAudio.paused) {
+            window.WordSync.update(els.nativeAudio.currentTime);
+          }
+        }
+      });
+    }
+
+
 
     // Lexicon Search
     if (els.lexiconInput) {
@@ -1496,6 +1514,7 @@
         const item = results[idx];
         if (item) {
           playAudioSegment({
+            episode_id: item.episode_id,
             media_url: item.media_url,
             title: item.title,
             teacher: item.teacher,
@@ -1777,6 +1796,7 @@
 
       els.drawerPlayFullBtn.onclick = () => {
         playAudioSegment({
+          episode_id: ep.id,
           media_url: ep.media_url,
           title: ep.title,
           teacher: ep.primary_display,
@@ -1793,43 +1813,70 @@
         return;
       }
 
-      let html = '';
-      ep.segments.forEach((seg, idx) => {
-        const startStr = formatSeconds(seg.start_sec);
-        const endStr = formatSeconds(seg.end_sec);
-        const formattedText = formatTranscriptParagraphs(seg.text);
-        const spkColor = getSpeakerColor(seg.speaker_slug, seg.speaker_display);
-        const initials = getSpeakerInitials(seg.speaker_display || 'Speaker');
-        html += `
-          <div class="transcript-turn" id="turn-${idx}" data-start="${seg.start_sec}" style="--spk-color: ${spkColor};">
-            <div class="turn-header">
-              <span class="turn-speaker">
-                <span class="turn-speaker-badge" title="${escapeHtml(seg.speaker_display || 'Speaker')}">${escapeHtml(initials)}</span>
-                ${escapeHtml(seg.speaker_display || 'Speaker')}
-              </span>
-              <button type="button" class="turn-time-btn" data-start="${seg.start_sec}" title="Seek audio to this turn">
-                ▶ ${startStr}
-              </button>
+      function renderDrawerTurns() {
+        let html = '';
+        ep.segments.forEach((seg, idx) => {
+          const startStr = formatSeconds(seg.start_sec);
+          const formattedText = window.WordSync
+            ? window.WordSync.formatTurnParagraphs(seg.text, idx)
+            : formatTranscriptParagraphs(seg.text);
+          const spkColor = getSpeakerColor(seg.speaker_slug, seg.speaker_display);
+          const initials = getSpeakerInitials(seg.speaker_display || 'Speaker');
+          html += `
+            <div class="transcript-turn" id="turn-${idx}" data-start="${seg.start_sec}" style="--spk-color: ${spkColor};">
+              <div class="turn-header">
+                <span class="turn-speaker">
+                  <span class="turn-speaker-badge" title="${escapeHtml(seg.speaker_display || 'Speaker')}">${escapeHtml(initials)}</span>
+                  ${escapeHtml(seg.speaker_display || 'Speaker')}
+                </span>
+                <button type="button" class="turn-time-btn" data-start="${seg.start_sec}" title="Seek audio to this turn">
+                  ▶ ${startStr}
+                </button>
+              </div>
+              <div class="turn-text">${formattedText}</div>
             </div>
-            <div class="turn-text">${formattedText}</div>
-          </div>
-        `;
-      });
+          `;
+        });
 
-      els.drawerTurns.innerHTML = html;
+        els.drawerTurns.innerHTML = html;
 
-      // Click on any timestamp in drawer seeks audio!
-      els.drawerTurns.querySelectorAll('.turn-time-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const start = parseFloat(btn.dataset.start);
-          playAudioSegment({
-            media_url: ep.media_url,
-            title: ep.title,
-            teacher: ep.primary_display,
-            start_sec: start,
+        // Click on any timestamp in drawer seeks audio!
+        els.drawerTurns.querySelectorAll('.turn-time-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const start = parseFloat(btn.dataset.start);
+            playAudioSegment({
+              episode_id: ep.id,
+              media_url: ep.media_url,
+              title: ep.title,
+              teacher: ep.primary_display,
+              start_sec: start,
+            });
           });
         });
-      });
+
+        // Click on any word in drawer seeks audio to that exact second!
+        els.drawerTurns.querySelectorAll('.transcript-word').forEach(wSpan => {
+          wSpan.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const start = parseFloat(wSpan.dataset.start);
+            playAudioSegment({
+              episode_id: ep.id,
+              media_url: ep.media_url,
+              title: ep.title,
+              teacher: ep.primary_display,
+              start_sec: start,
+            });
+          });
+        });
+      }
+
+      window.renderActiveTranscript = renderDrawerTurns;
+
+      if (window.WordSync) {
+        await window.WordSync.prepareEpisode(ep);
+      }
+
+      renderDrawerTurns();
     } catch (err) {
       els.drawerTurns.innerHTML = '<div class="empty-state"><p>Failed to load transcript.</p></div>';
       console.error(err);
@@ -1837,7 +1884,7 @@
   }
 
   // ==========================================================================
-  // Audio Player Engine (Direct Podbean Streaming)
+  // Audio Player Engine (Cross-Browser VBR Neutralized & Podbean CDN Streaming)
   // ==========================================================================
 
   function setupAudioEngine() {
@@ -1845,38 +1892,41 @@
     let isScrubbing = false;
     let scrubCommitted = false;
 
-    function safeSeek(targetTime) {
+    function safeSeek(targetPhysicalTime) {
       const dur = Number.isFinite(audio.duration) ? audio.duration : Infinity;
-      const clamped = Math.max(0, Math.min(dur, targetTime));
-      // HAVE_METADATA (1) is enough to seek a remote stream; waiting for
-      // HAVE_CURRENT_DATA (2) drops seeks while buffering.
-      if (audio.readyState >= 1) {
+      const clampedPhys = Math.max(0, Math.min(dur, targetPhysicalTime));
+      const doSeek = () => {
         try {
-          audio.currentTime = clamped;
+          const streamSeek = window.WordSync
+            ? window.WordSync.prepareSeek(clampedPhys)
+            : clampedPhys;
+          audio.currentTime = Math.max(0, Math.min(dur, streamSeek));
         } catch (err) {
           console.warn('Seek error:', err);
         }
+      };
+      // HAVE_METADATA (1) is enough to seek a remote stream; waiting for
+      // HAVE_CURRENT_DATA (2) drops seeks while buffering.
+      if (audio.readyState >= 1) {
+        doSeek();
       } else {
-        const onReady = () => {
-          try {
-            audio.currentTime = clamped;
-          } catch (err) {
-            console.warn('Seek on ready error:', err);
-          }
-        };
-        audio.addEventListener('canplay', onReady, { once: true });
-        audio.addEventListener('loadeddata', onReady, { once: true });
+        audio.addEventListener('canplay', doSeek, { once: true });
+        audio.addEventListener('loadeddata', doSeek, { once: true });
       }
     }
 
     function syncProgress() {
       if (isScrubbing) return; // Do not overwrite slider while user is dragging
-      const cur = audio.currentTime;
+      const rawCur = audio.currentTime;
+      const physCur = window.WordSync ? window.WordSync.getPhysicalTime(rawCur) : rawCur;
       const dur = Number.isFinite(audio.duration) ? audio.duration : 0;
-      els.timeCurrent.textContent = formatSeconds(cur);
+      els.timeCurrent.textContent = formatSeconds(physCur);
       if (dur > 0) {
         els.timeTotal.textContent = formatSeconds(dur);
-        els.scrubber.value = (cur / dur) * 100;
+        els.scrubber.value = Math.min(100, Math.max(0, (physCur / dur) * 100));
+      }
+      if (window.WordSync && state.activeTab === 'transcript-view') {
+        window.WordSync.update(rawCur);
       }
     }
 
@@ -1915,11 +1965,13 @@
     }
 
     els.btnSkipBack.addEventListener('click', () => {
-      safeSeek(audio.currentTime - 15);
+      const curPhys = window.WordSync ? window.WordSync.getPhysicalTime(audio.currentTime) : audio.currentTime;
+      safeSeek(curPhys - 15);
     });
 
     els.btnSkipFwd.addEventListener('click', () => {
-      safeSeek(audio.currentTime + 15);
+      const curPhys = window.WordSync ? window.WordSync.getPhysicalTime(audio.currentTime) : audio.currentTime;
+      safeSeek(curPhys + 15);
     });
 
     // Scrubber: show preview during drag, seek only on commit to prevent stream thrashing
@@ -1998,6 +2050,10 @@
       audio.volume = parseFloat(els.volumeSlider.value);
       updateVolumeIcon(audio.volume);
     });
+
+    if (window.WordSync) {
+      window.WordSync.bindAudio(audio);
+    }
   }
 
   function playPrevTrack() {
@@ -2006,12 +2062,14 @@
     if (currentIdx > 0) {
       const prevEp = state.catalog[currentIdx - 1];
       playAudioSegment({
+        episode_id: prevEp.id || prevEp.episode_id,
         media_url: prevEp.media_url,
         title: prevEp.title,
         teacher: prevEp.teacher || prevEp.primary_display,
         start_sec: 0,
       });
     } else {
+      if (window.WordSync) window.WordSync.prepareSeek(0);
       els.nativeAudio.currentTime = 0;
     }
   }
@@ -2022,6 +2080,7 @@
     if (currentIdx >= 0 && currentIdx < state.catalog.length - 1) {
       const nextEp = state.catalog[currentIdx + 1];
       playAudioSegment({
+        episode_id: nextEp.id || nextEp.episode_id,
         media_url: nextEp.media_url,
         title: nextEp.title,
         teacher: nextEp.teacher || nextEp.primary_display,
@@ -2033,7 +2092,23 @@
   // 500ms lead time to first word for any/all seek reference points
   const SEEK_REF_LEAD_TIME_SEC = 0.50;
 
-  function playAudioSegment({ media_url, title, teacher, start_sec }) {
+  function resolveEpisodeId(explicitId, mediaUrl) {
+    if (explicitId) return explicitId;
+    if (state.currentEpisode && state.currentEpisode.media_url === mediaUrl) {
+      return state.currentEpisode.id || state.currentEpisode.episode_id;
+    }
+    if (state.catalog && state.catalog.length > 0) {
+      const found = state.catalog.find(e => e.media_url === mediaUrl);
+      if (found) return found.id || found.episode_id;
+    }
+    if (mediaUrl) {
+      const m = mediaUrl.match(/(pb\d+)/i);
+      if (m) return m[1];
+    }
+    return null;
+  }
+
+  function playAudioSegment({ episode_id, media_url, title, teacher, start_sec }) {
     if (!media_url) {
       alert('Podbean CDN streaming URL is not available for this talk.');
       return;
@@ -2044,18 +2119,39 @@
     const spkColor = getSpeakerColor('', teacher);
     els.playerSpeaker.innerHTML = `<span class="player-speaker-dot" style="background-color: ${spkColor}; box-shadow: 0 0 8px ${spkColor};"></span> ${escapeHtml(teacher || 'Monastic')}`;
 
-    const isDifferentSource = state.currentMediaUrl !== media_url;
+    const epId = resolveEpisodeId(episode_id, media_url);
+    const useLocalAudioRoute = Boolean(
+      epId &&
+      window.location.protocol !== 'file:' &&
+      !state.localAudioRouteUnavailable
+    );
+    const desiredSrcUrl = useLocalAudioRoute
+      ? `/audio/${encodeURIComponent(epId)}.mp3`
+      : media_url;
+
+    if (window.WordSync) {
+      window.WordSync.streamMode = useLocalAudioRoute ? 'local' : 'cdn';
+    }
+
+    const isDifferentSource = state.currentMediaUrl !== media_url || state.currentStreamUrl !== desiredSrcUrl;
     state.currentMediaUrl = media_url;
+    state.currentStreamUrl = desiredSrcUrl;
 
     // Apply exactly 500ms lead time to first word for any/all seek ref points (clamped to 0)
     const rawTarget = typeof start_sec === 'number' ? start_sec : parseFloat(start_sec || 0);
     const targetTime = Math.max(0, rawTarget > 0 ? (rawTarget - SEEK_REF_LEAD_TIME_SEC) : 0);
 
-    function performSeek(sec) {
-      if (sec < 0) return;
+    function performSeek(physSec, wordStartSec) {
+      if (physSec < 0) return;
       const doSeek = () => {
         try {
-          audio.currentTime = sec;
+          const streamSeekTime = window.WordSync
+            ? window.WordSync.prepareSeek(physSec, wordStartSec)
+            : physSec;
+          audio.currentTime = streamSeekTime;
+          if (window.WordSync && state.activeTab === 'transcript-view') {
+            window.WordSync.update(streamSeekTime);
+          }
         } catch (e) {
           console.warn('Seek error:', e);
         }
@@ -2069,12 +2165,41 @@
       }
     }
 
+    // If WordSync has not loaded this episode's VBR profile yet (e.g. playing from Search tab),
+    // asynchronously load it and refine the seek position as soon as it arrives.
+    if (window.WordSync && epId && window.WordSync.currentEpisodeId !== epId) {
+      window.WordSync.ensureEpisodeLoaded(epId).then(() => {
+        if (state.currentMediaUrl === media_url && targetTime > 0) {
+          performSeek(targetTime, rawTarget);
+        }
+      });
+    }
+
     if (isDifferentSource) {
-      audio.src = media_url;
+      audio.src = desiredSrcUrl;
       audio.playbackRate = state.playbackSpeed;
 
+      if (useLocalAudioRoute) {
+        const onLocalStreamError = () => {
+          if (state.currentStreamUrl === desiredSrcUrl && media_url) {
+            state.localAudioRouteUnavailable = true;
+            state.currentStreamUrl = media_url;
+            if (window.WordSync) window.WordSync.streamMode = 'cdn';
+            audio.src = media_url;
+            audio.playbackRate = state.playbackSpeed;
+            if (targetTime > 0) {
+              performSeek(targetTime, rawTarget);
+            }
+            audio.play().catch(() => {});
+          }
+        };
+        audio.addEventListener('error', onLocalStreamError, { once: true });
+      }
+
       if (targetTime > 0) {
-        performSeek(targetTime);
+        performSeek(targetTime, rawTarget);
+      } else if (window.WordSync) {
+        window.WordSync.prepareSeek(0, 0);
       }
 
       // Call audio.play() synchronously directly inside the user gesture
@@ -2085,7 +2210,7 @@
         });
       }
     } else {
-      performSeek(targetTime);
+      performSeek(targetTime, rawTarget);
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.catch(e => console.warn('Play error:', e));
@@ -2100,6 +2225,7 @@
     if (!audio.src || audio.src === window.location.href || audio.src.endsWith('/')) {
       if (state.currentEpisode && state.currentEpisode.media_url) {
         playAudioSegment({
+          episode_id: state.currentEpisode.id || state.currentEpisode.episode_id,
           media_url: state.currentEpisode.media_url,
           title: state.currentEpisode.title,
           teacher: state.currentEpisode.primary_display || state.currentEpisode.teacher,
@@ -2111,6 +2237,7 @@
       if (state.catalog && state.catalog.length > 0 && state.catalog[0].media_url) {
         const firstEp = state.catalog[0];
         playAudioSegment({
+          episode_id: firstEp.id || firstEp.episode_id,
           media_url: firstEp.media_url,
           title: firstEp.title,
           teacher: firstEp.teacher,
@@ -2124,6 +2251,7 @@
         if (data && data.episodes && data.episodes.length > 0 && data.episodes[0].media_url) {
           const ep = data.episodes[0];
           playAudioSegment({
+            episode_id: ep.id || ep.episode_id,
             media_url: ep.media_url,
             title: ep.title,
             teacher: ep.teacher,
