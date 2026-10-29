@@ -13,8 +13,8 @@ Subcommands:
   test        Run end-to-end verification test on a 120s audio sample
   status      Inspect transcription progress and available archive audio catalog
   audit       Inspect, audit integrity, and clean/scrub archive audio files
-  serve       Launch Bottle-based Web UI and search API server
-  web         Build static distribution (dist/) or run local preview server
+  serve       Launch static web preview server (UI runs 100% in-browser via SQLite WASM)
+  web         Compile static distribution (dist/) or run local preview server
 """
 
 import argparse
@@ -611,13 +611,16 @@ def cmd_audit(args):
 
 
 def cmd_serve(args):
-    """Starts the Bottle-based web UI and search REST API."""
+    """Launches the in-browser static web application (redirects to web preview)."""
     if not getattr(args, "run", False):
         if hasattr(args, "subparser"):
             args.subparser.print_help()
         return
-    from deeper_dhamma.web.app import run_server
-    run_server(host=args.host, port=args.port, reloader=args.reload)
+    print("\n[i] Deeper Dhamma UI is 100% web-only and runs fully in the browser via SQLite WASM.")
+    print("[i] Python is used solely for localized transcription and website buildout.")
+    print("[i] Launching static preview server...\n")
+    from deeper_dhamma.export_web import run_web_preview
+    run_web_preview(host=args.host, port=args.port, dist_dir="dist")
 
 
 def cmd_web(args):
@@ -793,10 +796,10 @@ def main(argv=None):
     p_audit.add_argument("--report", "-r", type=str, help="Custom JSON report output file path")
     p_audit.set_defaults(func=cmd_audit, subparser=p_audit)
 
-    # 12. Web UI & Search Server
+    # 12. Web UI Static Server (Runs in-browser SQLite WASM)
     p_serve = subparsers.add_parser(
         "serve",
-        help="Start the Bottle-based Web UI and search server",
+        help="Start local preview server for the in-browser SQLite WASM web application",
     )
     p_serve.add_argument(
         "--run", "-r",

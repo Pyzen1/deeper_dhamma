@@ -159,6 +159,9 @@ async function initDatabase(dbUrl = 'dhamma_web.db') {
     throw new Error(`sqlite3_deserialize failed with code ${rc}`);
   }
 
+  // Initialize in-memory vocabulary cache for instant typo correction
+  initVocabCache();
+
   console.log(`[DB Worker] Database ready: v${currentDbVersion}, ${uint8Array.byteLength} bytes.`);
   return { version: currentDbVersion, cached: isFromCache, size: uint8Array.byteLength };
 }
@@ -313,11 +316,196 @@ function handleGetEpisode(episodeId) {
   };
 }
 
+// ============================================================================
+// In-Browser Fuzzy Search, Vocabulary Cache & Unicode Normalization
+// ============================================================================
+
+let vocabList = [];
+let vocabSet = new Set();
+
+const PALI_DIACRITICS_MAP = {
+  'ā': 'a', 'Ā': 'a',
+  'ī': 'i', 'Ī': 'i',
+  'ū': 'u', 'Ū': 'u',
+  'ṭ': 't', 'Ṭ': 't',
+  'ḍ': 'd', 'Ḍ': 'd',
+  'ṇ': 'n', 'Ṇ': 'n',
+  'ñ': 'n', 'Ñ': 'n',
+  'ḷ': 'l', 'Ḷ': 'l',
+  'ṁ': 'm', 'Ṁ': 'm',
+  'ŋ': 'm', 'Ŋ': 'm',
+  'ś': 's', 'Ś': 's',
+  'ṣ': 's', 'Ṣ': 's'
+};
+
+function foldDiacritics(str) {
+  if (!str) return '';
+  return str
+    .replace(/[ŋŊ]/g, 'm')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[āĀīĪūŪṭṬḍḌṇṆñÑḷḶṁṀŋŊśŚṣṢ]/g, (ch) => PALI_DIACRITICS_MAP[ch] || ch)
+    .toLowerCase();
+}
+
+function initVocabCache() {
+  vocabList = [];
+  vocabSet = new Set();
+  try {
+    const rows = queryAll('SELECT word, count FROM search_vocab ORDER BY count DESC;');
+    if (rows && rows.length > 0) {
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        vocabList.push({ word: r.word, count: r.count });
+        vocabSet.add(r.word);
+      }
+      console.log(`[DB Worker] Loaded ${vocabList.length} vocabulary terms for in-browser fuzzy search.`);
+      return;
+    }
+  } catch (_) {}
+
+  // Fallback dynamic extraction if search_vocab table is missing
+  try {
+    const segs = queryAll('SELECT text FROM speech_segments LIMIT 3000;');
+    const counts = {};
+    for (let i = 0; i < segs.length; i++) {
+      const ws = (segs[i].text || '').toLowerCase().match(/[a-z]{3,}/g) || [];
+      for (let j = 0; j < ws.length; j++) {
+        const w = ws[j];
+        counts[w] = (counts[w] || 0) + 1;
+      }
+    }
+    const terms = queryAll('SELECT pali_plain, english_description FROM terms LIMIT 2000;');
+    for (let i = 0; i < terms.length; i++) {
+      const t = terms[i];
+      const ws1 = (t.pali_plain || '').toLowerCase().match(/[a-z]{3,}/g) || [];
+      for (let j = 0; j < ws1.length; j++) counts[ws1[j]] = (counts[ws1[j]] || 0) + 5;
+      const ws2 = (t.english_description || '').toLowerCase().match(/[a-z]{3,}/g) || [];
+      for (let j = 0; j < ws2.length; j++) counts[ws2[j]] = (counts[ws2[j]] || 0) + 1;
+    }
+    const keys = Object.keys(counts);
+    for (let i = 0; i < keys.length; i++) {
+      const w = keys[i];
+      vocabList.push({ word: w, count: counts[w] });
+      vocabSet.add(w);
+    }
+    vocabList.sort((a, b) => b.count - a.count);
+    console.log(`[DB Worker] Dynamically indexed ${vocabList.length} vocabulary terms for fuzzy search.`);
+  } catch (e) {
+    console.warn('[DB Worker] Could not index vocabulary:', e);
+  }
+}
+
+function damerauLevenshtein(a, b, maxDist = 2) {
+  const la = a.length;
+  const lb = b.length;
+  if (la === 0) return lb;
+  if (lb === 0) return la;
+  if (Math.abs(la - lb) > maxDist) return 999;
+
+  const d = [];
+  for (let i = 0; i <= la; i++) {
+    d[i] = new Int32Array(lb + 1);
+    d[i][0] = i;
+  }
+  for (let j = 0; j <= lb; j++) {
+    d[0][j] = j;
+  }
+
+  for (let i = 1; i <= la; i++) {
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let minVal = Math.min(
+        d[i - 1][j] + 1,       // deletion
+        d[i][j - 1] + 1,       // insertion
+        d[i - 1][j - 1] + cost // substitution
+      );
+
+      // Transposition
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        minVal = Math.min(minVal, d[i - 2][j - 2] + 1);
+      }
+      d[i][j] = minVal;
+    }
+  }
+  return d[la][lb];
+}
+
+function correctFuzzyWord(w) {
+  if (!w || w.length <= 3) return w;
+  if (vocabSet.has(w)) return w;
+
+  const maxDist = w.length <= 6 ? 1 : 2;
+  let bestCandidate = w;
+  let bestDist = maxDist + 1;
+  let bestCount = -1;
+
+  for (let i = 0; i < vocabList.length; i++) {
+    const item = vocabList[i];
+    const cand = item.word;
+    const lenDiff = Math.abs(cand.length - w.length);
+    if (lenDiff > maxDist) continue;
+
+    const dist = damerauLevenshtein(w, cand, maxDist);
+    if (dist <= maxDist) {
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestCandidate = cand;
+        bestCount = item.count;
+      } else if (dist === bestDist && item.count > bestCount) {
+        bestCandidate = cand;
+        bestCount = item.count;
+      }
+    }
+  }
+
+  return bestCandidate;
+}
+
+const SEARCH_STOPWORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'for',
+  'in', 'into', 'is', 'it', 'no', 'not', 'of', 'on', 'or', 'such',
+  'that', 'the', 'their', 'then', 'there', 'these', 'they', 'this',
+  'to', 'was', 'will', 'with', 'you', 'your'
+]);
+
+function generateQuorumQueries(words) {
+  if (words.length < 3) return null;
+  const k = words.length <= 4 ? words.length - 1 : Math.max(2, Math.floor(words.length * 0.75));
+
+  function getCombos(arr, len) {
+    if (len === 1) return arr.map((x) => [x]);
+    const combos = [];
+    for (let i = 0; i <= arr.length - len; i++) {
+      const head = arr[i];
+      const tails = getCombos(arr.slice(i + 1), len - 1);
+      for (let j = 0; j < tails.length; j++) {
+        combos.push([head, ...tails[j]]);
+      }
+    }
+    return combos;
+  }
+
+  const combos = getCombos(words, k);
+  if (!combos.length) return null;
+  const topCombos = combos.slice(0, 10);
+  return topCombos.map((clause) => `(${clause.map((w) => `${w}*`).join(' AND ')})`).join(' OR ');
+}
+
 function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDate, sort = 'rank', limit = 500 }) {
   const t0 = performance.now();
   const cleanQuery = (query || '').replace(/\\"/g, '"').trim();
-  const words = cleanQuery.match(/[a-zA-Z0-9]+/g) || [];
+  if (!cleanQuery) {
+    return { query: cleanQuery, results: [], count: 0, elapsed_ms: 0, meta: { tier: 'none' } };
+  }
 
+  // Unicode-aware word tokenization
+  const rawTokens = cleanQuery.match(/[\p{L}\p{N}]+/gu) || [];
+  if (!rawTokens.length) {
+    return { query: cleanQuery, results: [], count: 0, elapsed_ms: 0, meta: { tier: 'none' } };
+  }
+
+  const words = rawTokens.map((w) => foldDiacritics(w)).filter(Boolean);
   if (!words.length) {
     return { query: cleanQuery, results: [], count: 0, elapsed_ms: 0, meta: { tier: 'none' } };
   }
@@ -357,9 +545,14 @@ function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDa
   }
 
   let results = [];
-  let meta = { tier: 'exact', effective_query: cleanQuery, corrected: false };
+  let meta = {
+    tier: 'exact',
+    original_query: cleanQuery,
+    effective_query: cleanQuery,
+    corrected: false,
+  };
 
-  // Explicit operators check
+  // 0. Explicit operators check
   const hasExplicitSyntax = [' AND ', ' OR ', ' NOT ', 'NEAR('].some((op) => cleanQuery.includes(op)) ||
     (cleanQuery.startsWith('"') && cleanQuery.endsWith('"') && cleanQuery.length > 2);
 
@@ -370,12 +563,12 @@ function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDa
     }
     meta.tier = 'explicit';
   } else {
-    // Tier 1: Exact phrase or word
-    const t1 = words.length > 1 ? `"${cleanQuery}"` : words[0];
+    // Tier 1: Exact Phrase / Exact Word
+    const t1 = words.length > 1 ? `"${words.join(' ')}"` : words[0];
     results = tryFtsQuery(t1);
     meta.tier = words.length > 1 ? 'exact_phrase' : 'exact_word';
 
-    // Tier 2: Proximity (NEAR)
+    // Tier 2: Proximity (NEAR) - words within 15 words of each other
     if (!results.length && !exact && words.length > 1) {
       const t2 = `NEAR(${words.join(' ')}, 15)`;
       results = tryFtsQuery(t2);
@@ -385,7 +578,7 @@ function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDa
       }
     }
 
-    // Tier 3: Prefix matching
+    // Tier 3: Prefix AND matching (word1* AND word2*)
     if (!results.length && !exact) {
       const t3 = words.map((w) => `${w}*`).join(' AND ');
       results = tryFtsQuery(t3);
@@ -395,13 +588,60 @@ function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDa
       }
     }
 
-    // Tier 4: Any word ranked match
+    // Tier 4: Fuzzy Auto-Correction (Damerau-Levenshtein in browser worker)
+    const correctedWords = words.map((w) => correctFuzzyWord(w));
+    const isCorrected = correctedWords.some((cw, i) => cw !== words[i]);
+    const correctedPhrase = correctedWords.join(' ');
+
+    if (!results.length && !exact && isCorrected) {
+      // 4a: Corrected exact phrase
+      const t4Phrase = words.length > 1 ? `"${correctedPhrase}"` : correctedWords[0];
+      results = tryFtsQuery(t4Phrase);
+
+      // 4b: Corrected proximity
+      if (!results.length && words.length > 1) {
+        const t4Near = `NEAR(${correctedPhrase}, 15)`;
+        results = tryFtsQuery(t4Near);
+      }
+
+      // 4c: Corrected prefix
+      if (!results.length) {
+        const t4Prefix = correctedWords.map((w) => `${w}*`).join(' AND ');
+        results = tryFtsQuery(t4Prefix);
+      }
+
+      if (results.length) {
+        meta.tier = 'fuzzy';
+        meta.corrected = true;
+        meta.effective_query = correctedPhrase;
+      }
+    }
+
+    // Tier 5: Multi-Word Soft AND / Quorum Matching (e.g. 2 of 3 words)
+    if (!results.length && !exact && words.length >= 3) {
+      const wordsToQuorum = isCorrected ? correctedWords : words;
+      const quorumQuery = generateQuorumQueries(wordsToQuorum);
+      if (quorumQuery) {
+        results = tryFtsQuery(quorumQuery);
+        if (results.length) {
+          meta.tier = 'quorum';
+          meta.effective_query = `${wordsToQuorum.length - 1} of ${wordsToQuorum.length} words`;
+          if (isCorrected) meta.corrected = true;
+        }
+      }
+    }
+
+    // Tier 6: Filtered Any-Word Match (Filtered OR)
     if (!results.length && !exact && words.length > 1) {
-      const t5 = words.join(' OR ');
-      results = tryFtsQuery(t5);
+      const baseWords = isCorrected ? correctedWords : words;
+      const contentWords = baseWords.filter((w) => !SEARCH_STOPWORDS.has(w));
+      const wordsToUse = contentWords.length > 0 ? contentWords : baseWords;
+      const t6 = wordsToUse.map((w) => `${w}*`).join(' OR ');
+      results = tryFtsQuery(t6);
       if (results.length) {
         meta.tier = 'any_word';
-        meta.effective_query = t5;
+        meta.effective_query = t6;
+        if (isCorrected) meta.corrected = true;
       }
     }
   }
@@ -441,35 +681,75 @@ function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDa
 }
 
 function handleSearchLexicon(q, limit = 10) {
-  const clean = (q || '').trim();
-  if (!clean) return [];
+  const raw = (q || '').trim();
+  if (!raw) return [];
+  const clean = foldDiacritics(raw);
+  const words = (clean.match(/[\p{L}\p{N}]+/gu) || []).map((w) => w.trim()).filter(Boolean);
+  if (!words.length) return [];
 
+  // Try 1: Exact matches on terms table directly
   try {
-    return queryAll(`
+    const exactMatches = queryAll(`
+      SELECT * FROM v_terms 
+      WHERE pali_plain = ? OR pali_diacritic = ? COLLATE NOCASE
+      LIMIT ?;
+    `, [clean, raw, limit]);
+    if (exactMatches.length > 0) return exactMatches;
+  } catch (_) {}
+
+  // Try 2: FTS prefix AND
+  try {
+    const ftsQ = words.map((w) => `${w}*`).join(' AND ');
+    const ftsMatches = queryAll(`
       SELECT t.* 
       FROM fts_terms f
       JOIN v_terms t ON f.rowid = t.id
       WHERE fts_terms MATCH ?
       ORDER BY rank
       LIMIT ?;
-    `, [`${clean}*`, limit]);
-  } catch (_) {
+    `, [ftsQ, limit]);
+    if (ftsMatches.length > 0) return ftsMatches;
+  } catch (_) {}
+
+  // Try 3: Fuzzy corrected words
+  const correctedWords = words.map((w) => correctFuzzyWord(w));
+  const isCorrected = correctedWords.some((cw, i) => cw !== words[i]);
+  if (isCorrected) {
+    try {
+      const ftsCorr = correctedWords.map((w) => `${w}*`).join(' AND ');
+      const corrMatches = queryAll(`
+        SELECT t.* 
+        FROM fts_terms f
+        JOIN v_terms t ON f.rowid = t.id
+        WHERE fts_terms MATCH ?
+        ORDER BY rank
+        LIMIT ?;
+      `, [ftsCorr, limit]);
+      if (corrMatches.length > 0) return corrMatches;
+    } catch (_) {}
+  }
+
+  // Try 4: Substring LIKE fallback
+  try {
     return queryAll(`
       SELECT * FROM v_terms 
-      WHERE pali_plain LIKE ? OR english_description LIKE ?
+      WHERE pali_plain LIKE ? OR english_description LIKE ? OR pali_diacritic LIKE ?
       LIMIT ?;
-    `, [`%${clean}%`, `%${clean}%`, limit]);
+    `, [`%${clean}%`, `%${clean}%`, `%${raw}%`, limit]);
+  } catch (_) {
+    return [];
   }
 }
 
 function handleLookupLexicon(term) {
-  const clean = (term || '').trim();
-  if (!clean) return null;
+  const raw = (term || '').trim();
+  if (!raw) return null;
+  const clean = foldDiacritics(raw);
   return queryOne(`
     SELECT * FROM v_terms 
     WHERE pali_plain = ? OR pali_diacritic = ? COLLATE NOCASE 
     LIMIT 1;
-  `, [clean, clean]);
+  `, [clean, raw]);
 }
 
 // ============================================================================

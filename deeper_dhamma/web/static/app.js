@@ -1618,7 +1618,11 @@
     // Meta bar
     const tierDisplay = formatTierName(meta ? meta.tier : 'none');
     els.queryTierBadge.textContent = tierDisplay;
-    els.queryMetaText.textContent = `Found ${totalSentenceMatches} match${totalSentenceMatches === 1 ? '' : 'es'} across ${episodeGroups.length} talk${episodeGroups.length === 1 ? '' : 's'} in ${elapsed_ms}ms`;
+    let metaMsg = `Found ${totalSentenceMatches} match${totalSentenceMatches === 1 ? '' : 'es'} across ${episodeGroups.length} talk${episodeGroups.length === 1 ? '' : 's'} in ${elapsed_ms}ms`;
+    if (meta && meta.corrected && meta.effective_query) {
+      metaMsg += ` (auto-corrected to "${meta.effective_query}")`;
+    }
+    els.queryMetaText.textContent = metaMsg;
 
     if (episodeGroups.length === 0) {
       els.searchResultsList.innerHTML = `
@@ -1825,9 +1829,11 @@
       case 'exact_phrase': return 'Tier 1: Exact Phrase';
       case 'exact_word': return 'Tier 1: Exact Word';
       case 'proximity': return 'Tier 2: Proximity Match (NEAR)';
-      case 'prefix': return 'Tier 3: Prefix Stemming';
+      case 'prefix': return 'Tier 3: Prefix Match';
       case 'fuzzy': return 'Tier 4: Auto-Corrected';
-      case 'bm25_any': return 'Tier 5: Ranked Match';
+      case 'quorum': return 'Tier 5: Multi-Word Quorum';
+      case 'any_word':
+      case 'bm25_any': return 'Tier 6: Ranked Any-Word';
       default: return 'FTS5 Index';
     }
   }

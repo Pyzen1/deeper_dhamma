@@ -123,10 +123,38 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         """)
         conn.execute("INSERT INTO fts_terms(fts_terms) VALUES('rebuild');")
 
-        conn.execute("DETACH DATABASE lex;")
-        conn.commit()
+        # 3. Build search_vocab table for ultra-fast in-browser fuzzy search & spell correction
+        conn.execute("DROP TABLE IF EXISTS search_vocab;")
+        conn.execute("""
+            CREATE TABLE search_vocab (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                word TEXT UNIQUE NOT NULL,
+                count INTEGER NOT NULL
+            );
+        """)
+        import re
+        from collections import Counter
+        vocab_counter = Counter()
+        seg_rows = conn.execute("SELECT text FROM speech_segments;").fetchall()
+        for row in seg_rows:
+            if row[0]:
+                vocab_counter.update(re.findall(r"[a-zA-Z]{3,}", row[0].lower()))
+        term_rows = conn.execute("SELECT pali_plain, english_description FROM terms;").fetchall()
+        for row in term_rows:
+            if row[0]:
+                vocab_counter.update(re.findall(r"[a-zA-Z]{3,}", row[0].lower()))
+            if row[1]:
+                vocab_counter.update(re.findall(r"[a-zA-Z]{3,}", row[1].lower()))
 
-        # 3. Clean and set header version outside transaction
+        conn.executemany(
+            "INSERT OR IGNORE INTO search_vocab (word, count) VALUES (?, ?);",
+            vocab_counter.most_common(),
+        )
+
+        conn.commit()
+        conn.execute("DETACH DATABASE lex;")
+
+        # 4. Clean and set header version outside transaction
         conn.isolation_level = None
         conn.execute("PRAGMA journal_mode = DELETE;")
         conn.execute(f"PRAGMA user_version = {version_int};")
@@ -203,10 +231,11 @@ def export_static_site(output_dir: Path | str = "dist") -> Path:
         shutil.copytree(words_src, words_dst)
         copied_files += len(list(words_src.glob("*.bin")))
 
-    # Deploy pure SQLite WASM client adapter to dist/db_client.js
+    # Deploy pure SQLite WASM client adapter to dist/db_client.js and static/db_client.js
     wasm_adapter = STATIC_SRC_DIR / "adapters" / "wasm_client.js"
     if wasm_adapter.exists():
         shutil.copy2(wasm_adapter, out_path / "db_client.js")
+        shutil.copy2(wasm_adapter, STATIC_SRC_DIR / "db_client.js")
         copied_files += 1
 
     print(f"[✓] Copied {copied_files} frontend/WASM assets into {out_path.name}/")
