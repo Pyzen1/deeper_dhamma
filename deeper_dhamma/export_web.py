@@ -256,11 +256,6 @@ def run_web_preview(host: str = DEFAULT_WEB_HOST, port: int = DEFAULT_WEB_PORT, 
 
     app = Bottle()
 
-    @app.route("/audio/<episode_id>", method=["GET", "HEAD"])
-    def serve_audio_stream(episode_id: str):
-        from deeper_dhamma.calibration import serve_episode_audio_stream
-        return serve_episode_audio_stream(episode_id, db_path=TRANSCRIPTS_DB_PATH)
-
     @app.route("/")
     def serve_index():
         res = static_file("index.html", root=str(dist_path))
@@ -278,7 +273,7 @@ def run_web_preview(host: str = DEFAULT_WEB_HOST, port: int = DEFAULT_WEB_PORT, 
     print("=" * 80)
     print(f"[*] Serving static bundle:  {dist_path}")
     print(f"[*] Local URL:              http://{host}:{port}/")
-    print(f"[*] HTTP Range Support:     Enabled (for SQLite WASM & VBR Audio Streams)")
+    print(f"[*] HTTP Range Support:     Enabled (for SQLite WASM)")
     print("=" * 80)
     print("Press Ctrl+C to stop.\n")
 

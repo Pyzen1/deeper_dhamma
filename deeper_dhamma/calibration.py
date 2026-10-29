@@ -1,9 +1,12 @@
 """
-Stream Seek Calibration & VBR Neutralization Engine.
+Offline VBR Seek Calibration & `.bin` BLOB `VBR1` Trailer Generator.
 
-Aligns physical uncompressed PCM timestamps produced by Whisper with the
-browser's HTML5 <audio> HTTP streaming timeline across both Mozilla Firefox
-(Gecko MP3TrackDemuxer) and Chromium (FFmpeg mp3dec).
+Generates the compact binary `VBR1` seek calibration trailer appended to
+`words/<episode_id>.bin` during transcription/export so the 100% static
+JavaScript web application (`word_sync.js`) can align physical 44.1 kHz PCM
+word timestamps with HTML5 `<audio>` streaming across both Mozilla Firefox
+(Gecko `MP3TrackDemuxer`) and Chromium (FFmpeg `mp3dec`) with zero backend
+server dependencies.
 
 See `docs/troubleshooting_guide.md` for full root-cause analysis and diagrams.
 
@@ -15,42 +18,33 @@ Key Mechanisms & Invariants:
    after any seek completes, the browser's audio decoder advances `audio.currentTime`
    at a constant 1:1 rate (`1152 / 44100` seconds per frame) rather than along
    the VBR bitrate curve.
-2. Full-Duration `VBR1` Seek Trailer:
-   For VBR MP3 files with a `Xing` header, a compact `VBR1` seek calibration
-   trailer is appended to `words/<episode_id>.bin` containing `(pcm_ms, audio_byte_offset)`
-   sample points and the 100-byte TOC across 100% of the file duration.
-3. Non-Destructive In-Memory `Xing -> Info` (`flags = 3`) Neutralization:
-   In Mozilla Firefox (`dom/media/mp3/MP3Demuxer.cpp`), `VBRHeader::Offset()` uses
-   an un-interpolated step function `TOC[floor(100 * aTime / D)]` and estimates
-   `mFrameIndex` at that byte offset via `AverageFrameLength`, followed by
-   `ScanUntil(aTime)`. On VBR talks with low-bitrate lead-in silence (such as
-   `pb27802310`), this creates 14-second un-seekable dead zones at bucket
-   boundaries (`k=2 -> k=3` at `193.17s`, jumping from `207.9s` to `221.9s` over
-   Turn 0 at `216.30s`) and up to 239s of mid-talk drift.
-   When streaming via `/audio/<episode_id>.mp3`, the 8-byte `Xing` signature
-   and flags are neutralized in-memory to `Info` (`flags = 3`, retaining `Frames=1`
-   and `Bytes=2` while clearing the `TOC=4` bit) without modifying the raw archive
-   file on disk. This forces both Firefox and Chromium into identical, continuous,
-   dead-zone-free linear byte-offset seeking.
+2. Full-Duration `VBR1` Seek Trailer in `words/<episode_id>.bin`:
+   For VBR MP3 files with a `Xing` header, `StreamSeekCalibrator.build_vbr_trailer()`
+   appends a compact `VBR1` seek calibration trailer to `words/<episode_id>.bin`
+   containing `(pcm_ms, audio_byte_offset)` sample points and the 100-byte TOC
+   across 100% of the file duration (~25.8 KB for a 107-minute talk).
+3. Client-Side Serverless Playback & Seeking (`word_sync.js`):
+   - Chromium (`!isFirefox`): Streams directly from Podbean CDN using HTTP Range
+     requests and translates physical timestamps via `xingSeekTimes` reconstructed
+     from the `.bin` `VBR1` trailer.
+   - Mozilla Firefox (`isFirefox`): Progressively fetches the MP3 stream from
+     Podbean CDN (`Access-Control-Allow-Origin: *`), patches the 8-byte `Xing`
+     header at `id3_len + 36` to `Info\x00\x00\x00\x03` in client-side `Uint8Array`
+     RAM, and plays from a progressive `Blob` URL using `linearSeekTimes` with
+     zero dead zones and zero backend server dependencies.
 """
 
 import bisect
 import json
 import logging
-import sqlite3
 import struct
 import subprocess
-import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("seek_calibrator")
 
 VBR_TRAILER_MAGIC = b"VBR1"
-
-# Process-wide caches for fast Range request serving
-_EPISODE_AUDIO_META_CACHE: Dict[str, Dict[str, Any]] = {}
-_XING_PATCH_OFFSET_CACHE: Dict[str, Optional[int]] = {}
 
 
 def detect_xing_patch_offset(header_bytes: bytes) -> Optional[int]:
@@ -84,8 +78,9 @@ def patch_xing_chunk_in_memory(
     xing_abs_offset: Optional[int],
 ) -> bytes:
     """
-    Neutralizes `b"Xing"` + flags (`8 bytes` at `xing_abs_offset`) to
-    `b"Info\\x00\\x00\\x00\\x03"` in memory if the byte range overlaps `xing_abs_offset`.
+    Reference implementation of the 8-byte in-memory `Xing -> Info` (`flags = 3`)
+    neutralization (`b"Info\\x00\\x00\\x00\\x03"`) performed in client-side JS
+    (`WordSync.ensureFirefoxPatchedStream` in `word_sync.js`).
     Never modifies files on disk.
     """
     if xing_abs_offset is None or not chunk:
@@ -102,237 +97,6 @@ def patch_xing_chunk_in_memory(
         if 0 <= pos_in_buf < len(buf):
             buf[pos_in_buf] = b_val
     return bytes(buf)
-
-
-def resolve_episode_audio_source(
-    episode_id: str,
-    db_path: Optional[Path | str] = None,
-    archive_dir: Optional[Path | str] = None,
-) -> Optional[Dict[str, Any]]:
-    """
-    Resolves an episode's local archive MP3 path (if available) and remote Podbean
-    CDN `media_url`, along with its cached `xing_abs_offset`.
-    """
-    from deeper_dhamma.config import ARCHIVE_DIR, PROJECT_ROOT, TRANSCRIPTS_DB_PATH
-
-    clean_id = episode_id.strip()
-    if clean_id.lower().endswith(".mp3"):
-        clean_id = clean_id[:-4]
-
-    if clean_id in _EPISODE_AUDIO_META_CACHE:
-        return _EPISODE_AUDIO_META_CACHE[clean_id]
-
-    target_db = Path(db_path) if db_path else TRANSCRIPTS_DB_PATH
-    target_archive = Path(archive_dir) if archive_dir else ARCHIVE_DIR
-
-    local_path: Optional[Path] = None
-    media_url: Optional[str] = None
-
-    if target_db.exists():
-        try:
-            with sqlite3.connect(target_db) as conn:
-                cols = [r[1] for r in conn.execute("PRAGMA table_info(episodes)").fetchall()]
-                if "filepath" in cols:
-                    row = conn.execute(
-                        "SELECT filepath, media_url FROM episodes WHERE id = ?",
-                        (clean_id,),
-                    ).fetchone()
-                    if row:
-                        if row[0]:
-                            candidate = Path(row[0])
-                            if not candidate.is_absolute():
-                                candidate = PROJECT_ROOT / candidate
-                            if candidate.exists():
-                                local_path = candidate
-                        media_url = row[1]
-                else:
-                    row = conn.execute(
-                        "SELECT media_url FROM episodes WHERE id = ?",
-                        (clean_id,),
-                    ).fetchone()
-                    if row:
-                        media_url = row[0]
-        except Exception as e:
-            logger.warning(f"DB lookup failed for episode audio {clean_id}: {e}")
-
-    if local_path is None and target_archive.exists():
-        matches = list(target_archive.rglob(f"*{clean_id}*.mp3"))
-        if matches:
-            local_path = matches[0]
-
-    if local_path is None and not media_url:
-        return None
-
-    xing_abs_offset: Optional[int] = None
-    if local_path and local_path.exists():
-        key = str(local_path.resolve())
-        if key in _XING_PATCH_OFFSET_CACHE:
-            xing_abs_offset = _XING_PATCH_OFFSET_CACHE[key]
-        else:
-            try:
-                with open(local_path, "rb") as f:
-                    head10 = f.read(10)
-                    id3_len = 0
-                    if len(head10) >= 10 and head10[:3] == b"ID3":
-                        id3_len = (
-                            (head10[6] << 21)
-                            | (head10[7] << 14)
-                            | (head10[8] << 7)
-                            | head10[9]
-                        ) + 10
-                    f.seek(0)
-                    header_bytes = f.read(id3_len + 4096)
-                xing_abs_offset = detect_xing_patch_offset(header_bytes)
-                _XING_PATCH_OFFSET_CACHE[key] = xing_abs_offset
-            except Exception as e:
-                logger.warning(f"Failed inspecting MP3 header for {local_path}: {e}")
-
-    info = {
-        "episode_id": clean_id,
-        "local_path": local_path,
-        "media_url": media_url,
-        "xing_abs_offset": xing_abs_offset,
-    }
-    _EPISODE_AUDIO_META_CACHE[clean_id] = info
-    return info
-
-
-def serve_episode_audio_stream(
-    episode_id: str,
-    db_path: Optional[Path | str] = None,
-):
-    """
-    Bottle route handler for `/audio/<episode_id>.mp3`.
-    Serves HTTP Range requests from the pristine local archive MP3 (or proxies
-    Podbean CDN if local file is absent) while neutralizing `Xing` -> `Info`
-    (`flags = 3`) in memory so both Firefox and Chrome seek with 0.00s discrepancy.
-    """
-    from bottle import HTTPResponse, request
-
-    info = resolve_episode_audio_source(episode_id, db_path=db_path)
-    if not info:
-        return HTTPResponse(status=404, body="Episode audio not found.")
-
-    local_path: Optional[Path] = info.get("local_path")
-    media_url: Optional[str] = info.get("media_url")
-    xing_abs_offset: Optional[int] = info.get("xing_abs_offset")
-    range_header = request.headers.get("Range")
-
-    if local_path and local_path.exists():
-        file_size = local_path.stat().st_size
-        start = 0
-        end = file_size - 1
-        status = 200
-
-        if range_header and range_header.startswith("bytes="):
-            status = 206
-            spec = range_header[6:].strip().split(",")[0].strip()
-            parts = spec.split("-")
-            try:
-                if parts[0] == "":
-                    suffix = int(parts[1])
-                    start = max(0, file_size - suffix)
-                    end = file_size - 1
-                else:
-                    start = int(parts[0])
-                    if len(parts) > 1 and parts[1]:
-                        end = min(int(parts[1]), file_size - 1)
-            except ValueError:
-                return HTTPResponse(
-                    status=416,
-                    headers={"Content-Range": f"bytes */{file_size}"},
-                )
-
-            if start >= file_size or start > end:
-                return HTTPResponse(
-                    status=416,
-                    headers={"Content-Range": f"bytes */{file_size}"},
-                )
-
-        length = end - start + 1
-        headers = {
-            "Content-Type": "audio/mpeg",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(length),
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "no-cache",
-        }
-        if status == 206:
-            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-
-        if request.method == "HEAD":
-            return HTTPResponse(body=b"", status=status, headers=headers)
-
-        def _file_iterator():
-            with open(local_path, "rb") as f:
-                f.seek(start)
-                remaining = length
-                cur_offset = start
-                while remaining > 0:
-                    raw_chunk = f.read(min(65536, remaining))
-                    if not raw_chunk:
-                        break
-                    patched = patch_xing_chunk_in_memory(raw_chunk, cur_offset, xing_abs_offset)
-                    yield patched
-                    cur_offset += len(raw_chunk)
-                    remaining -= len(raw_chunk)
-
-        return HTTPResponse(body=_file_iterator(), status=status, headers=headers)
-
-    if media_url:
-        req_headers = {"User-Agent": "DeeperDhamma/1.0"}
-        if range_header:
-            req_headers["Range"] = range_header
-        req = urllib.request.Request(media_url, headers=req_headers, method=request.method)
-        try:
-            resp = urllib.request.urlopen(req, timeout=15)
-            status = resp.getcode() or (206 if range_header else 200)
-            headers = {
-                "Content-Type": resp.headers.get("Content-Type", "audio/mpeg"),
-                "Accept-Ranges": "bytes",
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "no-cache",
-            }
-            for h_name in ("Content-Length", "Content-Range"):
-                val = resp.headers.get(h_name)
-                if val:
-                    headers[h_name] = val
-
-            if request.method == "HEAD":
-                resp.close()
-                return HTTPResponse(body=b"", status=status, headers=headers)
-
-            # Parse start offset from Content-Range if 206
-            start_offset = 0
-            cr = resp.headers.get("Content-Range", "")
-            if cr.startswith("bytes "):
-                try:
-                    start_offset = int(cr[6:].split("-")[0])
-                except ValueError:
-                    start_offset = 0
-
-            def _remote_iterator():
-                nonlocal xing_abs_offset
-                cur = start_offset
-                try:
-                    while True:
-                        chunk = resp.read(65536)
-                        if not chunk:
-                            break
-                        if cur == 0 and xing_abs_offset is None:
-                            xing_abs_offset = detect_xing_patch_offset(chunk)
-                            info["xing_abs_offset"] = xing_abs_offset
-                        yield patch_xing_chunk_in_memory(chunk, cur, xing_abs_offset)
-                        cur += len(chunk)
-                finally:
-                    resp.close()
-
-            return HTTPResponse(body=_remote_iterator(), status=status, headers=headers)
-        except Exception as e:
-            logger.error(f"Remote audio proxy failed for {episode_id}: {e}")
-            return HTTPResponse(status=502, body="Upstream CDN error.")
-
-    return HTTPResponse(status=404, body="Audio source unavailable.")
 
 
 class StreamSeekCalibrator:

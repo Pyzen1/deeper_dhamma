@@ -71,28 +71,32 @@ Previously, `StreamSeekCalibrator` pre-warped all segment and word timestamps in
 
 ---
 
-## 3. Architectural Solution
+## 3. Architectural Solution (100% Serverless Static Web Application)
 
-The synchronization engine resolves both issues across all browsers without modifying a single byte of the raw archive MP3 files in `archive/`:
+Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` hosted on GitHub Pages, Cloudflare Pages, or S3) streaming audio directly from Podbean CDN (`https://mcdn.podbean.com/...`) with **zero Python backend**, the entire VBR synchronization engine operates purely in client-side JavaScript (`word_sync.js`) powered by the binary `VBR1` trailer inside `words/<episode_id>.bin`:
 
 ```text
 +-----------------------------------------------------------------------------+
-| 1. Canonical Storage: True Physical 44.1 kHz PCM Timestamps                 |
-|    - dhamma_transcripts.db (`speech_segments.start_sec`, `end_sec`)         |
-|    - words/<episode_id>.bin (`uint32 start_ms`, `uint16 dur_ms`)            |
+| 1. Offline Build Time (`calibration.py` -> `words/<episode_id>.bin`)        |
+|    - Stores true physical 44.1 kHz PCM timestamps in `dhamma_transcripts.db`|
+|      (`speech_segments`) and `words/<episode_id>.bin` (`start_ms, dur_ms`). |
 |    - Appends compact `VBR1` trailer (`pcm_ms`, `audio_byte_offset`, `toc`)  |
-|      for VBR episodes across 100% of talk duration.                         |
+|      for VBR episodes across 100% of talk duration (~25.8 KB).              |
 +-----------------------------------------------------------------------------+
                                        |
                                        v
 +-----------------------------------------------------------------------------+
-| 2. In-Memory VBR TOC Neutralization (`/audio/<episode_id>.mp3`)             |
-|    - Streams HTTP 206 Partial Content from local `archive/` (or CDN proxy)  |
-|    - Patches 8 bytes in memory only when range overlaps `xing_abs_offset`:  |
-|      `b"Xing" + flags(7)`  --->  `b"Info\x00\x00\x00\x03"` (clears bit 0x04)|
-|    - Forces BOTH Mozilla Firefox and Chromium into identical, continuous,   |
-|      dead-zone-free linear byte-offset seeking:                             |
-|      `S_linear(t_phys) = (audio_byte_offset / bytes_len) * total_dur`       |
+| 2. Client-Side Browser Engine (`WordSync` in `word_sync.js`)                |
+|    - Loads `./words/<episode_id>.bin` and parses `VBR1` trailer in < 5ms.   |
+|    - Chromium / Safari (`streamMode = 'cdn'`):                              |
+|      Streams `media_url` directly from Podbean CDN via HTTP Range requests  |
+|      and maps `targetPhys` -> `xingSeekTimes` (`215.80s -> 202.64s`).       |
+|    - Mozilla Firefox (`streamMode = 'patched_blob'`):                       |
+|      Progressively streams `media_url` from Podbean CDN via CORS `fetch()`, |
+|      patches the 8-byte `Xing` header at `id3_len + 36` to                  |
+|      `Info\x00\x00\x00\x03` in client-side `Uint8Array` memory, and serves  |
+|      a zero-copy progressive `Blob` URL (`linearSeekTimes`, `183.40s`)      |
+|      with zero dead zones and zero backend server dependencies.             |
 +-----------------------------------------------------------------------------+
                                        |
                                        v
@@ -116,7 +120,7 @@ For CBR episodes (`6` of the `9` currently transcribed episodes), `.bin` files c
 | `+4` | `uint32` | `total_dur_ms` | Total MP3 duration in milliseconds (`frames * 1152 / 44.1`) |
 | `+8` | `uint32` | `id3_len` | Byte length of leading ID3v2 tag (`mFirstFrameOffset`) |
 | `+12` | `uint32` | `bytes_len` | Audio stream byte length from `Xing` header |
-| `+16` | `uint8[100]` | `toc` | Raw 100-byte `Xing` TOC array (for static CDN fallback) |
+| `+16` | `uint8[100]` | `toc` | Raw 100-byte `Xing` TOC array (used to compute `xingSeekTimes`) |
 | `+116` | `uint32` | `sample_count` | Number of packet sample points `M` (~2s stride across full file) |
 | `+120` | `uint32[2*M]` | `samples` | `M` pairs of `(uint32 pcm_ms, uint32 audio_byte_offset)` |
 
@@ -125,7 +129,7 @@ For CBR episodes (`6` of the `9` currently transcribed episodes), `.bin` files c
 ## 4. Diagnostic & Verification Procedures
 
 ### 4.1 Running the Cross-Browser Synchronization Test Suite
-Run `pytest` to verify byte parity, `VBR1` trailer integrity, in-memory `Xing -> Info` stream neutralization, and real headless Firefox + Chrome playback synchronization:
+Run `pytest` to verify byte parity, `VBR1` trailer integrity, client-side `Xing -> Info` progressive `Blob` neutralization, and real headless Firefox + Chrome playback synchronization:
 
 ```powershell
 pytest tests/
@@ -134,8 +138,7 @@ pytest tests/
 Specifically:
 - `tests/test_cross_browser_word_sync.py`:
   - Verifies that all VBR episodes in `databases/dhamma_transcripts.db` and `words/*.bin` store unwarped physical PCM timestamps and valid full-duration `VBR1` trailers.
-  - Verifies that `/audio/pb27802310.mp3` neutralizes `Xing -> Info` (`flags = 3`) in memory while leaving `archive/` files untouched on disk.
-  - Launches headless **Mozilla Firefox** and headless **Google Chrome** to verify that seeking to `"Everyone,"` (`216.30s`) and `"one"` (`231.34s`) lands at the exact same audio position (`< 0.05s` delta) and highlights the exact spoken words in real time.
+  - Launches headless **Mozilla Firefox** and headless **Google Chrome** against a pure static HTTP server (serving the raw unpatched VBR MP3 with `Access-Control-Allow-Origin: *` just like Podbean CDN) to verify that seeking to `"Everyone,"` (`216.30s`) and `"one"` (`231.34s`) via client-side `WordSync` lands at the exact physical audio position and highlights the exact spoken words in real time.
 - `tests/test_audio_cdn_sync.py`:
   - Verifies 1:1 bit-for-bit parity between local `archive/` MP3 files and Podbean CDN streams.
 
@@ -149,3 +152,4 @@ python main.py web --build
 Each build stamps a fresh Unix timestamp into `PRAGMA user_version` in `dist/dhamma_web.db`. If a browser tab has cached old static scripts:
 1. Perform a hard reload (`Ctrl+Shift+R` in Firefox / Chrome), or
 2. Run `window.resetDeeperDhammaCache()` in the browser developer console to purge the Origin Private File System (OPFS) SQLite cache and reload.
+

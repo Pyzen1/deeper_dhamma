@@ -1,21 +1,24 @@
 /**
- * Deeper Dhamma — Exact Word-Level Audio Synchronization & VBR Seek Calibration Engine
+ * Deeper Dhamma — Exact Word-Level Audio Synchronization & Serverless VBR Calibration Engine
  * 
- * Architecture:
- * - Compact Binary BLOB sidecars (.bin): 6 bytes/word [uint32 start_ms, uint16 duration_ms]
- *   plus optional `VBR1` seek calibration trailer for VBR MP3 streams.
- * - Lightweight footprint: ~40 KB per 50-minute talk (vs ~290 KB JSON, ~86% reduction)
- * - Sub-millisecond parsing directly into TypedArray with zero garbage collection overhead.
- * - Cross-browser VBR synchronization across Mozilla Firefox (Gecko MP3TrackDemuxer)
- *   and Chromium (FFmpeg mp3dec) with 1:1 44.1 kHz PCM playback clock tracking.
- *   See `docs/troubleshooting_guide.md` for details on the `VBR1` trailer,
- *   in-memory `Xing -> Info` stream neutralization, and constant-offset clock lock.
+ * Architecture (100% Static / Serverless Web Application):
+ * - Compact Binary BLOB sidecars (`words/<episode_id>.bin`):
+ *   - Section 1: 6 bytes/word `[uint32 start_ms, uint16 duration_ms]` in true 44.1 kHz PCM time.
+ *   - Section 2: Optional `VBR1` seek calibration trailer containing `(pcm_ms, audio_byte_offset)`
+ *     samples and the 100-byte `Xing` TOC across the full duration of the talk.
+ * - Cross-Browser Direct Podbean CDN Streaming:
+ *   - Chromium (Chrome / Edge / Brave / Safari): Streams directly from Podbean CDN via HTTP Range
+ *     requests, translating physical timestamps via `xingSeekTimes` from the `.bin` `VBR1` trailer.
+ *   - Mozilla Firefox (Gecko `MP3TrackDemuxer`): Gecko's raw `Xing` TOC demuxer uses an un-interpolated
+ *     step function with 14-second dead zones at low-bitrate bucket boundaries. For VBR episodes in
+ *     Firefox, `WordSync` progressively streams the Podbean CDN MP3 via CORS `fetch()`, patches the
+ *     8-byte `Xing` header to `Info` (`flags = 3`) in client-side `Uint8Array` memory, and serves a
+ *     zero-copy progressive `Blob` URL (`linearSeekTimes`) with zero backend dependencies.
+ *   - Playback Clock Lock: Once any seek lands at physical time `P`, the browser's 44.1 kHz PCM decoder
+ *     advances `audio.currentTime` at `1.000s` per `1.000s` of physical speech. Tracking
+ *     `physTime = audio.currentTime + seekOffset` eliminates intra-turn VBR bitrate drift.
  * 
- * Text Formatting:
- * - 100% preserves original paragraph structure, sentence breaks, typography, and line flow.
- * - Words are wrapped inline (display: inline) without any layout shifts or text reflow.
- * - No auto-scrolling (user retains full, natural manual scroll control).
- * - Clicking any word seeks audio stream to that exact second (with 500ms lead-in).
+ * See `docs/troubleshooting_guide.md` for full mathematical and architectural details.
  */
 
 (function () {
@@ -32,10 +35,11 @@
     turnWordMap: {}, // Map of turnIdx -> [words]
     vbrData: null, // Parsed VBR1 seek table if episode is VBR
     vbrCache: {}, // Cache of episodeId -> { words, vbrData, bytesLoaded }
-    streamMode: 'local', // 'local' (/audio/<ep>.mp3 with Xing->Info) or 'cdn' (direct Podbean CDN)
+    streamMode: 'cdn', // 'cdn' (direct Podbean CDN) or 'patched_blob' (client-side Info-patched Blob)
     seekOffset: 0.0, // Constant physical-minus-stream clock offset established at last seek
     _seekTargetWordTime: null, // Optional exact word start time targeted by the latest seek
     _pendingProgrammaticSeek: false,
+    _ffStreams: {}, // Client-side progressive Fetch + Xing->Info patched Blob state keyed by media_url
     isFirefox: typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent || ''),
     activeWordEl: null,
     activeWordIdx: -1,
@@ -74,7 +78,7 @@
           const rawT = audio.currentTime;
           if (rawT <= 0.05) {
             this.seekOffset = 0.0;
-          } else if (this.streamMode === 'local') {
+          } else if (this.streamMode === 'patched_blob') {
             const physT = this._interp(rawT, this.vbrData.linearSeekTimes, this.vbrData.pcmTimes);
             this.seekOffset = physT - rawT;
           } else if (this.isFirefox) {
@@ -199,6 +203,11 @@
       // Group words by segment turn if turns exist
       if (episode.segments && this.words.length > 0) {
         this.indexWordsByTurn(episode.segments);
+      }
+
+      // In Firefox, proactively start progressive VBR stream buffering & in-memory Xing->Info patching
+      if (this.isFirefox && this.vbrData && episode.media_url) {
+        this.ensureFirefoxPatchedStream(episode.media_url);
       }
 
       this.updateUI();
@@ -380,6 +389,181 @@
     },
 
     /**
+     * Pure Client-Side Progressive Fetch & In-Memory `Xing -> Info` Patcher for Firefox.
+     * Streams the MP3 from Podbean CDN (`Access-Control-Allow-Origin: *`), patches the 8-byte
+     * `Xing` header to `Info\x00\x00\x00\x03` in browser RAM (`Uint8Array`), and builds
+     * progressive zero-copy `Blob` URLs so Firefox seeks linearly with zero dead zones
+     * on any static web host without any backend server.
+     */
+    ensureFirefoxPatchedStream: function (mediaUrl) {
+      if (!mediaUrl || !this.vbrData) return null;
+      if (this._ffStreams[mediaUrl]) {
+        return this._ffStreams[mediaUrl];
+      }
+
+      const id3Len = this.vbrData.id3Len || 0;
+      const minHeaderBytes = id3Len + 1024;
+      const state = {
+        mediaUrl,
+        chunks: [],
+        headerBufs: [],
+        fetchedBytes: 0,
+        patched: false,
+        done: false,
+        failed: false,
+        blobUrl: null,
+        blobBytes: 0,
+        waiters: [],
+      };
+      this._ffStreams[mediaUrl] = state;
+
+      const notifyWaiters = () => {
+        for (let i = state.waiters.length - 1; i >= 0; i--) {
+          const w = state.waiters[i];
+          if (state.failed || state.done || (state.patched && state.fetchedBytes >= w.requiredBytes)) {
+            state.waiters.splice(i, 1);
+            w.resolve(state);
+          }
+        }
+      };
+
+      (async () => {
+        try {
+          const res = await fetch(mediaUrl);
+          if (!res.ok || !res.body) {
+            state.failed = true;
+            notifyWaiters();
+            return;
+          }
+          const reader = res.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              state.done = true;
+              notifyWaiters();
+              break;
+            }
+            if (value && value.byteLength > 0) {
+              state.fetchedBytes += value.byteLength;
+              if (!state.patched) {
+                state.headerBufs.push(value);
+                if (state.fetchedBytes >= minHeaderBytes) {
+                  const merged = new Uint8Array(state.fetchedBytes);
+                  let off = 0;
+                  for (const b of state.headerBufs) {
+                    merged.set(b, off);
+                    off += b.byteLength;
+                  }
+                  state.headerBufs = [];
+                  // Locate "Xing" (0x58, 0x69, 0x6e, 0x67) after id3Len and patch to "Info\x00\x00\x00\x03"
+                  const searchEnd = Math.min(merged.byteLength - 8, id3Len + 4096);
+                  for (let p = id3Len; p <= searchEnd; p++) {
+                    if (
+                      merged[p] === 0x58 &&
+                      merged[p + 1] === 0x69 &&
+                      merged[p + 2] === 0x6e &&
+                      merged[p + 3] === 0x67
+                    ) {
+                      const patch = [0x49, 0x6e, 0x66, 0x6f, 0x00, 0x00, 0x00, 0x03];
+                      for (let k = 0; k < 8; k++) {
+                        merged[p + k] = patch[k];
+                      }
+                      break;
+                    }
+                  }
+                  state.chunks.push(merged);
+                  state.patched = true;
+                }
+              } else {
+                state.chunks.push(value);
+              }
+              notifyWaiters();
+            }
+          }
+        } catch (err) {
+          console.warn('[WordSync] Firefox progressive stream fetch fallback:', err);
+          state.failed = true;
+          notifyWaiters();
+        }
+      })();
+
+      return state;
+    },
+
+    /**
+     * Computes the byte offset in the MP3 file required to seek and play at `targetPhysicalSec`.
+     */
+    getRequiredBytesForTime: function (targetPhysicalSec) {
+      if (!this.vbrData) return 0;
+      const audioByteOff = this._interp(
+        Math.max(0, targetPhysicalSec),
+        this.vbrData.pcmTimes,
+        this.vbrData.byteOffsets
+      );
+      // Include ID3 header + target audio byte offset + 384 KB read-ahead (~28s of audio)
+      return Math.min(
+        this.vbrData.id3Len + this.vbrData.bytesLen,
+        Math.ceil(this.vbrData.id3Len + audioByteOff + 393216)
+      );
+    },
+
+    /**
+     * Synchronously returns a patched `blob:` URL if sufficient bytes are already buffered in RAM,
+     * or `null` if still buffering.
+     */
+    getReadyFirefoxBlobUrl: function (mediaUrl, targetPhysicalSec) {
+      if (!this.isFirefox || !this.vbrData || !mediaUrl) return null;
+      const state = this.ensureFirefoxPatchedStream(mediaUrl);
+      if (!state || state.failed || !state.patched) return null;
+
+      const reqBytes = this.getRequiredBytesForTime(targetPhysicalSec);
+      if (!state.done && state.fetchedBytes < reqBytes) {
+        return null;
+      }
+
+      if (
+        !state.blobUrl ||
+        (state.blobBytes < reqBytes && state.fetchedBytes > state.blobBytes) ||
+        (state.done && state.blobBytes < state.fetchedBytes)
+      ) {
+        const prevUrl = state.blobUrl;
+        if (prevUrl) {
+          setTimeout(() => {
+            try { URL.revokeObjectURL(prevUrl); } catch (_) {}
+          }, 5000);
+        }
+        const blob = new Blob(state.chunks, { type: 'audio/mpeg' });
+        state.blobUrl = URL.createObjectURL(blob);
+        state.blobBytes = state.fetchedBytes;
+      }
+      return state.blobUrl;
+    },
+
+    /**
+     * Waits until the progressive Firefox stream has buffered enough bytes to cover
+     * `targetPhysicalSec` and returns the patched `blob:` URL (or `null` on failure).
+     */
+    waitForFirefoxBlobUrl: async function (mediaUrl, targetPhysicalSec) {
+      if (!this.isFirefox || !this.vbrData || !mediaUrl) return null;
+      const readyUrl = this.getReadyFirefoxBlobUrl(mediaUrl, targetPhysicalSec);
+      if (readyUrl) return readyUrl;
+
+      const state = this.ensureFirefoxPatchedStream(mediaUrl);
+      if (!state || state.failed) return null;
+
+      const reqBytes = this.getRequiredBytesForTime(targetPhysicalSec);
+      await new Promise(resolve => {
+        if (state.failed || state.done || (state.patched && state.fetchedBytes >= reqBytes)) {
+          resolve(state);
+        } else {
+          state.waiters.push({ requiredBytes: reqBytes, resolve });
+        }
+      });
+
+      return this.getReadyFirefoxBlobUrl(mediaUrl, targetPhysicalSec);
+    },
+
+    /**
      * Piecewise-linear interpolation helper over sorted arrays `xs` -> `ys`.
      */
     _interp: function (x, xs, ys) {
@@ -427,14 +611,14 @@
         return clampedPhys;
       }
 
-      if (this.streamMode === 'local') {
-        // Both Firefox and Chromium use linear byte-offset seeking on /audio/<ep>.mp3 (Info header)
+      if (this.streamMode === 'patched_blob') {
+        // Client-side Info-patched Blob uses exact linear byte-offset seeking in Firefox & Chrome
         const seekTime = this._interp(clampedPhys, this.vbrData.pcmTimes, this.vbrData.linearSeekTimes);
         this.seekOffset = clampedPhys - seekTime;
         return Math.max(0, seekTime);
       }
 
-      // Fallback when streaming directly from Podbean CDN with raw Xing header
+      // Direct Podbean CDN streaming with raw Xing header
       if (this.isFirefox) {
         const dur = this.vbrData.totalDurSec;
         const bucketWidth = dur / 100.0;
@@ -459,6 +643,7 @@
         return Math.max(0, bestS);
       }
 
+      // Chromium / Safari on direct Podbean CDN: interpolate Xing TOC seek curve
       const seekTime = this._interp(clampedPhys, this.vbrData.pcmTimes, this.vbrData.xingSeekTimes);
       this.seekOffset = clampedPhys - seekTime;
       return Math.max(0, seekTime);

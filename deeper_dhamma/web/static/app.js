@@ -1897,15 +1897,55 @@
       const clampedPhys = Math.max(0, Math.min(dur, targetPhysicalTime));
       const doSeek = () => {
         try {
+          const curDur = Number.isFinite(audio.duration) ? audio.duration : Infinity;
           const streamSeek = window.WordSync
             ? window.WordSync.prepareSeek(clampedPhys)
             : clampedPhys;
-          audio.currentTime = Math.max(0, Math.min(dur, streamSeek));
+          audio.currentTime = Math.max(0, Math.min(curDur, streamSeek));
         } catch (err) {
           console.warn('Seek error:', err);
         }
       };
-      // HAVE_METADATA (1) is enough to seek a remote stream; waiting for
+
+      // In Firefox on VBR talks, ensure the client-side patched progressive Blob covers clampedPhys
+      if (
+        window.WordSync &&
+        window.WordSync.isFirefox &&
+        window.WordSync.vbrData &&
+        state.currentMediaUrl
+      ) {
+        const mediaUrl = state.currentMediaUrl;
+        const wasPlaying = !audio.paused;
+        const readyBlobUrl = window.WordSync.getReadyFirefoxBlobUrl(mediaUrl, clampedPhys);
+        if (readyBlobUrl) {
+          window.WordSync.streamMode = 'patched_blob';
+          if (state.currentStreamUrl !== readyBlobUrl) {
+            state.currentStreamUrl = readyBlobUrl;
+            audio.src = readyBlobUrl;
+            audio.playbackRate = state.playbackSpeed;
+            audio.addEventListener('loadedmetadata', doSeek, { once: true });
+            if (wasPlaying) audio.play().catch(() => {});
+            return;
+          }
+        } else {
+          window.WordSync.waitForFirefoxBlobUrl(mediaUrl, clampedPhys).then(blobUrl => {
+            if (!blobUrl || state.currentMediaUrl !== mediaUrl) return;
+            window.WordSync.streamMode = 'patched_blob';
+            if (state.currentStreamUrl !== blobUrl) {
+              state.currentStreamUrl = blobUrl;
+              audio.src = blobUrl;
+              audio.playbackRate = state.playbackSpeed;
+              audio.addEventListener('loadedmetadata', doSeek, { once: true });
+              if (wasPlaying) audio.play().catch(() => {});
+            } else {
+              doSeek();
+            }
+          });
+          return;
+        }
+      }
+
+      // HAVE_METADATA (1) is enough to seek a stream; waiting for
       // HAVE_CURRENT_DATA (2) drops seeks while buffering.
       if (audio.readyState >= 1) {
         doSeek();
@@ -1952,6 +1992,33 @@
       els.btnPlayPause.innerHTML = FLUENT_ICONS.play;
       els.btnPlayPause.setAttribute('title', 'Play (Space)');
       els.btnPlayPause.setAttribute('aria-label', 'Play');
+    });
+
+    // If a partial progressive Firefox Blob reaches the end of its initial slice before
+    // the full talk duration, seamlessly upgrade to the newly buffered chunks at physCur.
+    audio.addEventListener('ended', () => {
+      if (
+        window.WordSync &&
+        window.WordSync.streamMode === 'patched_blob' &&
+        window.WordSync.vbrData &&
+        state.currentMediaUrl
+      ) {
+        const dur = Number.isFinite(audio.duration) ? audio.duration : window.WordSync.vbrData.totalDurSec;
+        const physCur = window.WordSync.getPhysicalTime(audio.currentTime);
+        if (dur > 0 && physCur < dur - 5) {
+          const mediaUrl = state.currentMediaUrl;
+          window.WordSync.waitForFirefoxBlobUrl(mediaUrl, physCur + 30).then(blobUrl => {
+            if (!blobUrl || state.currentMediaUrl !== mediaUrl) return;
+            state.currentStreamUrl = blobUrl;
+            audio.src = blobUrl;
+            audio.playbackRate = state.playbackSpeed;
+            audio.addEventListener('loadedmetadata', () => {
+              audio.currentTime = window.WordSync.prepareSeek(physCur);
+              audio.play().catch(() => {});
+            }, { once: true });
+          });
+        }
+      }
     });
 
     els.btnPlayPause.addEventListener('click', togglePlayPause);
@@ -2120,22 +2187,7 @@
     els.playerSpeaker.innerHTML = `<span class="player-speaker-dot" style="background-color: ${spkColor}; box-shadow: 0 0 8px ${spkColor};"></span> ${escapeHtml(teacher || 'Monastic')}`;
 
     const epId = resolveEpisodeId(episode_id, media_url);
-    const useLocalAudioRoute = Boolean(
-      epId &&
-      window.location.protocol !== 'file:' &&
-      !state.localAudioRouteUnavailable
-    );
-    const desiredSrcUrl = useLocalAudioRoute
-      ? `/audio/${encodeURIComponent(epId)}.mp3`
-      : media_url;
-
-    if (window.WordSync) {
-      window.WordSync.streamMode = useLocalAudioRoute ? 'local' : 'cdn';
-    }
-
-    const isDifferentSource = state.currentMediaUrl !== media_url || state.currentStreamUrl !== desiredSrcUrl;
     state.currentMediaUrl = media_url;
-    state.currentStreamUrl = desiredSrcUrl;
 
     // Apply exactly 500ms lead time to first word for any/all seek ref points (clamped to 0)
     const rawTarget = typeof start_sec === 'number' ? start_sec : parseFloat(start_sec || 0);
@@ -2165,56 +2217,66 @@
       }
     }
 
-    // If WordSync has not loaded this episode's VBR profile yet (e.g. playing from Search tab),
-    // asynchronously load it and refine the seek position as soon as it arrives.
-    if (window.WordSync && epId && window.WordSync.currentEpisodeId !== epId) {
-      window.WordSync.ensureEpisodeLoaded(epId).then(() => {
-        if (state.currentMediaUrl === media_url && targetTime > 0) {
+    function launchStreamAndSeek(streamUrl, mode) {
+      if (window.WordSync) {
+        window.WordSync.streamMode = mode;
+      }
+      const isDifferentSource = state.currentStreamUrl !== streamUrl;
+      state.currentStreamUrl = streamUrl;
+
+      if (isDifferentSource) {
+        audio.src = streamUrl;
+        audio.playbackRate = state.playbackSpeed;
+        if (targetTime > 0) {
           performSeek(targetTime, rawTarget);
+        } else if (window.WordSync) {
+          window.WordSync.prepareSeek(0, 0);
         }
-      });
-    }
-
-    if (isDifferentSource) {
-      audio.src = desiredSrcUrl;
-      audio.playbackRate = state.playbackSpeed;
-
-      if (useLocalAudioRoute) {
-        const onLocalStreamError = () => {
-          if (state.currentStreamUrl === desiredSrcUrl && media_url) {
-            state.localAudioRouteUnavailable = true;
-            state.currentStreamUrl = media_url;
-            if (window.WordSync) window.WordSync.streamMode = 'cdn';
-            audio.src = media_url;
-            audio.playbackRate = state.playbackSpeed;
-            if (targetTime > 0) {
-              performSeek(targetTime, rawTarget);
-            }
-            audio.play().catch(() => {});
-          }
-        };
-        audio.addEventListener('error', onLocalStreamError, { once: true });
-      }
-
-      if (targetTime > 0) {
+      } else {
         performSeek(targetTime, rawTarget);
-      } else if (window.WordSync) {
-        window.WordSync.prepareSeek(0, 0);
       }
 
-      // Call audio.play() synchronously directly inside the user gesture
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.catch(e => {
           console.warn('Playback gesture error:', e);
         });
       }
-    } else {
-      performSeek(targetTime, rawTarget);
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(e => console.warn('Play error:', e));
+    }
+
+    function startWithLoadedProfile() {
+      if (state.currentMediaUrl !== media_url) return;
+
+      // In Firefox on VBR episodes, use pure client-side progressive Fetch + Info-patched Blob
+      if (window.WordSync && window.WordSync.isFirefox && window.WordSync.vbrData) {
+        const readyBlobUrl = window.WordSync.getReadyFirefoxBlobUrl(media_url, targetTime);
+        if (readyBlobUrl) {
+          launchStreamAndSeek(readyBlobUrl, 'patched_blob');
+          return;
+        }
+        window.WordSync.waitForFirefoxBlobUrl(media_url, targetTime).then(blobUrl => {
+          if (state.currentMediaUrl !== media_url) return;
+          if (blobUrl) {
+            launchStreamAndSeek(blobUrl, 'patched_blob');
+          } else {
+            launchStreamAndSeek(media_url, 'cdn');
+          }
+        });
+        return;
       }
+
+      // Chromium / Safari / CBR episodes: stream directly from Podbean CDN
+      launchStreamAndSeek(media_url, 'cdn');
+    }
+
+    // If WordSync has not loaded this episode's VBR profile yet (e.g. playing from Search tab),
+    // load the compact .bin sidecar first and then start playback/seek.
+    if (window.WordSync && epId && window.WordSync.currentEpisodeId !== epId) {
+      window.WordSync.ensureEpisodeLoaded(epId).then(() => {
+        startWithLoadedProfile();
+      });
+    } else {
+      startWithLoadedProfile();
     }
   }
 

@@ -22,7 +22,6 @@ from deeper_dhamma.calibration import (
     patch_xing_chunk_in_memory,
 )
 from deeper_dhamma.config import PROJECT_ROOT, TRANSCRIPTS_DB_PATH
-from deeper_dhamma.web.app import create_app
 
 WORDS_STATIC_DIR = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "words"
 VBR_EPISODES = {"pb27802310", "pb27940021", "pb28867656"}
@@ -83,48 +82,27 @@ def test_vbr_episodes_store_unwarped_physical_timestamps_and_vbr1_trailer():
             assert len(raw) == 4 + wc * 6
 
 
-def test_audio_stream_endpoint_xing_neutralization_and_disk_immutability():
+def test_in_memory_xing_neutralization_and_disk_immutability():
     """
-    Verifies that GET /audio/pb27802310.mp3 with HTTP Range neutralizes the 8-byte
-    Xing header to `Info\\x00\\x00\\x00\\x03` in memory while keeping the raw archive
-    file on disk 100% unmodified.
+    Verifies that the 8-byte Xing header at offset 176,164 in pb27802310.mp3 is
+    accurately detected and neutralized in memory to `Info\\x00\\x00\\x00\\x03` while
+    keeping the raw archive file on disk 100% unmodified.
     """
     sample_mp3 = PROJECT_ROOT / "archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
     if not sample_mp3.exists():
         pytest.skip("Archive MP3 not found on disk")
 
-    app = create_app()
-    status_box, headers_box = [], []
+    with open(sample_mp3, "rb") as f:
+        header_prefix = f.read(180000)
 
-    def start_response(s, h, exc_info=None):
-        status_box.append(s)
-        headers_box.extend(h)
+    xing_off = detect_xing_patch_offset(header_prefix)
+    assert xing_off == 176164
 
-    # Request range covering the Xing header at byte 176,164
-    environ = {
-        "REQUEST_METHOD": "GET",
-        "PATH_INFO": "/audio/pb27802310.mp3",
-        "QUERY_STRING": "",
-        "HTTP_RANGE": "bytes=176128-176300",
-        "SERVER_NAME": "localhost",
-        "SERVER_PORT": "34266",
-        "wsgi.version": (1, 0),
-        "wsgi.url_scheme": "http",
-        "wsgi.input": io.BytesIO(),
-        "wsgi.errors": io.StringIO(),
-        "wsgi.multithread": True,
-        "wsgi.multiprocess": False,
-        "wsgi.run_once": False,
-    }
-    body = b"".join(app(environ, start_response))
-    headers = dict(headers_box)
+    raw_slice = header_prefix[176128:176301]
+    patched_slice = patch_xing_chunk_in_memory(raw_slice, 176128, xing_off)
 
-    assert status_box[0].startswith("206")
-    assert headers.get("Content-Range", "").startswith("bytes 176128-176300/")
-    assert len(body) == 176300 - 176128 + 1
-
-    # Offset 176164 - 176128 = 36 inside the returned chunk must be patched to Info (flags=3)
-    assert body[36:44] == b"Info\x00\x00\x00\x03"
+    # Offset 176164 - 176128 = 36 inside the slice must be patched to Info (flags=3)
+    assert patched_slice[36:44] == b"Info\x00\x00\x00\x03"
 
     # Verify pristine archive file on disk still has raw Xing (flags=0x0f)
     with open(sample_mp3, "rb") as f:
@@ -135,10 +113,14 @@ def test_audio_stream_endpoint_xing_neutralization_and_disk_immutability():
 
 def test_headless_firefox_and_chrome_word_sync_parity():
     """
-    End-to-end cross-browser verification in headless Mozilla Firefox and Google Chrome.
-    Verifies that seeking to Word 0 ("Everyone," at 216.30s) and Word 29 ("one" at 231.34s)
-    on pb27802310 produces identical stream seek coordinates, immediate word highlights,
-    and 1:1 physical clock progression during real audio playback in both browsers.
+    End-to-end serverless cross-browser verification in headless Mozilla Firefox and Google Chrome.
+    Serves the raw, unpatched VBR MP3 over a pure static HTTP server (identical to Podbean CDN)
+    and verifies that:
+    - Firefox progressively fetches the stream, patches `Xing -> Info` (`flags = 3`) in client-side
+      `Uint8Array` memory (`streamMode = 'patched_blob'`), and seeks linearly (`183.40s`, `197.60s`).
+    - Chrome streams directly (`streamMode = 'cdn'`) and seeks via `xingSeekTimes` (`202.64s`, `213.84s`).
+    - Both browsers immediately highlight Word 0 ("Everyone," at 216.30s) and Word 29 ("one" at 231.34s)
+      and advance their physical playback clocks in lockstep (`< 0.35s` delta) during real audio playback.
     """
     chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
     firefox_path = Path(r"C:\Program Files\Mozilla Firefox\firefox.exe")
@@ -150,9 +132,6 @@ def test_headless_firefox_and_chrome_word_sync_parity():
         pytest.skip("Headless browsers or sample assets not present")
 
     file_size = sample_mp3.stat().st_size
-    with open(sample_mp3, "rb") as f:
-        xing_off = detect_xing_patch_offset(f.read(200000))
-
     bin_bytes = bin_path.read_bytes()
     word_sync_js = word_sync_js_path.read_bytes()
     reports = {}
@@ -190,7 +169,8 @@ def test_headless_firefox_and_chrome_word_sync_parity():
                 self.wfile.write(bin_bytes)
                 return
 
-            if self.path.startswith("/audio/pb27802310.mp3"):
+            if self.path.startswith("/raw_cdn/pb27802310.mp3"):
+                # Pure unpatched static MP3 stream with CORS (identical to Podbean CDN)
                 rng = self.headers.get("Range")
                 start, end = 0, file_size - 1
                 status = 200
@@ -204,6 +184,7 @@ def test_headless_firefox_and_chrome_word_sync_parity():
                 self.send_response(status)
                 self.send_header("Content-Type", "audio/mpeg")
                 self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("Content-Length", str(length))
                 if status == 206:
                     self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
@@ -211,16 +192,14 @@ def test_headless_firefox_and_chrome_word_sync_parity():
                 with open(sample_mp3, "rb") as f:
                     f.seek(start)
                     rem = length
-                    cur = start
                     while rem > 0:
                         chunk = f.read(min(65536, rem))
                         if not chunk:
                             break
                         try:
-                            self.wfile.write(patch_xing_chunk_in_memory(chunk, cur, xing_off))
+                            self.wfile.write(chunk)
                         except Exception:
                             break
-                        cur += len(chunk)
                         rem -= len(chunk)
                 return
 
@@ -233,7 +212,6 @@ def test_headless_firefox_and_chrome_word_sync_parity():
                 <script>
                 async function run() {{
                     await WordSync.ensureEpisodeLoaded('pb27802310');
-                    WordSync.streamMode = 'local';
                     const container = document.getElementById('turn-0');
                     for (let i = 0; i < 50; i++) {{
                         const sp = document.createElement('span');
@@ -253,7 +231,15 @@ def test_headless_firefox_and_chrome_word_sync_parity():
                     src.connect(proc);
                     proc.connect(ctx.destination);
 
-                    a.src = '/audio/pb27802310.mp3';
+                    const rawCdnUrl = '/raw_cdn/pb27802310.mp3';
+                    if (WordSync.isFirefox) {{
+                        const blobUrl = await WordSync.waitForFirefoxBlobUrl(rawCdnUrl, 235.0);
+                        WordSync.streamMode = 'patched_blob';
+                        a.src = blobUrl;
+                    }} else {{
+                        WordSync.streamMode = 'cdn';
+                        a.src = rawCdnUrl;
+                    }}
                     await new Promise(r => a.addEventListener('loadedmetadata', r, {{once: true}}));
 
                     // Seek 1: Word 0 ("Everyone," at 216.30s -> 215.80s with 0.50s lead-in)
@@ -288,6 +274,7 @@ def test_headless_firefox_and_chrome_word_sync_parity():
                     await fetch('/report/{bname}', {{
                         method: 'POST',
                         body: JSON.stringify({{
+                            streamMode: WordSync.streamMode,
                             s1, initIdx1, phys1, activeIdx1,
                             s2, initIdx2, phys2, activeIdx2,
                             sumSq
@@ -357,17 +344,20 @@ def test_headless_firefox_and_chrome_word_sync_parity():
     c_rep = reports["chrome"]
     f_rep = reports["firefox"]
 
-    # Both browsers must compute the exact same neutralized stream seek coordinates
-    assert abs(c_rep["s1"] - f_rep["s1"]) < 0.01
-    assert abs(c_rep["s2"] - f_rep["s2"]) < 0.01
-    assert 183.0 <= c_rep["s1"] <= 184.0
-    assert 197.0 <= c_rep["s2"] <= 198.5
+    assert c_rep["streamMode"] == "cdn"
+    assert f_rep["streamMode"] == "patched_blob"
+
+    # Chrome uses xingSeekTimes (~202.64s, ~220.88s); Firefox uses linearSeekTimes (~183.40s, ~197.60s)
+    assert 202.0 <= c_rep["s1"] <= 203.2
+    assert 220.0 <= c_rep["s2"] <= 221.5
+    assert 183.0 <= f_rep["s1"] <= 184.0
+    assert 197.0 <= f_rep["s2"] <= 198.5
 
     # Both browsers must highlight Word 0 ("Everyone,") on Seek 1 and Word 29 ("one") on Seek 2
     assert c_rep["initIdx1"] == 0 and f_rep["initIdx1"] == 0
     assert c_rep["initIdx2"] == 29 and f_rep["initIdx2"] == 29
 
-    # After ~850ms of playback, physical time must be in [216.3s, 217.2s] for Seek 1 and [231.3s, 232.2s] for Seek 2
+    # After ~850ms of playback, physical time must be in [216.2s, 217.5s] for Seek 1 and [231.2s, 232.5s] for Seek 2
     for bname, rep in [("chrome", c_rep), ("firefox", f_rep)]:
         assert 216.2 <= rep["phys1"] <= 217.5, f"{bname} phys1 out of range: {rep['phys1']}"
         assert rep["activeIdx1"] in (0, 1, 2), f"{bname} activeIdx1 unexpected: {rep['activeIdx1']}"

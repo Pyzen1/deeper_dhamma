@@ -59,11 +59,6 @@ def create_app() -> Bottle:
     def serve_static(filepath: str):
         return static_file(filepath, root=str(STATIC_DIR))
 
-    @app.route("/audio/<episode_id>", method=["GET", "HEAD"])
-    def serve_audio_stream(episode_id: str):
-        from deeper_dhamma.calibration import serve_episode_audio_stream
-        return serve_episode_audio_stream(episode_id, db_path=TRANSCRIPTS_DB_PATH)
-
     @app.route("/")
     def index():
         index_file = VIEWS_DIR / "index.html"
