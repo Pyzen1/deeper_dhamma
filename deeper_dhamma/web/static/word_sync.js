@@ -43,6 +43,9 @@
     isFirefox: typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent || ''),
     activeWordEl: null,
     activeWordIdx: -1,
+    paliTermsMap: new Map(),
+    _lastSpokenWordId: null,
+    onPaliTermSpoken: null,
     metrics: {
       format: 'binary_blob',
       bytesLoaded: 0,
@@ -61,6 +64,50 @@
     },
 
     /**
+     * Strips and normalizes Pali diacritics to standard Latin.
+     */
+    foldDiacritics: function (str) {
+      if (!str) return '';
+      return str
+        .replace(/[ṁṃŋ]/g, 'm')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+    },
+
+    /**
+     * Ingests canonical Pali terms and establishes fast dual-keyed Map index.
+     */
+    setPaliTerms: function (terms) {
+      this.paliTermsMap.clear();
+      if (!Array.isArray(terms)) return;
+      for (let i = 0; i < terms.length; i++) {
+        const t = terms[i];
+        if (!t) continue;
+        if (t.pali_plain) {
+          const plain = t.pali_plain.trim().toLowerCase();
+          this.paliTermsMap.set(plain, t);
+          this.paliTermsMap.set(this.foldDiacritics(plain), t);
+        }
+        if (t.pali_diacritic) {
+          const dia = t.pali_diacritic.trim().toLowerCase();
+          this.paliTermsMap.set(dia, t);
+          this.paliTermsMap.set(this.foldDiacritics(dia), t);
+        }
+      }
+    },
+
+    /**
+     * Checks if a token corresponds to a registered canonical Pali term.
+     */
+    matchPaliTerm: function (token) {
+      if (!token || !this.paliTermsMap || this.paliTermsMap.size === 0) return null;
+      const clean = token.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '').toLowerCase();
+      if (clean.length < 3) return null;
+      return this.paliTermsMap.get(clean) || this.paliTermsMap.get(this.foldDiacritics(clean)) || null;
+    },
+
+    /**
      * Binds an HTML5 audio element for high-frequency 60fps word synchronization.
      * Replaces sluggish 250ms timeupdate polling with a smooth animation frame loop.
      */
@@ -71,6 +118,7 @@
       const onPlay = () => this.startLoop();
       const onPause = () => this.stopLoop();
       const onSeeked = () => {
+        this._lastSpokenWordId = null;
         if (this._pendingProgrammaticSeek) {
           this._pendingProgrammaticSeek = false;
         } else if (this.vbrData) {
@@ -605,6 +653,7 @@
       const clampedPhys = Math.max(0, Number(targetPhysicalSec) || 0);
       this._seekTargetWordTime = typeof targetWordStartSec === 'number' ? targetWordStartSec : null;
       this._pendingProgrammaticSeek = true;
+      this._lastSpokenWordId = null;
 
       if (clampedPhys <= 0.01 || !this.vbrData) {
         this.seekOffset = 0.0;
@@ -743,7 +792,16 @@
           const sents = pText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [pText];
           const wrappedSents = sents.map(sent => {
             const sIdx = sentCursorInTurn++;
-            return `<span class="transcript-sentence" id="turn-${turnIdx}-sent-${sIdx}" data-turn-idx="${turnIdx}" data-sent-idx="${sIdx}">${this.escapeHtml(sent)}</span>`;
+            const tokens = sent.split(/(\s+)/);
+            const wrappedTokens = tokens.map(token => {
+              if (!token || /^\s+$/.test(token)) return token;
+              const pali = this.matchPaliTerm(token);
+              if (pali) {
+                return `<span class="pali-term" data-pali="${this.escapeHtml(pali.pali_plain)}" title="Pali: ${this.escapeHtml(pali.pali_diacritic)} — Click to view definition">${this.escapeHtml(token)}</span>`;
+              }
+              return this.escapeHtml(token);
+            });
+            return `<span class="transcript-sentence" id="turn-${turnIdx}-sent-${sIdx}" data-turn-idx="${turnIdx}" data-sent-idx="${sIdx}">${wrappedTokens.join('')}</span>`;
           });
           return `<p class="turn-p">${wrappedSents.join('')}</p>`;
         }).join('');
@@ -760,9 +818,18 @@
             if (!token || /^\s+$/.test(token)) {
               return token; // Preserves exact whitespace
             }
+            const pali = this.matchPaliTerm(token);
+            const paliClass = pali ? ' pali-term' : '';
+            const paliAttr = pali ? ` data-pali="${this.escapeHtml(pali.pali_plain)}"` : '';
             if (wordCursorInTurn < turnWords.length) {
               const w = turnWords[wordCursorInTurn++];
-              return `<span class="transcript-word" id="${w.id}" data-turn-idx="${turnIdx}" data-word-idx="${w.wordIdxInTurn}" data-start="${w.s}" data-end="${w.e}" title="Click to seek to ${this.formatSeconds(w.s)}">${this.escapeHtml(token)}</span>`;
+              const titleText = pali
+                ? `Pali: ${pali.pali_diacritic} — Click to seek / view definition`
+                : `Click to seek to ${this.formatSeconds(w.s)}`;
+              return `<span class="transcript-word${paliClass}" id="${w.id}" data-turn-idx="${turnIdx}" data-word-idx="${w.wordIdxInTurn}" data-start="${w.s}" data-end="${w.e}"${paliAttr} title="${this.escapeHtml(titleText)}">${this.escapeHtml(token)}</span>`;
+            }
+            if (pali) {
+              return `<span class="pali-term"${paliAttr} title="Pali: ${this.escapeHtml(pali.pali_diacritic)} — Click to view definition">${this.escapeHtml(token)}</span>`;
             }
             return this.escapeHtml(token);
           });
@@ -801,6 +868,22 @@
             }
             newSpan.classList.add('active-word');
             this.activeWordEl = newSpan;
+
+            // Trigger live companion lookup if word is an annotated Pali doctrinal term
+            if (newSpan.classList.contains('pali-term') && newSpan.dataset && newSpan.dataset.pali) {
+              if (this._lastSpokenWordId !== targetWord.id) {
+                this._lastSpokenWordId = targetWord.id;
+                const pKey = newSpan.dataset.pali;
+                if (typeof this.onPaliTermSpoken === 'function') {
+                  this.onPaliTermSpoken(pKey, this.paliTermsMap.get(pKey), {
+                    wordId: targetWord.id,
+                    startSec: targetWord.s,
+                  });
+                }
+              }
+            } else {
+              this._lastSpokenWordId = null;
+            }
           }
         }
       } else {

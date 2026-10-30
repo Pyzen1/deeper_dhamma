@@ -59,6 +59,12 @@ class ApiDatabaseClient {
     return res.json();
   }
 
+  async getAllTerms() {
+    const res = await fetch('/api/lexicon/all_terms');
+    if (!res.ok) return [];
+    return res.json();
+  }
+
   async searchLexicon(query, limit = 10) {
     const res = await fetch(`/api/lexicon/search?q=${encodeURIComponent(query)}&limit=${limit}`);
     if (!res.ok) return [];

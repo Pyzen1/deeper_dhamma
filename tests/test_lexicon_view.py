@@ -181,3 +181,27 @@ def test_api_lexicon_page_filter_and_sort(wsgi_client):
     for item in data["items"]:
         assert item["pali_plain"].startswith("s")
 
+
+def test_lexicon_db_get_all_terms(lexicon_db):
+    """Verifies get_all_terms returns complete indexed canonical terms with translations."""
+    terms = lexicon_db.get_all_terms()
+    assert isinstance(terms, list)
+    assert len(terms) >= 1000
+    sample = next((t for t in terms if t["pali_plain"] == "samadhi"), None)
+    assert sample is not None
+    assert "translation_bodhi" in sample or "translation_brahm" in sample
+
+
+def test_api_lexicon_all_terms_endpoint(wsgi_client):
+    """GET /api/lexicon/all_terms returns all indexed terms for live companion."""
+    status, headers, data = wsgi_client("/api/lexicon/all_terms")
+    assert status.startswith("200")
+    assert "application/json" in headers.get("Content-Type", "")
+    assert isinstance(data, list)
+    assert len(data) >= 1000
+    pali_plains = {t["pali_plain"] for t in data}
+    assert "samadhi" in pali_plains
+    assert "sati" in pali_plains
+    assert "anicca" in pali_plains
+
+

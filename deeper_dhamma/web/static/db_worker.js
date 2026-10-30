@@ -869,6 +869,16 @@ self.onmessage = async (e) => {
         self.postMessage({ id, success: true, data: term });
         break;
       }
+      case 'get_all_terms': {
+        const terms = queryAll(`
+          SELECT id, pali_plain, pali_diacritic, category, 
+                 translation_bodhi, translation_sujato, translation_brahm, translation_brahmali, english_description 
+          FROM terms 
+          ORDER BY pali_plain ASC;
+        `);
+        self.postMessage({ id, success: true, data: terms });
+        break;
+      }
       case 'get_lexicon_page': {
         const pageData = handleGetLexiconPage(payload || {});
         self.postMessage({ id, success: true, data: pageData });

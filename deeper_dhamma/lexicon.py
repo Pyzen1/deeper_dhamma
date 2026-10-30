@@ -77,6 +77,21 @@ class BuddhismLexiconDatabase:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def get_all_terms(self) -> List[Dict]:
+        """
+        Returns all canonical Pali terms with definitions and teacher glosses
+        for high-speed client-side companion index and live audio synchronization.
+        """
+        with self._get_connection() as conn:
+            cur = conn.execute("""
+                SELECT id, pali_plain, pali_diacritic, category,
+                       translation_bodhi, translation_sujato, translation_brahm, translation_brahmali,
+                       english_description
+                FROM terms
+                ORDER BY pali_plain ASC;
+            """)
+            return [dict(r) for r in cur.fetchall()]
+
     def lookup_term(self, term: str) -> Optional[Dict]:
         """Look up a term by plain Latin or diacritic form, including source document details."""
         plain = strip_diacritics(term)

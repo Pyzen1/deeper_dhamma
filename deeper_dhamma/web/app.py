@@ -233,6 +233,12 @@ def create_app() -> Bottle:
             return static_file(f"{episode_id}.bin", root=str(STATIC_DIR / "words"), mimetype="application/octet-stream")
         return json_response({"available": False, "episode_id": episode_id}, status=404)
 
+    @app.route("/api/lexicon/all_terms")
+    def api_lexicon_all_terms():
+        """Returns all canonical Pali terms with translations for client-side companion index."""
+        terms = lexicon_db.get_all_terms()
+        return json_response(terms)
+
     @app.route("/api/lexicon/lookup")
     def api_lexicon_lookup():
         """Looks up a Pali Buddhist doctrinal term."""

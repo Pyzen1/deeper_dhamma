@@ -441,8 +441,54 @@
           </div>
         </div>
 
-        <div class="transcript-reader-container" id="drawer-turns-container">
-          <div class="loading-spinner">Loading transcript...</div>
+        <div class="transcript-layout-container" id="transcript-layout-container">
+          <div class="transcript-reader-container" id="drawer-turns-container">
+            <div class="loading-spinner">Loading transcript...</div>
+          </div>
+
+          <!-- Pali Lexicon Companion (Desktop Sidebar + Mobile Bottom Sheet) -->
+          <aside class="transcript-lexicon-companion" id="transcript-lexicon-companion" aria-label="Pali Lexicon Live Companion">
+            <!-- Mobile Mini Ticker Bar (Docked directly above player bar) -->
+            <div class="lex-mobile-ticker" id="lex-mobile-ticker">
+              <div class="lex-ticker-info" id="lex-ticker-trigger" role="button" tabindex="0" title="Click to expand terms window">
+                <span class="lex-ticker-icon" aria-hidden="true">📖</span>
+                <div class="lex-ticker-text-group">
+                  <div class="lex-ticker-headline">
+                    <span class="lex-ticker-tag">Current Term:</span>
+                    <strong class="lex-ticker-term" id="mobile-ticker-term">—</strong>
+                  </div>
+                  <span class="lex-ticker-def" id="mobile-ticker-def">Pali definitions appear here as spoken</span>
+                </div>
+              </div>
+              <button type="button" class="btn-toggle-lex-sheet" id="btn-toggle-lex-sheet" aria-expanded="false" title="Expand terms window">
+                <span class="sheet-count-pill" id="mobile-sheet-count">0</span>
+                <span class="sheet-arrow-icon" id="sheet-arrow-icon">▲</span>
+              </button>
+            </div>
+
+            <!-- Companion Header -->
+            <div class="lex-companion-header" id="lex-companion-header">
+              <div class="lex-companion-title-group">
+                <span class="lex-companion-icon" aria-hidden="true">📖</span>
+                <h3 class="lex-companion-title">Pali Lexicon</h3>
+                <span class="lex-stack-badge" id="lex-stack-badge">0 terms</span>
+              </div>
+              <div class="lex-companion-header-actions">
+                <button type="button" class="btn-clear-lex-stack" id="btn-clear-lex-stack" title="Jump to current active term">Active</button>
+                <button type="button" class="btn-close-lex-sheet" id="btn-close-lex-sheet" title="Collapse panel" aria-label="Collapse panel">▼</button>
+              </div>
+            </div>
+
+            <!-- Scrollable List of Definitions (Chronological Rolling 5-Term Window) -->
+            <div class="lexicon-stack-container" id="transcript-lexicon-stack">
+              <div class="lex-stack-empty" id="lex-stack-empty">
+                <div class="empty-icon">🪷</div>
+                <h4>Lexicon Companion</h4>
+                <p>Pali and Buddhist doctrinal terms spoken in this talk appear chronologically here.</p>
+                <p class="empty-hint">Click any term in this list to seek audio to that word, or tap highlighted terms in the transcript.</p>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </section>

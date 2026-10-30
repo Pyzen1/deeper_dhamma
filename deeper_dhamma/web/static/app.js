@@ -33,6 +33,12 @@
       totalPages: 1,
       loadedOnce: false,
     },
+    lexCompanion: {
+      allTerms: [],
+      currentActiveIdx: -1,
+      isExpandedMobile: false,
+      loadedOnce: false,
+    },
   };
 
   // ==========================================================================
@@ -143,6 +149,20 @@
     drawerPlayFullBtn: document.getElementById('drawer-play-full-btn'),
     drawerPodbeanLink: document.getElementById('drawer-podbean-link'),
     drawerTurns: document.getElementById('drawer-turns-container'),
+
+    // Lexicon Companion Elements
+    lexCompanion: document.getElementById('transcript-lexicon-companion'),
+    lexMobileTicker: document.getElementById('lex-mobile-ticker'),
+    lexTickerTrigger: document.getElementById('lex-ticker-trigger'),
+    mobileTickerTerm: document.getElementById('mobile-ticker-term'),
+    mobileTickerDef: document.getElementById('mobile-ticker-def'),
+    mobileSheetCount: document.getElementById('mobile-sheet-count'),
+    btnToggleLexSheet: document.getElementById('btn-toggle-lex-sheet'),
+    btnCloseLexSheet: document.getElementById('btn-close-lex-sheet'),
+    lexStackBadge: document.getElementById('lex-stack-badge'),
+    btnClearLexStack: document.getElementById('btn-clear-lex-stack'),
+    lexiconStack: document.getElementById('transcript-lexicon-stack'),
+    lexStackEmpty: document.getElementById('lex-stack-empty'),
 
     // Audio Player
     playerBar: document.getElementById('audio-player-bar'),
@@ -347,6 +367,7 @@
       await Promise.all([
         loadArchiveStats(),
         loadBrowseCatalog(),
+        ensurePaliTermsLoaded(),
       ]);
     } catch (err) {
       console.error('[App] Failed to initialize database service:', err);
@@ -1148,6 +1169,42 @@
           }
         }
       });
+    }
+
+    // Lexicon Live Companion Controls
+    if (els.btnToggleLexSheet) {
+      els.btnToggleLexSheet.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleMobileLexSheet();
+      });
+    }
+    if (els.lexTickerTrigger) {
+      els.lexTickerTrigger.addEventListener('click', () => {
+        toggleMobileLexSheet();
+      });
+    }
+    if (els.btnCloseLexSheet) {
+      els.btnCloseLexSheet.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleMobileLexSheet(false);
+      });
+    }
+    if (els.btnClearLexStack) {
+      els.btnClearLexStack.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.lexCompanion.currentActiveIdx >= 0 && els.lexiconStack) {
+          const activeCard = els.lexiconStack.querySelector('.lex-stack-card.current-companion-term');
+          if (activeCard) {
+            activeCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      });
+    }
+
+    if (window.WordSync) {
+      window.WordSync.onPaliTermSpoken = (key, termObj, options) => {
+        handleSpokenPaliTerm(key, termObj, options);
+      };
     }
 
 
@@ -2284,10 +2341,420 @@
   }
 
   // ==========================================================================
+  // Pali Lexicon Live Companion (Spoken Stack & Mobile Sheet)
+  // ==========================================================================
+
+  async function ensurePaliTermsLoaded() {
+    if (state.lexCompanion.loadedOnce && window.WordSync && window.WordSync.paliTermsMap.size > 0) {
+      return;
+    }
+    try {
+      if (!dbService || !dbService.getAllTerms) return;
+      const terms = await dbService.getAllTerms();
+      if (Array.isArray(terms) && terms.length > 0) {
+        if (window.WordSync) {
+          window.WordSync.setPaliTerms(terms);
+        }
+        state.lexCompanion.loadedOnce = true;
+      }
+    } catch (err) {
+      console.warn('[LexCompanion] Failed to pre-load Pali terms index:', err);
+    }
+  }
+
+  function toggleMobileLexSheet(forceOpen) {
+    if (!els.lexCompanion) return;
+    const isCurrentlyExpanded = els.lexCompanion.classList.contains('is-expanded');
+    const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !isCurrentlyExpanded;
+
+    els.lexCompanion.classList.toggle('is-expanded', shouldOpen);
+    state.lexCompanion.isExpandedMobile = shouldOpen;
+    if (els.btnToggleLexSheet) {
+      els.btnToggleLexSheet.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    }
+    if (shouldOpen && state.lexCompanion.currentActiveIdx >= 0 && els.lexiconStack) {
+      requestAnimationFrame(() => {
+        const activeCard = els.lexiconStack.querySelector('.lex-stack-card.current-companion-term');
+        if (activeCard) {
+          activeCard.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+        }
+      });
+    }
+  }
+
+  function resetLexCompanion() {
+    state.lexCompanion.allTerms = [];
+    state.lexCompanion.currentActiveIdx = -1;
+    if (els.lexiconStack) {
+      els.lexiconStack.querySelectorAll('.lex-stack-card').forEach(el => el.remove());
+    }
+    if (els.lexStackEmpty) {
+      els.lexStackEmpty.style.display = 'flex';
+    }
+    if (els.lexStackBadge) {
+      els.lexStackBadge.textContent = '0 terms';
+    }
+    if (els.mobileSheetCount) {
+      els.mobileSheetCount.textContent = '0';
+    }
+    if (els.mobileTickerTerm) {
+      els.mobileTickerTerm.textContent = '—';
+    }
+    if (els.mobileTickerDef) {
+      els.mobileTickerDef.textContent = 'Pali definitions appear here as spoken';
+    }
+    if (window.WordSync) {
+      window.WordSync._lastSpokenWordId = null;
+    }
+  }
+
+  function cleanDefinitionText(text) {
+    if (!text) return '';
+    let clean = String(text).trim();
+    if (clean.startsWith('Canonical early Buddhist term')) {
+      const mB = clean.match(/Bodhi:\s*'([^']+)'/i);
+      const mS = clean.match(/Sujato:\s*'([^']+)'/i);
+      if (mB && mB[1]) {
+        clean = mB[1];
+      } else if (mS && mS[1]) {
+        clean = mS[1];
+      } else {
+        clean = 'Early Buddhist canonical doctrinal term.';
+      }
+    }
+    // Remove "(1) untranslated: " or "untranslated: "
+    clean = clean.replace(/(\(\d+\)\s*)?untranslated:\s*/gi, '');
+    clean = clean.replace(/^[\s;,\.\-]+|[\s;,\.\-]+$/g, '');
+    if (clean && clean[0] === clean[0].toLowerCase()) {
+      clean = clean[0].toUpperCase() + clean.slice(1);
+    }
+    return clean;
+  }
+
+  function getBestDefinition(term) {
+    if (!term) return { text: '', source: 'Lexicon' };
+    const brahm = term.translation_brahm ? String(term.translation_brahm).trim() : '';
+    const bodhi = term.translation_bodhi ? String(term.translation_bodhi).trim() : '';
+    const sujato = term.translation_sujato ? String(term.translation_sujato).trim() : '';
+    const desc = term.english_description ? String(term.english_description).trim() : '';
+
+    // 1. Ajahn Brahm: highest priority living forest tradition definition
+    if (brahm) {
+      return { text: cleanDefinitionText(brahm), source: 'Ajahn Brahm' };
+    }
+
+    // 2. If Bodhi is untranslated but Sujato has a direct English translation, prefer Sujato
+    if (bodhi.toLowerCase().includes('untranslated') && sujato && !sujato.toLowerCase().includes('untranslated')) {
+      return { text: cleanDefinitionText(sujato), source: 'Sujato' };
+    }
+
+    // 3. Bhikkhu Bodhi: canonical Theravada translation
+    if (bodhi) {
+      return { text: cleanDefinitionText(bodhi), source: 'Bodhi' };
+    }
+
+    // 4. Bhikkhu Sujato: modern SuttaCentral translation
+    if (sujato) {
+      return { text: cleanDefinitionText(sujato), source: 'Sujato' };
+    }
+
+    // 5. English description fallback
+    if (desc && !desc.startsWith('Canonical early Buddhist term')) {
+      return { text: cleanDefinitionText(desc), source: 'Lexicon' };
+    }
+
+    return { text: cleanDefinitionText(desc || 'Canonical Buddhist doctrinal term.'), source: 'Lexicon' };
+  }
+
+  function openFullLexiconEntry(termKey) {
+    if (!termKey) return;
+    switchTab('lexicon-view');
+    if (els.lexiconInput) {
+      els.lexiconInput.value = termKey;
+    }
+    if (els.lexAlphabetBar) els.lexAlphabetBar.style.display = 'none';
+    if (els.lexPagination) els.lexPagination.style.display = 'none';
+    if (els.lexCountText) els.lexCountText.textContent = `Search results for "${termKey}"`;
+    executeLexiconSearch(termKey);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function createCompanionCard(term, idx) {
+    const card = document.createElement('article');
+    card.className = 'lex-stack-card';
+    card.id = `lex-card-${idx}`;
+    card.dataset.idx = String(idx);
+    card.dataset.term = term.pali_plain || '';
+
+    const paliTitle = escapeHtml(term.pali_diacritic || term.pali_plain || '');
+    const startSec = typeof term.startSec === 'number' ? term.startSec : 0;
+    card.title = `Seek audio to ${formatSeconds(startSec)}`;
+    const detailsBtn = `<button type="button" class="lex-card-link-btn" title="View full lexicon entry for ${paliTitle}">Lexicon ↗</button>`;
+
+    const bestDef = getBestDefinition(term);
+    const sourceNote = bestDef.source
+      ? `<div class="lex-card-source-tag">— ${escapeHtml(bestDef.source)}</div>`
+      : '';
+
+    card.innerHTML = `
+      <div class="lex-card-header">
+        <div class="lex-card-term-group">
+          <h4 class="lex-card-pali">${paliTitle}</h4>
+        </div>
+        <div class="lex-card-meta-right">
+          ${detailsBtn}
+        </div>
+      </div>
+      <div class="lex-card-def-row">
+        <span class="lex-card-def-text">${escapeHtml(bestDef.text)}</span>
+      </div>
+      ${sourceNote}
+    `;
+
+    // Clicking Lexicon link opens full entry in Lexicon view
+    const lBtn = card.querySelector('.lex-card-link-btn');
+    if (lBtn) {
+      lBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openFullLexiconEntry(term.pali_plain || term.pali_diacritic);
+      });
+    }
+
+    // Clicking anywhere else on card seeks audio and scrolls transcript to word
+    card.addEventListener('click', () => {
+      jumpToCompanionTerm(idx);
+    });
+
+    return card;
+  }
+
+  function renderCompanionCards(terms) {
+    if (!els.lexiconStack) return;
+
+    // Clear previous cards
+    els.lexiconStack.querySelectorAll('.lex-stack-card').forEach(c => c.remove());
+
+    if (!terms || terms.length === 0) {
+      if (els.lexStackEmpty) els.lexStackEmpty.style.display = 'flex';
+      if (els.lexStackBadge) els.lexStackBadge.textContent = '0 terms';
+      if (els.mobileSheetCount) els.mobileSheetCount.textContent = '0';
+      if (els.mobileTickerTerm) els.mobileTickerTerm.textContent = '—';
+      if (els.mobileTickerDef) els.mobileTickerDef.textContent = 'No canonical Pali terms indexed in this talk';
+      return;
+    }
+
+    if (els.lexStackEmpty) {
+      els.lexStackEmpty.style.display = 'none';
+    }
+    if (els.lexStackBadge) {
+      els.lexStackBadge.textContent = `${terms.length} term${terms.length === 1 ? '' : 's'} in talk`;
+    }
+    if (els.mobileSheetCount) {
+      els.mobileSheetCount.textContent = `1 / ${terms.length}`;
+    }
+
+    const fragment = document.createDocumentFragment();
+    terms.forEach((term, idx) => {
+      const cardEl = createCompanionCard(term, idx);
+      fragment.appendChild(cardEl);
+    });
+    els.lexiconStack.appendChild(fragment);
+
+    // Initial preview: activate term 0 without forced scroll
+    setActiveCompanionTerm(0, { scrollCompanion: false });
+  }
+
+  function buildCompanionTermsList() {
+    if (!els.drawerTurns) return;
+    const termElements = els.drawerTurns.querySelectorAll('.pali-term');
+    const allTerms = [];
+    let lastTermKey = null;
+    let lastStartSec = -999;
+
+    termElements.forEach((el) => {
+      const key = el.dataset.pali;
+      if (!key) return;
+      const cleanKey = key.trim().toLowerCase();
+      const termData = window.WordSync && window.WordSync.paliTermsMap
+        ? window.WordSync.paliTermsMap.get(cleanKey)
+        : null;
+      if (!termData) return;
+
+      let startSec = parseFloat(el.dataset.start);
+      if (isNaN(startSec)) {
+        const turnEl = el.closest('.transcript-turn');
+        if (turnEl && turnEl.dataset.start) {
+          startSec = parseFloat(turnEl.dataset.start);
+        } else {
+          startSec = 0;
+        }
+      }
+
+      // Skip immediate stutter duplicates (same term spoken within 2.0s)
+      if (cleanKey === lastTermKey && Math.abs(startSec - lastStartSec) < 2.0) {
+        return;
+      }
+      lastTermKey = cleanKey;
+      lastStartSec = startSec;
+
+      const turnEl = el.closest('.transcript-turn');
+      const turnIdx = turnEl && turnEl.dataset.turnIdx ? parseInt(turnEl.dataset.turnIdx, 10) : 0;
+
+      allTerms.push({
+        idx: allTerms.length,
+        pali_plain: termData.pali_plain,
+        pali_diacritic: termData.pali_diacritic || termData.pali_plain,
+        category: termData.category,
+        translation_brahm: termData.translation_brahm,
+        translation_bodhi: termData.translation_bodhi,
+        translation_sujato: termData.translation_sujato,
+        english_description: termData.english_description,
+        startSec: startSec,
+        turnIdx: turnIdx,
+        wordId: el.id || null,
+      });
+    });
+
+    // Chronological order
+    allTerms.sort((a, b) => a.startSec - b.startSec);
+    allTerms.forEach((t, i) => { t.idx = i; });
+
+    state.lexCompanion.allTerms = allTerms;
+    state.lexCompanion.currentActiveIdx = -1;
+    renderCompanionCards(allTerms);
+  }
+
+  function jumpToCompanionTerm(idx) {
+    const terms = state.lexCompanion.allTerms;
+    if (!terms || !terms[idx]) return;
+    const term = terms[idx];
+
+    // 1. Seek audio to term's start time
+    if (state.currentEpisode) {
+      playAudioSegment({
+        episode_id: state.currentEpisode.id,
+        media_url: state.currentEpisode.media_url,
+        title: state.currentEpisode.title,
+        teacher: state.currentEpisode.primary_display,
+        start_sec: term.startSec,
+      });
+    }
+
+    // 2. Scroll transcript smoothly to spoken word or turn
+    let scrollTarget = null;
+    if (term.wordId) {
+      scrollTarget = document.getElementById(term.wordId);
+    }
+    if (!scrollTarget) {
+      scrollTarget = document.getElementById(`turn-${term.turnIdx}`);
+    }
+
+    if (scrollTarget) {
+      scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (term.wordId && scrollTarget.classList.contains('transcript-word')) {
+        if (window.WordSync) {
+          window.WordSync.clearHighlights();
+          scrollTarget.classList.add('active-word');
+          window.WordSync.activeWordEl = scrollTarget;
+        }
+      } else {
+        scrollTarget.classList.add('target-turn-flash');
+        setTimeout(() => scrollTarget.classList.remove('target-turn-flash'), 2500);
+      }
+    }
+
+    // 3. Highlight this card in companion
+    setActiveCompanionTerm(idx, { scrollCompanion: true });
+  }
+
+  function setActiveCompanionTerm(idx, options = {}) {
+    const terms = state.lexCompanion.allTerms;
+    if (!terms || !terms[idx]) return;
+    state.lexCompanion.currentActiveIdx = idx;
+    const term = terms[idx];
+
+    // 1. Update card highlights and keep in rolling 5-term view
+    if (els.lexiconStack) {
+      const cards = els.lexiconStack.querySelectorAll('.lex-stack-card');
+      cards.forEach(c => {
+        const cardIdx = parseInt(c.dataset.idx, 10);
+        if (cardIdx === idx) {
+          c.classList.add('current-companion-term');
+          if (options.scrollCompanion !== false) {
+            c.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        } else {
+          c.classList.remove('current-companion-term');
+        }
+      });
+    }
+
+    // 2. Update collapsed mobile ticker
+    if (els.mobileTickerTerm) {
+      els.mobileTickerTerm.textContent = term.pali_diacritic || term.pali_plain || '—';
+    }
+    const bestDef = getBestDefinition(term);
+    if (els.mobileTickerDef) {
+      els.mobileTickerDef.textContent = bestDef.text ? `${bestDef.source}: ${bestDef.text}` : '';
+    }
+    if (els.mobileSheetCount) {
+      els.mobileSheetCount.textContent = `${idx + 1} / ${terms.length}`;
+    }
+  }
+
+  function updateActiveCompanionTerm(currentTime) {
+    const terms = state.lexCompanion.allTerms;
+    if (!terms || terms.length === 0) return;
+
+    let targetIdx = -1;
+    for (let i = terms.length - 1; i >= 0; i--) {
+      if (terms[i].startSec <= currentTime + 0.35) {
+        targetIdx = i;
+        break;
+      }
+    }
+
+    if (targetIdx === -1 && currentTime >= 0) {
+      targetIdx = 0;
+    }
+
+    if (targetIdx !== -1 && targetIdx !== state.lexCompanion.currentActiveIdx) {
+      setActiveCompanionTerm(targetIdx, { scrollCompanion: true });
+    }
+  }
+
+  async function handleSpokenPaliTerm(termKey, termObj, options = {}) {
+    if (!termKey) return;
+    const terms = state.lexCompanion.allTerms;
+    if (!terms || terms.length === 0) return;
+
+    let matchedIdx = -1;
+    if (options.wordId) {
+      matchedIdx = terms.findIndex(t => t.wordId === options.wordId);
+    }
+    if (matchedIdx === -1 && typeof options.startSec === 'number') {
+      matchedIdx = terms.findIndex(t => Math.abs(t.startSec - options.startSec) < 0.85);
+    }
+    if (matchedIdx === -1) {
+      const cleanKey = String(termKey).trim().toLowerCase();
+      matchedIdx = terms.findIndex(t => t.pali_plain.toLowerCase() === cleanKey);
+    }
+
+    if (matchedIdx !== -1) {
+      setActiveCompanionTerm(matchedIdx, { scrollCompanion: true });
+    }
+
+    if (options.userClicked && window.innerWidth <= 1024) {
+      toggleMobileLexSheet(true);
+    }
+  }
+
+  // ==========================================================================
   // Transcript Drawer / Modal
   // ==========================================================================
 
   async function openTranscriptDrawer(episodeId, targetOpts = null) {
+    resetLexCompanion();
     if (state.activeTab !== 'transcript-view') {
       state.previousTab = state.activeTab;
     }
@@ -2400,17 +2867,38 @@
               teacher: ep.primary_display,
               start_sec: start,
             });
+            if (wSpan.classList.contains('pali-term') && wSpan.dataset.pali) {
+              handleSpokenPaliTerm(wSpan.dataset.pali, null, { userClicked: true, startSec: start, wordId: wSpan.id });
+            }
+          });
+        });
+
+        // Click on any un-timed Pali term in sentence fallback mode
+        els.drawerTurns.querySelectorAll('.pali-term:not(.transcript-word)').forEach(pSpan => {
+          pSpan.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (pSpan.dataset.pali) {
+              handleSpokenPaliTerm(pSpan.dataset.pali, null, { userClicked: true });
+            }
           });
         });
       }
 
       window.renderActiveTranscript = renderDrawerTurns;
 
+      await ensurePaliTermsLoaded();
+
       if (window.WordSync) {
         await window.WordSync.prepareEpisode(ep);
       }
 
       renderDrawerTurns();
+      buildCompanionTermsList();
+      if (els.nativeAudio && els.nativeAudio.currentTime > 0) {
+        const rawCur = els.nativeAudio.currentTime;
+        const physCur = window.WordSync ? window.WordSync.getPhysicalTime(rawCur) : rawCur;
+        updateActiveCompanionTerm(physCur);
+      }
 
       // If opened from a sentence context match, scroll to that sentence/word and start audio at exact word time!
       if (targetOpts && typeof targetOpts.turnIndex === 'number') {
@@ -2487,6 +2975,19 @@
     const audio = els.nativeAudio;
     let isScrubbing = false;
     let scrubCommitted = false;
+
+    function updatePlayerHeight() {
+      if (els.playerBar) {
+        const h = els.playerBar.offsetHeight || 78;
+        document.documentElement.style.setProperty('--player-height', `${h}px`);
+      }
+    }
+    updatePlayerHeight();
+    window.addEventListener('resize', updatePlayerHeight, { passive: true });
+    if (typeof ResizeObserver !== 'undefined' && els.playerBar) {
+      const ro = new ResizeObserver(() => updatePlayerHeight());
+      ro.observe(els.playerBar);
+    }
 
     function getTotalDuration() {
       if (window.WordSync && window.WordSync.vbrData && window.WordSync.vbrData.totalDurSec > 0) {
@@ -2576,8 +3077,11 @@
         els.timeTotal.textContent = formatSeconds(dur);
         els.scrubber.value = Math.min(100, Math.max(0, (physCur / dur) * 100));
       }
-      if (window.WordSync && state.activeTab === 'transcript-view') {
-        window.WordSync.update(rawCur);
+      if (state.activeTab === 'transcript-view') {
+        if (window.WordSync) {
+          window.WordSync.update(rawCur);
+        }
+        updateActiveCompanionTerm(physCur);
       }
     }
 

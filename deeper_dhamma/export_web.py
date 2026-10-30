@@ -63,7 +63,12 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
     """
     output_db_path = Path(output_db_path)
     if output_db_path.exists():
-        output_db_path.unlink()
+        try:
+            output_db_path.unlink()
+        except PermissionError:
+            # On Windows, if a preview dev server is holding a read lock,
+            # unlink fails, but SQLite backup API (src.backup(dst)) can still safely overwrite.
+            pass
 
     # 1. Clone base transcripts database
     logger.info(f"Cloning transcripts database from {TRANSCRIPTS_DB_PATH} ...")
