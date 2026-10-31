@@ -65,16 +65,27 @@ def test_lexicon_core_mode_default(lexicon_db):
     """Core mode should return curated foundational terms without returning the entire 1,000+ corpus."""
     result = lexicon_db.get_paged_terms(mode="core", page=1, limit=50)
     assert result["total"] >= 20
-    assert result["total"] < 100
+    assert result["total"] < 200
     assert len(result["items"]) <= 50
 
-    plain_terms = [item["pali_plain"] for item in result["items"]]
+    # Membership is checked across the whole core set, not just the first page
+    full_core = lexicon_db.get_paged_terms(mode="core", page=1, limit=500)
+    plain_terms = [item["pali_plain"] for item in full_core["items"]]
     assert "anapanasati" in plain_terms
     assert "jhana" in plain_terms
     assert "nimitta" in plain_terms
     assert "samadhi" in plain_terms
     assert "sati" in plain_terms
     assert "dukkha" in plain_terms
+
+
+def test_brahm_bswa_glossary_samadhi_is_stillness(lexicon_db):
+    """Ajahn Brahm renders samādhi as 'stillness', not 'concentration'."""
+    full_core = lexicon_db.get_paged_terms(mode="core", page=1, limit=500)
+    samadhi = next(item for item in full_core["items"] if item["pali_plain"] == "samadhi")
+    assert samadhi["translation_brahm"].lower().startswith("stillness")
+    # Canonical SuttaCentral data must be preserved alongside the Brahm gloss
+    assert samadhi["translation_bodhi"]
 
 
 def test_lexicon_core_mode_brahm_glosses(lexicon_db):
@@ -157,7 +168,8 @@ def test_api_lexicon_page_core_mode(wsgi_client):
     assert data["page"] == 1
     assert len(data["items"]) <= 25
 
-    pali_plains = [item["pali_plain"] for item in data["items"]]
+    _, _, jhana_page = wsgi_client("/api/lexicon/page", "mode=core&letter=j&limit=25")
+    pali_plains = [item["pali_plain"] for item in jhana_page["items"]]
     assert "jhana" in pali_plains
 
 

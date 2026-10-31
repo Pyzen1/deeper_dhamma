@@ -76,14 +76,23 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         src.backup(dst)
 
     # 2. Attach lexicon and import terms, source documents, and views
+    lex_db_str = str(BUDDHISM_LEXICON_DB_PATH.resolve()).replace("\\", "/")
+    logger.info(f"Attaching lexicon database from {lex_db_str} ...")
     with sqlite3.connect(output_db_path) as conn:
         conn.execute("PRAGMA foreign_keys = OFF;")
-        conn.execute(f"ATTACH DATABASE '{BUDDHISM_LEXICON_DB_PATH}' AS lex;")
+        conn.execute(f"ATTACH DATABASE '{lex_db_str}' AS lex;")
+        attached = conn.execute("PRAGMA database_list;").fetchall()
+        logger.info(f"Attached databases: {attached}")
+        lex_tables = [r[0] for r in conn.execute("SELECT name FROM lex.sqlite_master;").fetchall()]
+        logger.info(f"Tables in lex: {lex_tables}")
 
-        # Copy lexicon reference tables
-        conn.execute("CREATE TABLE IF NOT EXISTS source_documents AS SELECT * FROM lex.source_documents;")
-        conn.execute("CREATE TABLE IF NOT EXISTS terms AS SELECT * FROM lex.terms;")
-        conn.execute("CREATE TABLE IF NOT EXISTS phrase_rules AS SELECT * FROM lex.phrase_rules;")
+        # Copy lexicon reference tables (explicitly targeting main database to avoid dropping from attached lex)
+        conn.execute("DROP TABLE IF EXISTS main.source_documents;")
+        conn.execute("CREATE TABLE main.source_documents AS SELECT * FROM lex.source_documents;")
+        conn.execute("DROP TABLE IF EXISTS main.terms;")
+        conn.execute("CREATE TABLE main.terms AS SELECT * FROM lex.terms;")
+        conn.execute("DROP TABLE IF EXISTS main.phrase_rules;")
+        conn.execute("CREATE TABLE main.phrase_rules AS SELECT * FROM lex.phrase_rules;")
 
         # Recreate lexical join view
         conn.execute("DROP VIEW IF EXISTS v_terms;")

@@ -353,6 +353,50 @@ def get_brahm_meditation_and_bswa_terms() -> List[Dict]:
     ]
 
 
+def get_brahm_bswa_glossary() -> List[Tuple[str, str, str, str]]:
+    """
+    Ajahn Brahm's official translations directly cited from his published translation
+    work: "The Word of the Buddha" (Ajahn Brahm revised edition, BSWA / Bodhinyana International
+    Foundation, 2024, https://bswa.org/bswp/wp-content/uploads/2024/11/TheWord0fTheBuddha_eCat.pdf),
+    specifically its Glossary (pp. 99-103) and Noble Eightfold Path chapters.
+
+    Each row is (pali_diacritic, pali_plain, category, translation_brahm).
+    Strictly sourced from Ajahn Brahm's text: any term not explicitly translated by him
+    remains untouched (translation_brahm = None).
+    """
+    return [
+        # Glossary (pp. 99-103)
+        ("samādhi", "samadhi", "meditation", "stillness (arising from letting go, a non-doing)"),
+        ("sambodhi", "sambodhi", "doctrine", "awakening"),
+        ("bodhi", "bodhi", "doctrine", "awakening"),
+        ("khandha", "khandha", "doctrine", "components of existence"),
+        ("nibbidā", "nibbida", "doctrine", "revulsion"),
+        ("taṇhā", "tanha", "doctrine", "wanting"),
+        ("vedanā", "vedana", "doctrine", "experience"),
+        ("viññāṇa", "vinnana", "doctrine", "consciousnesses"),
+        ("virāga", "viraga", "doctrine", "fading away"),
+        ("saṅkhāra", "sankhara", "doctrine", "will / volitional formations"),
+        ("saṅkappa", "sankappa", "doctrine", "motivation (letting go, kindness, gentleness)"),
+        ("vāyāma", "vayama", "doctrine", "restraint (of the five hindrances)"),
+        ("attā", "atta", "doctrine", "permanent essence"),
+        ("ālaya", "alaya", "doctrine", "attached to the idea of a self"),
+        ("jāti", "jati", "doctrine", "rebirth"),
+        ("kāma", "kama", "doctrine", "the world of the five senses"),
+        ("vitakka-vicāra", "vitakka-vicara", "meditation", "movement of the mind onto the object and holding on to it"),
+        # Core Path Factors & Realities translated by Ajahn Brahm in Chapters I-IV
+        ("sammādiṭṭhi", "sammaditthi", "doctrine", "right view"),
+        ("sammāsaṅkappa", "sammasankappa", "doctrine", "right motivation"),
+        ("sammāvācā", "sammavaca", "doctrine", "right speech"),
+        ("sammākammanta", "sammakammanta", "doctrine", "right action"),
+        ("sammā-ājīva", "samma-ajiva", "doctrine", "right livelihood"),
+        ("sammāvāyāma", "sammavayama", "doctrine", "right endeavour (restraint)"),
+        ("sammāsati", "sammasati", "doctrine", "right mindfulness"),
+        ("sammāsamādhi", "sammasamadhi", "meditation", "right stillness"),
+        ("satipaṭṭhāna", "satipatthana", "meditation", "the four focuses of mindfulness"),
+        ("nibbāna", "nibbana", "doctrine", "the destruction of wanting, aversion and delusion / unshakeable deliverance"),
+    ]
+
+
 def get_brahmali_vinaya_terms() -> List[Dict]:
     """
     Key Vinaya & monastic governance vocabulary from Bhikkhu Brahmali's
@@ -673,11 +717,23 @@ def build_buddhism_lexicon_db():
     """Builds and populates the master SQLite lexicon database."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     if DB_PATH.exists():
-        DB_PATH.unlink()
+        try:
+            DB_PATH.unlink()
+        except PermissionError:
+            # File may be held open by preview or server process; clear via SQLite schema drop
+            pass
 
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA foreign_keys=OFF;")
+
+    # Drop existing tables and views if DB existed but couldn't be unlinked
+    conn.execute("DROP VIEW IF EXISTS v_terms;")
+    conn.execute("DROP TABLE IF EXISTS fts_terms;")
+    conn.execute("DROP TABLE IF EXISTS phrase_rules;")
+    conn.execute("DROP TABLE IF EXISTS terms;")
+    conn.execute("DROP TABLE IF EXISTS source_documents;")
 
     # 1. Create Source Documents Table (for space-efficient offline storage)
     conn.execute("""
@@ -829,6 +885,30 @@ def build_buddhism_lexicon_db():
             all_terms[key]["source_url"] = entry["source_url"]
         else:
             all_terms[key] = entry
+
+    # Layer 4: Ajahn Brahm BSWA glossary (fills translation_brahm only; keeps canonical data)
+    for pali_diacritic, key, category, gloss in get_brahm_bswa_glossary():
+        if key in all_terms:
+            if not all_terms[key].get("translation_brahm"):
+                all_terms[key]["translation_brahm"] = gloss
+                all_terms[key]["context_keywords"] += f", {gloss}"
+                if "bswa:brahm" not in all_terms[key]["source"]:
+                    all_terms[key]["source"] += ", bswa:brahm"
+        else:
+            all_terms[key] = {
+                "pali_diacritic": pali_diacritic,
+                "pali_plain": key,
+                "category": category,
+                "translation_bodhi": None,
+                "translation_sujato": None,
+                "translation_brahm": gloss,
+                "translation_brahmali": None,
+                "english_description": f"Ajahn Brahm: {gloss}",
+                "context_keywords": f"{key}, {gloss}",
+                "phonetic_variants": [],
+                "source": "bswa:brahm",
+                "source_url": URL_BSWA_BRAHM_MEDITATION,
+            }
 
     # Map URL to integer ID
     cur = conn.execute("SELECT url, id FROM source_documents;")
