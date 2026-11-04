@@ -217,3 +217,35 @@ def test_api_lexicon_all_terms_endpoint(wsgi_client):
     assert "anicca" in pali_plains
 
 
+def test_lexicon_source_documents_and_urls(lexicon_db):
+    """Verifies that all terms have joined source_urls and that offline documents are retrievable."""
+    # Verify terms join source_documents
+    sample = lexicon_db.lookup_term("samadhi")
+    assert sample is not None
+    assert sample["source_url"] is not None
+    assert sample["source_url"].startswith("http")
+    assert sample["source_title"] is not None
+
+    # Test list_source_documents
+    docs = lexicon_db.list_source_documents()
+    assert len(docs) == 3
+    for d in docs:
+        assert d["id"] is not None
+        assert d["url"].startswith("http")
+        assert d["title"]
+        assert d["author"]
+        assert d["sha256"]
+
+    # Test get_source_document by id
+    doc1 = lexicon_db.get_source_document(1)
+    assert doc1 is not None
+    assert doc1["id"] == 1
+    assert len(doc1["content"]) > 1000
+
+    # Test get_source_document by url match
+    doc_vinaya = lexicon_db.get_source_document("https://suttacentral.net/vinaya")
+    assert doc_vinaya is not None
+    assert "vinaya" in doc_vinaya["content"].lower()
+
+
+

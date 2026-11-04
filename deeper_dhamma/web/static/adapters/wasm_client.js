@@ -115,6 +115,16 @@ class WasmDatabaseClient {
     await this.init();
     return this.send('get_lexicon_page', options);
   }
+
+  async getSourceDocuments() {
+    await this.init();
+    return this.send('get_source_documents');
+  }
+
+  async getSourceDocument(query) {
+    await this.init();
+    return this.send('get_source_document', { query });
+  }
 }
 
 window.DeeperDhammaDB = WasmDatabaseClient;

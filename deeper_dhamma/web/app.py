@@ -283,6 +283,23 @@ def create_app() -> Bottle:
         )
         return json_response(data)
 
+    @app.route("/api/lexicon/sources")
+    def api_lexicon_sources():
+        """Returns metadata for all canonical offline reference documents."""
+        docs = lexicon_db.list_source_documents()
+        return json_response(docs)
+
+    @app.route("/api/lexicon/source_doc")
+    def api_lexicon_source_doc():
+        """Retrieves an offline canonical reference document with decompressed content."""
+        q = request.query.get("query", "").strip()
+        if not q:
+            return json_response({"error": "query parameter required"}, status=400)
+        doc = lexicon_db.get_source_document(q)
+        if not doc:
+            return json_response({"error": "document not found", "query": q}, status=404)
+        return json_response(doc)
+
     @app.route("/api/stats")
     def api_stats():
         """Returns archive catalog status, transcription progress, and filter options."""

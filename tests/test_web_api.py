@@ -82,3 +82,35 @@ def test_api_search_empty_query(wsgi_client):
     assert status.startswith("200")
     assert data["results"] == []
     assert data["count"] == 0
+
+
+def test_api_lexicon_sources(wsgi_client):
+    status, _, data = wsgi_client("/api/lexicon/sources")
+    assert status.startswith("200")
+    assert isinstance(data, list)
+    assert len(data) >= 3
+    doc_ids = [d["id"] for d in data]
+    assert 1 in doc_ids
+    assert 2 in doc_ids
+    assert 3 in doc_ids
+    for d in data:
+        assert d["url"].startswith("http")
+        assert d["title"]
+        assert d["sha256"]
+        assert "content_compressed" not in d
+
+
+def test_api_lexicon_source_doc(wsgi_client):
+    # Lookup by id
+    status, _, doc = wsgi_client("/api/lexicon/source_doc", "query=1")
+    assert status.startswith("200")
+    assert doc["id"] == 1
+    assert "content" in doc
+    assert len(doc["content"]) > 1000
+    assert "content_compressed" not in doc
+
+    # Lookup by url substring
+    status, _, doc = wsgi_client("/api/lexicon/source_doc", "query=vinaya")
+    assert status.startswith("200")
+    assert "vinaya" in doc["url"].lower()
+    assert len(doc["content"]) > 0

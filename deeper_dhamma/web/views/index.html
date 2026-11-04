@@ -290,11 +290,16 @@
               <button type="button" class="lexicon-mode-btn" id="btn-lexicon-all" data-mode="all" title="Browse all canonical Pali terms">📖 Browse All Terms</button>
             </div>
 
-            <div class="lexicon-sort-wrapper">
-              <select id="lexicon-sort-select" aria-label="Sort terms">
-                <option value="pali_asc">Pali (A → Z)</option>
-                <option value="teacher_first">Teacher Glosses First</option>
-              </select>
+            <div class="lexicon-controls-right">
+              <button type="button" class="btn-lexicon-sources" id="btn-lex-sources" title="View canonical offline reference documents and integrity hashes">
+                📜 Authority Documents
+              </button>
+              <div class="lexicon-sort-wrapper">
+                <select id="lexicon-sort-select" aria-label="Sort terms">
+                  <option value="pali_asc">Pali (A → Z)</option>
+                  <option value="teacher_first">Teacher Glosses First</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -614,6 +619,52 @@
       <div class="archive-modal-current-item" id="archive-modal-current-item">Preparing archive...</div>
       <div class="archive-modal-actions">
         <button type="button" class="btn-secondary" id="archive-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lexicon Canonical Source Documents & Authority Modal -->
+  <div class="archive-modal-backdrop" id="lexicon-sources-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="sources-modal-title">
+    <div class="sources-modal-card">
+      <div class="sources-modal-header">
+        <div class="sources-header-left">
+          <div class="sources-modal-icon">📜</div>
+          <div class="sources-modal-headings">
+            <h3 class="sources-modal-title" id="sources-modal-title">Canonical Authority Source Documents</h3>
+            <p class="sources-modal-subtitle">Offline verifiable Pali definitions, glossaries, and monastic references stored directly in SQLite.</p>
+          </div>
+        </div>
+        <button type="button" class="btn-close-modal" id="btn-close-sources-modal" aria-label="Close authority documents modal">✕</button>
+      </div>
+
+      <div class="sources-modal-body" id="sources-modal-body">
+        <!-- List of Documents View -->
+        <div class="sources-list-container" id="sources-list-container">
+          <div class="sources-loading-spinner" id="sources-loading-spinner">Loading authority documents...</div>
+          <div class="sources-cards-grid" id="sources-cards-grid" style="display: none;"></div>
+        </div>
+
+        <!-- Single Document Reader View -->
+        <div class="source-doc-viewer" id="source-doc-viewer" style="display: none;">
+          <div class="viewer-nav-bar">
+            <button type="button" class="btn-secondary" id="btn-back-to-sources">← All Documents</button>
+            <div class="viewer-title-group">
+              <span class="viewer-doc-title" id="viewer-doc-title">Document Title</span>
+              <span class="viewer-doc-author" id="viewer-doc-author">Author</span>
+            </div>
+            <a href="#" target="_blank" rel="noopener noreferrer" class="btn-primary viewer-remote-btn" id="viewer-remote-btn">
+              Open Remote URL ↗
+            </a>
+          </div>
+          <div class="viewer-meta-strip" id="viewer-meta-strip">
+            <span class="meta-item" id="viewer-sha256-badge">SHA-256 Verified</span>
+            <span class="meta-item" id="viewer-format-badge">Format: Text</span>
+            <span class="meta-item" id="viewer-size-badge">Bytes: 0</span>
+          </div>
+          <div class="viewer-content-container" id="viewer-content-container">
+            <pre class="viewer-raw-text" id="viewer-raw-text"></pre>
+          </div>
+        </div>
       </div>
     </div>
   </div>

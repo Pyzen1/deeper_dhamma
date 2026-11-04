@@ -270,37 +270,50 @@ class BuddhismLexiconDatabase:
         with self._get_connection() as conn:
             cur = conn.execute(
                 """
-                SELECT url, title, author, publisher, retrieved_date,
+                SELECT id, url, title, author, publisher, retrieved_date,
                        content_format, uncompressed_bytes, compressed_bytes, sha256
                 FROM source_documents
-                ORDER BY author, title;
+                ORDER BY id ASC;
                 """
             )
             return [dict(r) for r in cur.fetchall()]
 
-    def get_source_document(self, query: str) -> Optional[Dict]:
+    def get_source_document(self, query: str | int) -> Optional[Dict]:
         """
-        Retrieves and decompresses an embedded source document by exact URL,
-        URL substring, or title match.
+        Retrieves and decompresses an embedded source document by integer id,
+        exact URL, URL substring, or title match.
         """
         import zlib
+        q_str = str(query).strip()
+        is_num = q_str.isdigit()
+
         with self._get_connection() as conn:
-            cur = conn.execute(
-                """
-                SELECT * FROM source_documents
-                WHERE url = ? OR url LIKE ? OR title LIKE ?
-                LIMIT 1;
-                """,
-                (query, f"%{query}%", f"%{query}%"),
-            )
+            if is_num:
+                cur = conn.execute(
+                    "SELECT * FROM source_documents WHERE id = ? LIMIT 1;",
+                    (int(q_str),),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    SELECT * FROM source_documents
+                    WHERE url = ? OR url LIKE ? OR title LIKE ?
+                    LIMIT 1;
+                    """,
+                    (q_str, f"%{q_str}%", f"%{q_str}%"),
+                )
             row = cur.fetchone()
             if not row:
                 return None
             d = dict(row)
-            if d.get("content_compressed"):
+            if d.get("content_text"):
+                d["content"] = d["content_text"]
+            elif d.get("content_compressed"):
                 d["content"] = zlib.decompress(d["content_compressed"]).decode("utf-8")
             else:
                 d["content"] = ""
+            # Omit raw binary blob from returned dict to keep serializable
+            d.pop("content_compressed", None)
             return d
 
     def get_prompt_steering_terms(

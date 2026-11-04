@@ -1,4 +1,4 @@
-"""
+00"""
 Script to build the comprehensive Buddhism Lexicon SQLite Database (buddhism_lexicon.db).
 
 Stores:
@@ -748,7 +748,8 @@ def build_buddhism_lexicon_db():
             uncompressed_bytes INTEGER NOT NULL,
             compressed_bytes INTEGER NOT NULL,
             sha256 TEXT NOT NULL,
-            content_compressed BLOB NOT NULL
+            content_compressed BLOB NOT NULL,
+            content_text TEXT
         );
     """)
 
@@ -840,13 +841,14 @@ def build_buddhism_lexicon_db():
             len(compressed_bytes),
             sha256,
             compressed_bytes,
+            d["text"],
         ))
 
     conn.executemany("""
         INSERT INTO source_documents (
             url, title, author, publisher, retrieved_date,
-            content_format, uncompressed_bytes, compressed_bytes, sha256, content_compressed
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            content_format, uncompressed_bytes, compressed_bytes, sha256, content_compressed, content_text
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     """, doc_rows)
     logger.info(f"Embedded {len(doc_rows)} compressed offline source documents in source_documents table.")
 

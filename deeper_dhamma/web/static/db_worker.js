@@ -884,6 +884,76 @@ self.onmessage = async (e) => {
         self.postMessage({ id, success: true, data: pageData });
         break;
       }
+      case 'get_source_documents': {
+        const docs = queryAll(`
+          SELECT id, url, title, author, publisher, retrieved_date,
+                 content_format, uncompressed_bytes, compressed_bytes, sha256
+          FROM source_documents
+          ORDER BY id ASC;
+        `);
+        self.postMessage({ id, success: true, data: docs });
+        break;
+      }
+      case 'get_source_document': {
+        const query = payload && payload.query;
+        let doc = null;
+        if (typeof query === 'number' || (typeof query === 'string' && /^\d+$/.test(query.trim()))) {
+          doc = queryOne(`
+            SELECT id, url, title, author, publisher, retrieved_date,
+                   content_format, uncompressed_bytes, compressed_bytes, sha256,
+                   content_text, content_compressed
+            FROM source_documents
+            WHERE id = ? LIMIT 1;
+          `, [parseInt(query, 10)]);
+        } else if (query) {
+          const qStr = String(query).trim();
+          doc = queryOne(`
+            SELECT id, url, title, author, publisher, retrieved_date,
+                   content_format, uncompressed_bytes, compressed_bytes, sha256,
+                   content_text, content_compressed
+            FROM source_documents
+            WHERE url = ? OR url LIKE ? OR title LIKE ?
+            LIMIT 1;
+          `, [qStr, `%${qStr}%`, `%${qStr}%`]);
+        }
+
+        if (doc) {
+          if (doc.content_text) {
+            doc.content = doc.content_text;
+          } else if (doc.content_compressed) {
+            try {
+              if (typeof DecompressionStream !== 'undefined') {
+                const ds = new DecompressionStream('deflate');
+                const writer = ds.writable.getWriter();
+                writer.write(doc.content_compressed);
+                writer.close();
+                const chunks = [];
+                const reader = ds.readable.getReader();
+                while (true) {
+                  const { value, done } = await reader.read();
+                  if (done) break;
+                  chunks.push(value);
+                }
+                const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
+                const combined = new Uint8Array(totalLen);
+                let offset = 0;
+                for (const chunk of chunks) {
+                  combined.set(chunk, offset);
+                  offset += chunk.length;
+                }
+                doc.content = new TextDecoder().decode(combined);
+              }
+            } catch (decompErr) {
+              console.warn('[DB Worker] Decompression failed:', decompErr);
+              doc.content = '';
+            }
+          }
+          delete doc.content_compressed;
+        }
+
+        self.postMessage({ id, success: true, data: doc });
+        break;
+      }
       default:
         self.postMessage({ id, success: false, error: `Unknown message type: ${type}` });
     }

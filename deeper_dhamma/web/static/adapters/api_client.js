@@ -90,6 +90,18 @@ class ApiDatabaseClient {
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch lexicon page`);
     return res.json();
   }
+
+  async getSourceDocuments() {
+    const res = await fetch('/api/lexicon/sources');
+    if (!res.ok) return [];
+    return res.json();
+  }
+
+  async getSourceDocument(query) {
+    const res = await fetch(`/api/lexicon/source_doc?query=${encodeURIComponent(query)}`);
+    if (!res.ok) return null;
+    return res.json();
+  }
 }
 
 window.DeeperDhammaDB = ApiDatabaseClient;

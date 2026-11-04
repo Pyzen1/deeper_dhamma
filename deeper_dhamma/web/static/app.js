@@ -140,6 +140,21 @@
     btnLexLast: document.getElementById('btn-lex-last'),
     lexPageIndicator: document.getElementById('lex-page-indicator'),
     lexLimitSelect: document.getElementById('lex-limit-select'),
+    btnLexSources: document.getElementById('btn-lex-sources'),
+    lexSourcesModal: document.getElementById('lexicon-sources-modal'),
+    btnCloseSourcesModal: document.getElementById('btn-close-sources-modal'),
+    sourcesListContainer: document.getElementById('sources-list-container'),
+    sourcesLoadingSpinner: document.getElementById('sources-loading-spinner'),
+    sourcesCardsGrid: document.getElementById('sources-cards-grid'),
+    sourceDocViewer: document.getElementById('source-doc-viewer'),
+    btnBackToSources: document.getElementById('btn-back-to-sources'),
+    viewerDocTitle: document.getElementById('viewer-doc-title'),
+    viewerDocAuthor: document.getElementById('viewer-doc-author'),
+    viewerRemoteBtn: document.getElementById('viewer-remote-btn'),
+    viewerSha256Badge: document.getElementById('viewer-sha256-badge'),
+    viewerFormatBadge: document.getElementById('viewer-format-badge'),
+    viewerSizeBadge: document.getElementById('viewer-size-badge'),
+    viewerRawText: document.getElementById('viewer-raw-text'),
 
     // Transcript View Elements
     transcriptBackBtn: document.getElementById('transcript-back-btn'),
@@ -1334,33 +1349,75 @@
       });
     }
 
-    // Delegated "Find Talks" click on lexicon cards
+    // Delegated clicks on lexicon cards (Find Talks & View Offline Document)
     if (els.lexiconResults) {
       els.lexiconResults.addEventListener('click', (e) => {
         const btn = e.target.closest('.btn-lexicon-talks');
-        if (!btn) return;
-        const term = btn.dataset.term;
-        if (term) {
-          switchTab('search-view');
-          if (els.searchInput) {
-            els.searchInput.value = term;
-            executeSearch(term);
+        if (btn) {
+          const term = btn.dataset.term;
+          if (term) {
+            switchTab('search-view');
+            if (els.searchInput) {
+              els.searchInput.value = term;
+              executeSearch(term);
+            }
           }
+          return;
         }
+
+        const docBtn = e.target.closest('.btn-lexicon-view-doc');
+        if (docBtn) {
+          const docId = docBtn.dataset.docId;
+          if (docId) {
+            openSourceDocumentModal(docId);
+          }
+          return;
+        }
+      });
+    }
+
+    // Lexicon Canonical Authority Sources Modal
+    if (els.btnLexSources) {
+      els.btnLexSources.addEventListener('click', () => {
+        openSourceDocumentModal();
+      });
+    }
+    if (els.btnCloseSourcesModal) {
+      els.btnCloseSourcesModal.addEventListener('click', () => {
+        closeSourceDocumentModal();
+      });
+    }
+    if (els.lexSourcesModal) {
+      els.lexSourcesModal.addEventListener('click', (e) => {
+        if (e.target === els.lexSourcesModal) {
+          closeSourceDocumentModal();
+        }
+      });
+    }
+    if (els.btnBackToSources) {
+      els.btnBackToSources.addEventListener('click', () => {
+        showSourcesList();
       });
     }
 
     // Global Keyboard Shortcuts
     window.addEventListener('keydown', (e) => {
+      // 'Escape' closes sources modal or returns to previous view
+      if (e.key === 'Escape') {
+        if (els.lexSourcesModal && els.lexSourcesModal.style.display !== 'none') {
+          closeSourceDocumentModal();
+          return;
+        }
+        if (state.activeTab === 'transcript-view') {
+          switchTab(state.previousTab || 'search-view');
+          return;
+        }
+      }
       // '/' to focus search
       if (e.key === '/' && document.activeElement !== els.searchInput && document.activeElement !== els.lexiconInput) {
         e.preventDefault();
         els.searchInput.focus();
         els.searchInput.select();
-      }
-      // 'Escape' returns to previous view
-      if (e.key === 'Escape' && state.activeTab === 'transcript-view') {
-        switchTab(state.previousTab || 'search-view');
       }
       // Space toggles audio (when not typing in an input)
       if (e.code === 'Space' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
@@ -2193,7 +2250,21 @@
     }
 
     const notes = item.context_keywords || item.doctrinal_notes || '';
-    const source = item.source_title ? `${item.source_title}${item.source_author ? ' — ' + item.source_author : ''}` : (item.source || 'SuttaCentral / Bodhinyana Reference');
+    const sourceLabel = item.source_title
+      ? `${item.source_title}${item.source_author ? ' — ' + item.source_author : ''}`
+      : (item.source || 'SuttaCentral / Bodhinyana Reference');
+
+    let sourceHtml = escapeHtml(sourceLabel);
+    if (item.source_url) {
+      sourceHtml = `
+        <a href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer" class="lexicon-source-link" title="Open source authority (${escapeHtml(item.source_url)})">
+          ${escapeHtml(sourceLabel)} <span class="external-link-arrow">↗</span>
+        </a>
+      `;
+    }
+    if (item.source_document_id) {
+      sourceHtml += ` <button type="button" class="btn-lexicon-view-doc" data-doc-id="${escapeHtml(String(item.source_document_id))}" title="Read offline reference document in viewer">📜 View Offline Document</button>`;
+    }
 
     return `
       <div class="lexicon-card">
@@ -2215,7 +2286,7 @@
           </div>
         ` : ''}
         ${notes ? `<div class="lexicon-meta"><strong>Context / Keywords:</strong> ${escapeHtml(notes)}</div>` : ''}
-        <div class="lexicon-meta"><strong>Authority Source:</strong> ${escapeHtml(source)}</div>
+        <div class="lexicon-meta"><strong>Authority Source:</strong> ${sourceHtml}</div>
         <div class="lexicon-actions">
           <button type="button" class="btn-lexicon-talks" data-term="${escapeHtml(item.pali_plain)}" title="Search transcripts for this Pali term">
             🔍 Find Talks Mentioning "${escapeHtml(item.pali_plain)}"
@@ -2337,6 +2408,144 @@
       els.lexiconResults.innerHTML = entries.map(item => renderLexiconCard(item)).join('');
     } catch (err) {
       console.error('Lexicon search failed:', err);
+    }
+  }
+
+  // ==========================================================================
+  // Canonical Authority Source Documents Modal & Viewer
+  // ==========================================================================
+
+  let cachedSourceDocs = null;
+
+  async function openSourceDocumentModal(targetDocId = null) {
+    if (!els.lexSourcesModal) return;
+    els.lexSourcesModal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    if (targetDocId) {
+      await loadAndDisplaySourceDocument(targetDocId);
+    } else {
+      await loadSourceDocumentsList();
+    }
+  }
+
+  function closeSourceDocumentModal() {
+    if (!els.lexSourcesModal) return;
+    els.lexSourcesModal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  function showSourcesList() {
+    if (els.sourcesListContainer) els.sourcesListContainer.style.display = 'block';
+    if (els.sourceDocViewer) els.sourceDocViewer.style.display = 'none';
+  }
+
+  async function loadSourceDocumentsList() {
+    showSourcesList();
+    if (els.sourcesLoadingSpinner) els.sourcesLoadingSpinner.style.display = 'block';
+    if (els.sourcesCardsGrid) els.sourcesCardsGrid.style.display = 'none';
+
+    try {
+      if (!cachedSourceDocs) {
+        cachedSourceDocs = await dbService.getSourceDocuments();
+      }
+      renderSourceDocumentsList(cachedSourceDocs);
+    } catch (err) {
+      console.error('Failed to load source documents:', err);
+      if (els.sourcesLoadingSpinner) {
+        els.sourcesLoadingSpinner.textContent = 'Failed to load source documents.';
+      }
+    }
+  }
+
+  function renderSourceDocumentsList(docs) {
+    if (!els.sourcesCardsGrid) return;
+    if (els.sourcesLoadingSpinner) els.sourcesLoadingSpinner.style.display = 'none';
+    els.sourcesCardsGrid.style.display = 'grid';
+
+    if (!docs || docs.length === 0) {
+      els.sourcesCardsGrid.innerHTML = '<div class="empty-state">No source documents available.</div>';
+      return;
+    }
+
+    els.sourcesCardsGrid.innerHTML = docs.map(doc => {
+      const sizeKb = doc.uncompressed_bytes ? (doc.uncompressed_bytes / 1024).toFixed(1) + ' KB' : 'N/A';
+      return `
+        <div class="source-doc-card">
+          <div class="source-card-top">
+            <div>
+              <h4 class="source-card-title">${escapeHtml(doc.title)}</h4>
+              <div class="source-card-author">Author: <strong>${escapeHtml(doc.author)}</strong></div>
+              <div class="source-card-publisher">Publisher: ${escapeHtml(doc.publisher || 'Unknown')}</div>
+            </div>
+          </div>
+          <div class="source-card-meta">
+            <span>📅 Retrieved: ${escapeHtml(doc.retrieved_date || 'N/A')}</span>
+            <span>📄 Format: ${escapeHtml(doc.content_format || 'text')}</span>
+            <span>💾 Size: ${escapeHtml(sizeKb)}</span>
+            <span class="source-badge-sha" title="SHA-256 Checksum">🔒 SHA-256: ${escapeHtml((doc.sha256 || '').slice(0, 16))}...</span>
+          </div>
+          <div class="source-card-actions">
+            <a href="${escapeHtml(doc.url)}" target="_blank" rel="noopener noreferrer" class="lexicon-source-link" title="Visit canonical source URL">
+              ${escapeHtml(doc.url)} <span class="external-link-arrow">↗</span>
+            </a>
+            <div class="source-card-actions-right">
+              <button type="button" class="btn-primary btn-view-doc-content" data-doc-id="${escapeHtml(String(doc.id))}">
+                📖 Read Offline Document
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Attach click events on "Read Offline Document" buttons
+    els.sourcesCardsGrid.querySelectorAll('.btn-view-doc-content').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const docId = btn.dataset.docId;
+        if (docId) loadAndDisplaySourceDocument(docId);
+      });
+    });
+  }
+
+  async function loadAndDisplaySourceDocument(docId) {
+    if (els.sourcesListContainer) els.sourcesListContainer.style.display = 'none';
+    if (els.sourceDocViewer) els.sourceDocViewer.style.display = 'flex';
+    if (els.viewerRawText) els.viewerRawText.textContent = 'Loading document content...';
+
+    try {
+      const doc = await dbService.getSourceDocument(docId);
+      if (!doc) {
+        if (els.viewerRawText) els.viewerRawText.textContent = 'Document content not found.';
+        return;
+      }
+
+      if (els.viewerDocTitle) els.viewerDocTitle.textContent = doc.title || 'Untitled Document';
+      if (els.viewerDocAuthor) els.viewerDocAuthor.textContent = `${doc.author || 'Unknown'} • ${doc.publisher || ''}`;
+      if (els.viewerRemoteBtn) {
+        els.viewerRemoteBtn.href = doc.url || '#';
+        els.viewerRemoteBtn.style.display = doc.url ? 'inline-flex' : 'none';
+      }
+      if (els.viewerSha256Badge) {
+        els.viewerSha256Badge.textContent = `SHA-256: ${(doc.sha256 || '').slice(0, 20)}...`;
+        els.viewerSha256Badge.title = `Full SHA-256 Checksum: ${doc.sha256}`;
+      }
+      if (els.viewerFormatBadge) {
+        els.viewerFormatBadge.textContent = `Format: ${doc.content_format || 'text'}`;
+      }
+      if (els.viewerSizeBadge) {
+        const kb = doc.uncompressed_bytes ? (doc.uncompressed_bytes / 1024).toFixed(1) + ' KB' : '';
+        els.viewerSizeBadge.textContent = `Size: ${kb}`;
+      }
+
+      if (els.viewerRawText) {
+        els.viewerRawText.textContent = doc.content || '(No text content available)';
+      }
+    } catch (err) {
+      console.error('Failed to load document content:', err);
+      if (els.viewerRawText) {
+        els.viewerRawText.textContent = `Error loading document content: ${err.message || String(err)}`;
+      }
     }
   }
 
