@@ -771,7 +771,7 @@ function handleGetLexiconPage({
 
   if (mode === 'core') {
     const placeholders = CORE_CANONICAL_TERMS.map(() => '?').join(', ');
-    whereParts.push(`(translation_brahm IS NOT NULL OR category != 'sutta_canon' OR pali_plain IN (${placeholders}))`);
+    whereParts.push(`(translation_brahm IS NOT NULL OR category IN ('meditation', 'hindrance', 'monastery', 'retreat_centre', 'monastic_calendar') OR pali_plain IN (${placeholders}))`);
     params.push(...CORE_CANONICAL_TERMS);
   }
 
