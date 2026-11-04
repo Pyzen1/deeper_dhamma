@@ -1172,6 +1172,9 @@
     els.tabSearchBtn.addEventListener('click', () => switchTab('search-view'));
     els.tabBrowseBtn.addEventListener('click', () => switchTab('browse-view'));
     els.tabLexiconBtn.addEventListener('click', () => switchTab('lexicon-view'));
+    if (els.tabDocsBtn) {
+      els.tabDocsBtn.addEventListener('click', () => switchTab('documents-view'));
+    }
     if (els.tabTranscriptBtn) {
       els.tabTranscriptBtn.addEventListener('click', () => switchTab('transcript-view'));
     }
@@ -2507,26 +2510,38 @@
     }
 
     const content = doc.content;
-    const hasTable = content.includes('<table>') && content.includes('</table>');
+    const hasTable = content.includes('<table') && content.includes('</table>');
 
     if (hasTable) {
-      const tableStartIdx = content.indexOf('<table>');
+      let tableStartIdx = content.indexOf('<div class="doc-table-container">');
+      if (tableStartIdx === -1) {
+        tableStartIdx = content.indexOf('<table');
+      }
       const tableEndIdx = content.lastIndexOf('</table>') + 8;
+      let postEndIdx = tableEndIdx;
+      const afterTable = content.slice(tableEndIdx).trimStart();
+      if (afterTable.startsWith('</div>')) {
+        postEndIdx = content.indexOf('</div>', tableEndIdx) + 6;
+      }
+
       const preamble = content.slice(0, tableStartIdx);
-      const rawTableHtml = content.slice(tableStartIdx, tableEndIdx);
+      const postamble = content.slice(postEndIdx);
+      let rawTableHtml = content.slice(tableStartIdx, postEndIdx);
 
       const renderedPreamble = renderSimpleMarkdown(preamble);
+      const renderedPostamble = postamble.trim() ? renderSimpleMarkdown(postamble) : '';
 
-      // Enhance table with styling classes
-      let enhancedTable = rawTableHtml;
-      if (!enhancedTable.includes('doc-table-container')) {
-        enhancedTable = enhancedTable
-          .replace('<table>', '<div class="doc-table-container"><table class="doc-rendered-table" id="doc-active-table">')
-          .replace('</table>', '</table></div>');
+      // Ensure wrapped in doc-table-container
+      if (!rawTableHtml.includes('doc-table-container')) {
+        rawTableHtml = `<div class="doc-table-container">${rawTableHtml}</div>`;
+      }
+      // Ensure table element has class doc-rendered-table and id doc-active-table
+      if (!rawTableHtml.includes('doc-rendered-table')) {
+        rawTableHtml = rawTableHtml.replace(/<table\b([^>]*)>/, '<table class="doc-rendered-table" id="doc-active-table"$1>');
       }
 
       // 3-column rows without classes (e.g. Doc 1: Pali, Bodhi, Sujato)
-      enhancedTable = enhancedTable.replace(/<tr>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/g, (match, pali, bodhi, sujato) => {
+      rawTableHtml = rawTableHtml.replace(/<tr>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/g, (match, pali, bodhi, sujato) => {
         return `<tr class="doc-table-data-row">
           <td class="td-pali">${pali}</td>
           <td class="td-bodhi">${bodhi}</td>
@@ -2535,7 +2550,7 @@
       });
 
       // 2-column rows without classes (e.g. Doc 2: Pali, Brahmali)
-      enhancedTable = enhancedTable.replace(/<tr>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/g, (match, pali, brahmali) => {
+      rawTableHtml = rawTableHtml.replace(/<tr>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/g, (match, pali, brahmali) => {
         return `<tr class="doc-table-data-row">
           <td class="td-pali">${pali}</td>
           <td class="td-brahmali">${brahmali}</td>
@@ -2543,7 +2558,7 @@
       });
 
       // Ensure all rows inside tbody have .doc-table-data-row class
-      enhancedTable = enhancedTable.replace(/<tbody>([\s\S]*?)<\/tbody>/, (match, tbodyContent) => {
+      rawTableHtml = rawTableHtml.replace(/<tbody>([\s\S]*?)<\/tbody>/, (match, tbodyContent) => {
         const enhancedBody = tbodyContent.replace(/<tr\b([^>]*)>/g, (trMatch, attrs) => {
           if (attrs && attrs.includes('doc-table-data-row')) return trMatch;
           return `<tr class="doc-table-data-row"${attrs || ''}>`;
@@ -2553,7 +2568,8 @@
 
       return `
         <div class="doc-preamble-section">${renderedPreamble}</div>
-        ${enhancedTable}
+        ${rawTableHtml}
+        ${renderedPostamble}
       `;
     }
 
@@ -2642,42 +2658,57 @@
     return out;
   }
 
+  function normalizePaliSearch(text) {
+    if (!text) return '';
+    return text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[ṁṃŋ]/g, 'm')
+      .toLowerCase();
+  }
+
   function filterActiveDocument(query) {
-    const q = (query || '').trim().toLowerCase();
-    state.documents.filterQuery = q;
+    const rawQ = (query || '').trim().toLowerCase();
+    const q = normalizePaliSearch(rawQ);
+    state.documents.filterQuery = rawQ;
 
     if (els.clearDocFilterBtn) {
-      els.clearDocFilterBtn.style.display = q ? 'inline-block' : 'none';
+      els.clearDocFilterBtn.style.display = rawQ ? 'inline-block' : 'none';
     }
 
     const tableRows = els.docRenderedBody ? els.docRenderedBody.querySelectorAll('.doc-table-data-row') : [];
     if (tableRows.length > 0) {
-      // In table mode (Doc 1)
       let visibleCount = 0;
       tableRows.forEach(row => {
         const text = row.textContent.toLowerCase();
-        const matches = !q || text.includes(q);
+        const normText = normalizePaliSearch(text);
+        const matches = !q || text.includes(rawQ) || normText.includes(q);
         row.classList.toggle('doc-row-hidden', !matches);
         if (matches) visibleCount++;
       });
       if (els.docFilterCount) {
-        els.docFilterCount.textContent = q ? `Showing ${visibleCount} of ${tableRows.length} terms` : `${tableRows.length} terms`;
+        els.docFilterCount.textContent = rawQ 
+          ? `Showing ${visibleCount.toLocaleString()} of ${tableRows.length.toLocaleString()} terms`
+          : `${tableRows.length.toLocaleString()} terms`;
       }
       return;
     }
 
-    // In markdown list mode (Doc 2 & 3)
+    // In markdown list mode (Doc 2 & 3 fallback)
     const listItems = els.docRenderedBody ? els.docRenderedBody.querySelectorAll('.doc-list-item') : [];
     if (listItems.length > 0) {
       let visibleCount = 0;
       listItems.forEach(item => {
         const text = item.textContent.toLowerCase();
-        const matches = !q || text.includes(q);
+        const normText = normalizePaliSearch(text);
+        const matches = !q || text.includes(rawQ) || normText.includes(q);
         item.style.display = matches ? '' : 'none';
         if (matches) visibleCount++;
       });
       if (els.docFilterCount) {
-        els.docFilterCount.textContent = q ? `Showing ${visibleCount} of ${listItems.length} items` : `${listItems.length} items`;
+        els.docFilterCount.textContent = rawQ 
+          ? `Showing ${visibleCount.toLocaleString()} of ${listItems.length.toLocaleString()} items`
+          : `${listItems.length.toLocaleString()} items`;
       }
     }
   }

@@ -1586,6 +1586,27 @@ select:hover, select:focus {
   line-height: 1.6;
 }
 
+.doc-rendered-body a,
+.doc-intro-lead a,
+.doc-preamble-section a,
+.doc-rendered-table a {
+  color: var(--accent-saffron-light, #fbbf24);
+  text-decoration: underline;
+  text-decoration-color: rgba(245, 158, 11, 0.45);
+  text-underline-offset: 3px;
+  font-weight: 600;
+  transition: all var(--transition-fast, 0.15s ease);
+}
+
+.doc-rendered-body a:hover,
+.doc-intro-lead a:hover,
+.doc-preamble-section a:hover,
+.doc-rendered-table a:hover {
+  color: #ffffff;
+  text-decoration-color: var(--accent-saffron, #f59e0b);
+  text-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
 .doc-rendered-body p {
   margin-bottom: 0.85rem;
 }
