@@ -1,4 +1,4 @@
-00"""
+"""
 Script to build the comprehensive Buddhism Lexicon SQLite Database (buddhism_lexicon.db).
 
 Stores:
@@ -638,11 +638,24 @@ def get_standard_phrase_rules() -> List[Dict]:
 
 def get_source_document_records() -> List[Dict]:
     """Prepares the three canonical source reference documents for compressed offline storage."""
-    # 1. SuttaCentral Bodhi & Sujato Glossary HTML
+    # 1. SuttaCentral Bodhi & Sujato Glossary HTML Table
     if SC_DISCOURSE_CACHE.exists():
-        sc_text = SC_DISCOURSE_CACHE.read_text(encoding="utf-8")
+        raw_html = SC_DISCOURSE_CACHE.read_text(encoding="utf-8")
+        intro_m = re.search(r"<p>(This list is based on a file prepared by John Kelly.*?)</p>", raw_html, re.DOTALL)
+        table_m = re.search(r"<table>.*?</table>", raw_html, re.DOTALL)
+        intro_text = intro_m.group(1).strip() if intro_m else "Pali glossary comparative concordance for Bhikkhus Bodhi and Sujato."
+        table_html = table_m.group(0).strip() if table_m else ""
+        sc_text = f"""# Pali Glossary for Bhikkhus Bodhi and Sujato
+**Authors:** Bhikkhu Sujato, Bhikkhu Bodhi, John Kelly
+**Publisher:** SuttaCentral
+**Canonical Source URL:** https://discourse.suttacentral.net/t/pali-glossary-for-bhikkhus-bodhi-and-sujato/12008
+
+<p class="doc-intro-lead">{intro_text}</p>
+
+{table_html}
+"""
     else:
-        sc_text = "<html><body><h1>SuttaCentral Pali Glossary</h1><p>Source cache.</p></body></html>"
+        sc_text = "# SuttaCentral Pali Glossary\n\nCanonical source reference."
 
     # 2. SuttaCentral Bhikkhu Brahmali Vinaya Reference Text
     brahmali_text = """# SuttaCentral Vinaya Piṭaka: Monastic Law of the Theravāda School
@@ -687,7 +700,7 @@ URL: https://bswa.org/teachings/
             "author": "Bhikkhu Sujato, Bhikkhu Bodhi, John Kelly",
             "publisher": "SuttaCentral",
             "retrieved_date": "2026-10-22",
-            "content_format": "text/html",
+            "content_format": "text/markdown",
             "text": sc_text,
         },
         {

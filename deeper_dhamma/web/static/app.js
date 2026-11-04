@@ -39,6 +39,12 @@
       isExpandedMobile: false,
       loadedOnce: false,
     },
+    documents: {
+      activeDocId: 1,
+      cachedDocs: {},
+      loadedOnce: false,
+      filterQuery: '',
+    },
   };
 
   // ==========================================================================
@@ -141,20 +147,22 @@
     lexPageIndicator: document.getElementById('lex-page-indicator'),
     lexLimitSelect: document.getElementById('lex-limit-select'),
     btnLexSources: document.getElementById('btn-lex-sources'),
-    lexSourcesModal: document.getElementById('lexicon-sources-modal'),
-    btnCloseSourcesModal: document.getElementById('btn-close-sources-modal'),
-    sourcesListContainer: document.getElementById('sources-list-container'),
-    sourcesLoadingSpinner: document.getElementById('sources-loading-spinner'),
-    sourcesCardsGrid: document.getElementById('sources-cards-grid'),
-    sourceDocViewer: document.getElementById('source-doc-viewer'),
-    btnBackToSources: document.getElementById('btn-back-to-sources'),
-    viewerDocTitle: document.getElementById('viewer-doc-title'),
-    viewerDocAuthor: document.getElementById('viewer-doc-author'),
-    viewerRemoteBtn: document.getElementById('viewer-remote-btn'),
-    viewerSha256Badge: document.getElementById('viewer-sha256-badge'),
-    viewerFormatBadge: document.getElementById('viewer-format-badge'),
-    viewerSizeBadge: document.getElementById('viewer-size-badge'),
-    viewerRawText: document.getElementById('viewer-raw-text'),
+
+    // Documents View Elements
+    tabDocsBtn: document.getElementById('tab-documents-btn'),
+    documentsView: document.getElementById('documents-view'),
+    docTabsBar: document.getElementById('doc-tabs-bar'),
+    docActiveTitle: document.getElementById('doc-active-title'),
+    docActiveByline: document.getElementById('doc-active-byline'),
+    docActiveRemoteLink: document.getElementById('doc-active-remote-link'),
+    docChipRetrieved: document.getElementById('doc-chip-retrieved'),
+    docChipFormat: document.getElementById('doc-chip-format'),
+    docChipSize: document.getElementById('doc-chip-size'),
+    docChipSha: document.getElementById('doc-chip-sha'),
+    docFilterInput: document.getElementById('doc-filter-input'),
+    clearDocFilterBtn: document.getElementById('clear-doc-filter-btn'),
+    docFilterCount: document.getElementById('doc-filter-count'),
+    docRenderedBody: document.getElementById('doc-rendered-body'),
 
     // Transcript View Elements
     transcriptBackBtn: document.getElementById('transcript-back-btn'),
@@ -1367,45 +1375,57 @@
 
         const docBtn = e.target.closest('.btn-lexicon-view-doc');
         if (docBtn) {
-          const docId = docBtn.dataset.docId;
-          if (docId) {
-            openSourceDocumentModal(docId);
-          }
+          const docId = docBtn.dataset.docId || 1;
+          const term = docBtn.closest('.lexicon-card')?.querySelector('.pali-term')?.textContent || '';
+          switchTab('documents-view');
+          loadDocumentInView(docId, term);
           return;
         }
       });
     }
 
-    // Lexicon Canonical Authority Sources Modal
+    // Lexicon Canonical Authority Sources Navigation
     if (els.btnLexSources) {
       els.btnLexSources.addEventListener('click', () => {
-        openSourceDocumentModal();
+        switchTab('documents-view');
       });
     }
-    if (els.btnCloseSourcesModal) {
-      els.btnCloseSourcesModal.addEventListener('click', () => {
-        closeSourceDocumentModal();
-      });
-    }
-    if (els.lexSourcesModal) {
-      els.lexSourcesModal.addEventListener('click', (e) => {
-        if (e.target === els.lexSourcesModal) {
-          closeSourceDocumentModal();
+
+    // Authority Documents View Navigation & In-Document Filtering
+    if (els.docTabsBar) {
+      els.docTabsBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.doc-tab-btn');
+        if (!btn) return;
+        const docId = btn.dataset.docId;
+        if (docId) {
+          loadDocumentInView(docId);
         }
       });
     }
-    if (els.btnBackToSources) {
-      els.btnBackToSources.addEventListener('click', () => {
-        showSourcesList();
+
+    if (els.docFilterInput) {
+      els.docFilterInput.addEventListener('input', (e) => {
+        filterActiveDocument(e.target.value);
+      });
+    }
+
+    if (els.clearDocFilterBtn) {
+      els.clearDocFilterBtn.addEventListener('click', () => {
+        if (els.docFilterInput) {
+          els.docFilterInput.value = '';
+          filterActiveDocument('');
+          els.docFilterInput.focus();
+        }
       });
     }
 
     // Global Keyboard Shortcuts
     window.addEventListener('keydown', (e) => {
-      // 'Escape' closes sources modal or returns to previous view
+      // 'Escape' clears doc filter or returns to previous view
       if (e.key === 'Escape') {
-        if (els.lexSourcesModal && els.lexSourcesModal.style.display !== 'none') {
-          closeSourceDocumentModal();
+        if (state.activeTab === 'documents-view' && els.docFilterInput && els.docFilterInput.value) {
+          els.docFilterInput.value = '';
+          filterActiveDocument('');
           return;
         }
         if (state.activeTab === 'transcript-view') {
@@ -1414,7 +1434,7 @@
         }
       }
       // '/' to focus search
-      if (e.key === '/' && document.activeElement !== els.searchInput && document.activeElement !== els.lexiconInput) {
+      if (e.key === '/' && document.activeElement !== els.searchInput && document.activeElement !== els.lexiconInput && document.activeElement !== els.docFilterInput) {
         e.preventDefault();
         els.searchInput.focus();
         els.searchInput.select();
@@ -1440,6 +1460,9 @@
     }
     if (viewId === 'lexicon-view' && (!state.lexicon || !state.lexicon.loadedOnce)) {
       loadLexiconView();
+    }
+    if (viewId === 'documents-view') {
+      loadDocumentInView(state.documents.activeDocId, state.documents.filterQuery);
     }
   }
 
@@ -2412,139 +2435,231 @@
   }
 
   // ==========================================================================
-  // Canonical Authority Source Documents Modal & Viewer
+  // Canonical Authority Source Documents Tab & Rendered Viewer
   // ==========================================================================
 
-  let cachedSourceDocs = null;
+  async function loadDocumentInView(docId = 1, filterTerm = '') {
+    state.documents.activeDocId = parseInt(docId, 10) || 1;
 
-  async function openSourceDocumentModal(targetDocId = null) {
-    if (!els.lexSourcesModal) return;
-    els.lexSourcesModal.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-
-    if (targetDocId) {
-      await loadAndDisplaySourceDocument(targetDocId);
-    } else {
-      await loadSourceDocumentsList();
-    }
-  }
-
-  function closeSourceDocumentModal() {
-    if (!els.lexSourcesModal) return;
-    els.lexSourcesModal.style.display = 'none';
-    document.body.style.overflow = '';
-  }
-
-  function showSourcesList() {
-    if (els.sourcesListContainer) els.sourcesListContainer.style.display = 'block';
-    if (els.sourceDocViewer) els.sourceDocViewer.style.display = 'none';
-  }
-
-  async function loadSourceDocumentsList() {
-    showSourcesList();
-    if (els.sourcesLoadingSpinner) els.sourcesLoadingSpinner.style.display = 'block';
-    if (els.sourcesCardsGrid) els.sourcesCardsGrid.style.display = 'none';
-
-    try {
-      if (!cachedSourceDocs) {
-        cachedSourceDocs = await dbService.getSourceDocuments();
-      }
-      renderSourceDocumentsList(cachedSourceDocs);
-    } catch (err) {
-      console.error('Failed to load source documents:', err);
-      if (els.sourcesLoadingSpinner) {
-        els.sourcesLoadingSpinner.textContent = 'Failed to load source documents.';
-      }
-    }
-  }
-
-  function renderSourceDocumentsList(docs) {
-    if (!els.sourcesCardsGrid) return;
-    if (els.sourcesLoadingSpinner) els.sourcesLoadingSpinner.style.display = 'none';
-    els.sourcesCardsGrid.style.display = 'grid';
-
-    if (!docs || docs.length === 0) {
-      els.sourcesCardsGrid.innerHTML = '<div class="empty-state">No source documents available.</div>';
-      return;
-    }
-
-    els.sourcesCardsGrid.innerHTML = docs.map(doc => {
-      const sizeKb = doc.uncompressed_bytes ? (doc.uncompressed_bytes / 1024).toFixed(1) + ' KB' : 'N/A';
-      return `
-        <div class="source-doc-card">
-          <div class="source-card-top">
-            <div>
-              <h4 class="source-card-title">${escapeHtml(doc.title)}</h4>
-              <div class="source-card-author">Author: <strong>${escapeHtml(doc.author)}</strong></div>
-              <div class="source-card-publisher">Publisher: ${escapeHtml(doc.publisher || 'Unknown')}</div>
-            </div>
-          </div>
-          <div class="source-card-meta">
-            <span>📅 Retrieved: ${escapeHtml(doc.retrieved_date || 'N/A')}</span>
-            <span>📄 Format: ${escapeHtml(doc.content_format || 'text')}</span>
-            <span>💾 Size: ${escapeHtml(sizeKb)}</span>
-            <span class="source-badge-sha" title="SHA-256 Checksum">🔒 SHA-256: ${escapeHtml((doc.sha256 || '').slice(0, 16))}...</span>
-          </div>
-          <div class="source-card-actions">
-            <a href="${escapeHtml(doc.url)}" target="_blank" rel="noopener noreferrer" class="lexicon-source-link" title="Visit canonical source URL">
-              ${escapeHtml(doc.url)} <span class="external-link-arrow">↗</span>
-            </a>
-            <div class="source-card-actions-right">
-              <button type="button" class="btn-primary btn-view-doc-content" data-doc-id="${escapeHtml(String(doc.id))}">
-                📖 Read Offline Document
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    // Attach click events on "Read Offline Document" buttons
-    els.sourcesCardsGrid.querySelectorAll('.btn-view-doc-content').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const docId = btn.dataset.docId;
-        if (docId) loadAndDisplaySourceDocument(docId);
-      });
+    // Update active tab button in doc-tabs-bar
+    document.querySelectorAll('.doc-tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.docId === String(state.documents.activeDocId));
     });
-  }
 
-  async function loadAndDisplaySourceDocument(docId) {
-    if (els.sourcesListContainer) els.sourcesListContainer.style.display = 'none';
-    if (els.sourceDocViewer) els.sourceDocViewer.style.display = 'flex';
-    if (els.viewerRawText) els.viewerRawText.textContent = 'Loading document content...';
+    if (els.docRenderedBody) {
+      els.docRenderedBody.innerHTML = '<div class="loading-spinner">Loading canonical document...</div>';
+    }
 
     try {
-      const doc = await dbService.getSourceDocument(docId);
+      let doc = state.documents.cachedDocs[state.documents.activeDocId];
       if (!doc) {
-        if (els.viewerRawText) els.viewerRawText.textContent = 'Document content not found.';
+        doc = await dbService.getSourceDocument(state.documents.activeDocId);
+        if (doc) {
+          state.documents.cachedDocs[state.documents.activeDocId] = doc;
+        }
+      }
+
+      if (!doc) {
+        if (els.docRenderedBody) {
+          els.docRenderedBody.innerHTML = '<div class="empty-state">Document not found.</div>';
+        }
         return;
       }
 
-      if (els.viewerDocTitle) els.viewerDocTitle.textContent = doc.title || 'Untitled Document';
-      if (els.viewerDocAuthor) els.viewerDocAuthor.textContent = `${doc.author || 'Unknown'} • ${doc.publisher || ''}`;
-      if (els.viewerRemoteBtn) {
-        els.viewerRemoteBtn.href = doc.url || '#';
-        els.viewerRemoteBtn.style.display = doc.url ? 'inline-flex' : 'none';
+      // Update Header Metadata
+      if (els.docActiveTitle) els.docActiveTitle.textContent = doc.title;
+      if (els.docActiveByline) els.docActiveByline.textContent = `Author: ${doc.author} • Publisher: ${doc.publisher || 'Canonical Reference'}`;
+      if (els.docActiveRemoteLink) {
+        els.docActiveRemoteLink.href = doc.url || '#';
       }
-      if (els.viewerSha256Badge) {
-        els.viewerSha256Badge.textContent = `SHA-256: ${(doc.sha256 || '').slice(0, 20)}...`;
-        els.viewerSha256Badge.title = `Full SHA-256 Checksum: ${doc.sha256}`;
+      if (els.docChipRetrieved) els.docChipRetrieved.textContent = `📅 Retrieved: ${doc.retrieved_date || 'N/A'}`;
+      if (els.docChipFormat) els.docChipFormat.textContent = `📄 Format: ${doc.content_format || 'text/markdown'}`;
+      if (els.docChipSize) {
+        const kb = doc.uncompressed_bytes ? (doc.uncompressed_bytes / 1024).toFixed(1) + ' KB' : 'N/A';
+        els.docChipSize.textContent = `💾 Size: ${kb}`;
       }
-      if (els.viewerFormatBadge) {
-        els.viewerFormatBadge.textContent = `Format: ${doc.content_format || 'text'}`;
-      }
-      if (els.viewerSizeBadge) {
-        const kb = doc.uncompressed_bytes ? (doc.uncompressed_bytes / 1024).toFixed(1) + ' KB' : '';
-        els.viewerSizeBadge.textContent = `Size: ${kb}`;
+      if (els.docChipSha) {
+        els.docChipSha.textContent = `🔒 SHA-256: ${(doc.sha256 || '').slice(0, 20)}...`;
+        els.docChipSha.title = `Full SHA-256 Checksum: ${doc.sha256}`;
       }
 
-      if (els.viewerRawText) {
-        els.viewerRawText.textContent = doc.content || '(No text content available)';
+      // Render Content with Rich Formatting & Tables
+      if (els.docRenderedBody) {
+        els.docRenderedBody.innerHTML = renderDocumentContent(doc);
+      }
+
+      // Set filter if provided
+      if (els.docFilterInput) {
+        els.docFilterInput.value = filterTerm || '';
+        filterActiveDocument(filterTerm || '');
       }
     } catch (err) {
-      console.error('Failed to load document content:', err);
-      if (els.viewerRawText) {
-        els.viewerRawText.textContent = `Error loading document content: ${err.message || String(err)}`;
+      console.error('Failed to load document:', err);
+      if (els.docRenderedBody) {
+        els.docRenderedBody.innerHTML = `<div class="empty-state">Failed to load document: ${escapeHtml(err.message || String(err))}</div>`;
+      }
+    }
+  }
+
+  function renderDocumentContent(doc) {
+    if (!doc || !doc.content) {
+      return '<div class="empty-state">No document content available.</div>';
+    }
+
+    const content = doc.content;
+    const isDoc1Table = content.includes('<table>') && content.includes('</table>');
+
+    if (isDoc1Table) {
+      // Document 1: SuttaCentral comparative table of Bodhi vs Sujato
+      const tableStartIdx = content.indexOf('<table>');
+      const tableEndIdx = content.indexOf('</table>') + 8;
+      const preamble = content.slice(0, tableStartIdx);
+      const rawTableHtml = content.slice(tableStartIdx, tableEndIdx);
+
+      const renderedPreamble = renderSimpleMarkdown(preamble);
+
+      // Enhance table with styling classes
+      let enhancedTable = rawTableHtml
+        .replace('<table>', '<div class="doc-table-container"><table class="doc-rendered-table" id="doc-active-table">')
+        .replace('</table>', '</table></div>');
+
+      // Add column semantic classes to rows
+      enhancedTable = enhancedTable
+        .replace(/<tr>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/g, (match, pali, bodhi, sujato) => {
+          return `<tr class="doc-table-data-row">
+            <td class="td-pali">${pali}</td>
+            <td class="td-bodhi">${bodhi}</td>
+            <td class="td-sujato">${sujato}</td>
+          </tr>`;
+        });
+
+      return `
+        <div class="doc-preamble-section">${renderedPreamble}</div>
+        ${enhancedTable}
+      `;
+    }
+
+    // Documents 2 & 3: Clean rich Markdown
+    return renderSimpleMarkdown(content);
+  }
+
+  function renderSimpleMarkdown(md) {
+    if (!md) return '';
+    const lines = md.split(/\r?\n/);
+    const htmlParts = [];
+    let inList = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i].trim();
+      if (!line) {
+        if (inList) {
+          htmlParts.push('</ul>');
+          inList = false;
+        }
+        continue;
+      }
+
+      // Check if line is already an HTML block tag (like <p class="doc-intro-lead">...</p>)
+      if (line.startsWith('<p') || line.startsWith('<div') || line.startsWith('</')) {
+        if (inList) { htmlParts.push('</ul>'); inList = false; }
+        htmlParts.push(line);
+        continue;
+      }
+
+      // Headers
+      if (line.startsWith('### ')) {
+        if (inList) { htmlParts.push('</ul>'); inList = false; }
+        htmlParts.push(`<h4>${formatInlineMd(line.slice(4))}</h4>`);
+        continue;
+      }
+      if (line.startsWith('## ')) {
+        if (inList) { htmlParts.push('</ul>'); inList = false; }
+        htmlParts.push(`<h3 class="doc-section-title">${formatInlineMd(line.slice(3))}</h3>`);
+        continue;
+      }
+      if (line.startsWith('# ')) {
+        if (inList) { htmlParts.push('</ul>'); inList = false; }
+        // Skip H1 title as it's shown in the card header
+        continue;
+      }
+
+      // Bullet list items
+      if (line.startsWith('- ') || line.startsWith('* ')) {
+        if (!inList) {
+          htmlParts.push('<ul>');
+          inList = true;
+        }
+        const itemText = line.slice(2);
+        htmlParts.push(`<li class="doc-list-item">${formatInlineMd(itemText)}</li>`);
+        continue;
+      }
+
+      if (inList) {
+        htmlParts.push('</ul>');
+        inList = false;
+      }
+
+      // Paragraph
+      htmlParts.push(`<p>${formatInlineMd(line)}</p>`);
+    }
+
+    if (inList) {
+      htmlParts.push('</ul>');
+    }
+
+    return htmlParts.join('\n');
+  }
+
+  function formatInlineMd(text) {
+    if (!text) return '';
+    let out = text;
+    // Bold **text**
+    out = out.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Italic *text*
+    out = out.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    // Links [text](url)
+    out = out.replace(/\[(.*?)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="lexicon-source-link">$1 ↗</a>');
+    // Standalone URLs (not preceded by href=")
+    out = out.replace(/(^|[^"=])(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="lexicon-source-link">$2 ↗</a>');
+    return out;
+  }
+
+  function filterActiveDocument(query) {
+    const q = (query || '').trim().toLowerCase();
+    state.documents.filterQuery = q;
+
+    if (els.clearDocFilterBtn) {
+      els.clearDocFilterBtn.style.display = q ? 'inline-block' : 'none';
+    }
+
+    const tableRows = els.docRenderedBody ? els.docRenderedBody.querySelectorAll('.doc-table-data-row') : [];
+    if (tableRows.length > 0) {
+      // In table mode (Doc 1)
+      let visibleCount = 0;
+      tableRows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        const matches = !q || text.includes(q);
+        row.classList.toggle('doc-row-hidden', !matches);
+        if (matches) visibleCount++;
+      });
+      if (els.docFilterCount) {
+        els.docFilterCount.textContent = q ? `Showing ${visibleCount} of ${tableRows.length} terms` : `${tableRows.length} terms`;
+      }
+      return;
+    }
+
+    // In markdown list mode (Doc 2 & 3)
+    const listItems = els.docRenderedBody ? els.docRenderedBody.querySelectorAll('.doc-list-item') : [];
+    if (listItems.length > 0) {
+      let visibleCount = 0;
+      listItems.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        const matches = !q || text.includes(q);
+        item.style.display = matches ? '' : 'none';
+        if (matches) visibleCount++;
+      });
+      if (els.docFilterCount) {
+        els.docFilterCount.textContent = q ? `Showing ${visibleCount} of ${listItems.length} items` : `${listItems.length} items`;
       }
     }
   }
