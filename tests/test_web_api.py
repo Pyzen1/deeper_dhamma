@@ -109,8 +109,8 @@ def test_api_lexicon_source_doc(wsgi_client):
     assert len(doc["content"]) > 1000
     assert "content_compressed" not in doc
 
-    # Lookup by url substring
+    # Lookup by title/url query
     status, _, doc = wsgi_client("/api/lexicon/source_doc", "query=vinaya")
     assert status.startswith("200")
-    assert "vinaya" in doc["url"].lower()
+    assert "vinaya" in doc["title"].lower()
     assert len(doc["content"]) > 0

@@ -32,8 +32,8 @@ SC_DISCOURSE_CACHE = Path(r"C:\Users\rabailey\.gemini\antigravity-ide\brain\46bf
 
 # Canonical Document Source URLs
 URL_SUTTACENTRAL_BODHI_SUJATO = "https://discourse.suttacentral.net/t/pali-glossary-for-bhikkhus-bodhi-and-sujato/12008"
-URL_SUTTACENTRAL_BRAHMALI_VINAYA = "https://suttacentral.net/vinaya"
-URL_BSWA_BRAHM_MEDITATION = "https://bswa.org/teachings/"
+URL_SUTTACENTRAL_BRAHMALI_VINAYA = "https://suttacentral.net/edition/pli-tv-vi/en/brahmali/appendix-glossary"
+URL_BSWA_BRAHM_MEDITATION = "https://bswa.org/teaching/the-word-of-the-buddha-book/"
 
 
 def strip_diacritics(text: str) -> str:
@@ -399,137 +399,74 @@ def get_brahm_bswa_glossary() -> List[Tuple[str, str, str, str]]:
 
 def get_brahmali_vinaya_terms() -> List[Dict]:
     """
-    Key Vinaya & monastic governance vocabulary from Bhikkhu Brahmali's
-    complete SuttaCentral English translation of the Vinaya Pitaka.
+    Parses Bhikkhu Brahmali's complete SuttaCentral English Vinaya Pitaka glossary
+    (1,309 entries) from cached appendix-glossary.html.
     """
-    return [
-        {
-            "pali_diacritic": "pātimokkha",
-            "pali_plain": "patimokkha",
+    glossary_path = PROJECT_ROOT / "databases" / "suttacentral_brahmali_vinaya_glossary.html"
+    if not glossary_path.exists():
+        return [
+            {
+                "pali_diacritic": "pātimokkha",
+                "pali_plain": "patimokkha",
+                "category": "vinaya",
+                "translation_bodhi": "monastic code of conduct",
+                "translation_sujato": "monastic rule / code",
+                "translation_brahm": "the fundamental training rules (227 rules for monks)",
+                "translation_brahmali": "monastic code / fundamental training rules for bhikkhus and bhikkhunis",
+                "english_description": "The core disciplinary code recited fortnightly by monastics on Uposatha days, consisting of rules that foster monastic harmony and restraint.",
+                "context_keywords": "monastic code, rules, uposatha, recitation, precept, bhikkhus, vinaya, restraint, fault",
+                "phonetic_variants": ["patimoker", "party mocker", "patimokka", "pattimokkha"],
+                "source": "suttacentral:brahmali",
+                "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
+            },
+        ]
+
+    raw_html = glossary_path.read_text(encoding="utf-8")
+    pattern = re.compile(r"<dt[^>]*>\s*<i[^>]*>(.*?)</i>\s*</dt>\s*<dd>(.*?)</dd>", re.DOTALL)
+    matches = pattern.findall(raw_html)
+
+    terms: List[Dict] = []
+    seen_plains = set()
+
+    for pali_raw, desc_raw in matches:
+        pali_clean = html.unescape(re.sub(r"<[^>]+>", "", pali_raw)).strip()
+        desc_clean = html.unescape(re.sub(r"<[^>]+>", "", desc_raw)).strip()
+        pali_clean = re.sub(r"\s+", " ", pali_clean)
+        desc_clean = re.sub(r"\s+", " ", desc_clean)
+
+        parts = [p.strip() for p in pali_clean.split(",")]
+        primary_pali = parts[0]
+        plain = strip_diacritics(primary_pali)
+        if not plain:
+            continue
+
+        variants = [strip_diacritics(p) for p in parts[1:]] if len(parts) > 1 else []
+
+        if plain in seen_plains:
+            for existing in terms:
+                if existing["pali_plain"] == plain:
+                    existing["translation_brahmali"] += f"; {desc_clean}"
+                    existing["english_description"] += f" | Vinaya (Brahmali): {desc_clean}"
+                    break
+            continue
+
+        seen_plains.add(plain)
+        terms.append({
+            "pali_diacritic": primary_pali,
+            "pali_plain": plain,
             "category": "vinaya",
-            "translation_bodhi": "monastic code of conduct",
-            "translation_sujato": "monastic rule / code",
-            "translation_brahm": "monastic code of 227 rules",
-            "translation_brahmali": "monastic code / fundamental training rules for bhikkhus and bhikkhunis",
-            "english_description": "The core disciplinary code recited fortnightly by monastics on Uposatha days, consisting of rules that foster monastic harmony and restraint.",
-            "context_keywords": "monastic code, rules, uposatha, recitation, precept, bhikkhus, vinaya, restraint, fault",
-            "phonetic_variants": ["patimoker", "party mocker", "patimokka", "pattimokkha"],
-            "source": "suttacentral_bswa:brahmali",
+            "translation_bodhi": None,
+            "translation_sujato": None,
+            "translation_brahm": None,
+            "translation_brahmali": desc_clean,
+            "english_description": f"Vinaya (Brahmali): {desc_clean}",
+            "context_keywords": f"vinaya, {plain}, monastic law, {primary_pali}",
+            "phonetic_variants": variants,
+            "source": "suttacentral:brahmali",
             "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
-        },
-        {
-            "pali_diacritic": "vinaya",
-            "pali_plain": "vinaya",
-            "category": "vinaya",
-            "translation_bodhi": "discipline",
-            "translation_sujato": "monastic training / discipline",
-            "translation_brahm": "monastic discipline and training",
-            "translation_brahmali": "monastic law and training rules (Vinaya Piṭaka)",
-            "english_description": "The collection of rules, ethical principles, and administrative guidelines governing the Buddhist monastic community (Sangha).",
-            "context_keywords": "discipline, monastic law, rules, sangha, pitaka, training, code of conduct",
-            "phonetic_variants": ["vinia", "vinnaya", "vinayer"],
-            "source": "suttacentral_bswa:brahmali",
-            "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
-        },
-        {
-            "pali_diacritic": "uposatha",
-            "pali_plain": "uposatha",
-            "category": "vinaya",
-            "translation_bodhi": "observance day",
-            "translation_sujato": "sabbath / observance day",
-            "translation_brahm": "observance day / full moon and new moon recitation day",
-            "translation_brahmali": "monastic observance day for Patimokkha recitation",
-            "english_description": "The monastic meeting held on the full moon and new moon for Patimokkha recitation and communal purification.",
-            "context_keywords": "observance day, full moon, new moon, recitation, patimokkha, confession, sangha",
-            "phonetic_variants": ["uposata", "upposatha"],
-            "source": "suttacentral_bswa:brahmali",
-            "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
-        },
-        {
-            "pali_diacritic": "pāvāraṇā",
-            "pali_plain": "pavarana",
-            "category": "vinaya",
-            "translation_bodhi": "invitation ceremony",
-            "translation_sujato": "invitation",
-            "translation_brahm": "the invitation ceremony concluding the Rains Retreat",
-            "translation_brahmali": "invitation ceremony (inviting fellow monastics to point out any faults)",
-            "english_description": "The ceremony at the conclusion of the Rains Retreat where every monastic invites fellow community members to admonish them for any seen, heard, or suspected fault.",
-            "context_keywords": "invitation, end of vassa, end of rains retreat, feedback, monastic harmony, confession",
-            "phonetic_variants": ["pavarana", "pawarrana"],
-            "source": "suttacentral_bswa:brahmali",
-            "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
-        },
-        {
-            "pali_diacritic": "upasampadā",
-            "pali_plain": "upasampada",
-            "category": "vinaya",
-            "translation_bodhi": "higher ordination",
-            "translation_sujato": "full ordination",
-            "translation_brahm": "full monastic ordination as a bhikkhu or bhikkhuni",
-            "translation_brahmali": "higher ordination (becoming a full member of the Sangha)",
-            "english_description": "The formal sangha transaction (kamma) through which an ordained novice receives full ordination as a bhikkhu or bhikkhuni.",
-            "context_keywords": "higher ordination, full ordination, monk, nun, bhikkhu, bhikkhuni, kamma vacana, sangha transaction",
-            "phonetic_variants": ["upasampada", "upasampadha"],
-            "source": "suttacentral_bswa:brahmali",
-            "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
-        },
-        {
-            "pali_diacritic": "pabbajjā",
-            "pali_plain": "pabbajja",
-            "category": "vinaya",
-            "translation_bodhi": "going forth",
-            "translation_sujato": "going forth into homelessness",
-            "translation_brahm": "going forth from home to homelessness (novice ordination)",
-            "translation_brahmali": "going forth into homelessness",
-            "english_description": "Renunciation and departure from secular lay life to become a novice monk or nun (samanera / samaneri).",
-            "context_keywords": "going forth, novice, robes, shaving head, renunciation, homeless life",
-            "phonetic_variants": ["pabbaja", "pabaja"],
-            "source": "suttacentral_bswa:brahmali",
-            "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
-        },
-        {
-            "pali_diacritic": "bhikkhu",
-            "pali_plain": "bhikkhu",
-            "category": "monastic_life",
-            "translation_bodhi": "monk / bhikkhu",
-            "translation_sujato": "monk",
-            "translation_brahm": "fully ordained Buddhist monk",
-            "translation_brahmali": "monk / bhikkhu",
-            "english_description": "A fully ordained male Buddhist monastic living under the 227 rules of the Vinaya Patimokkha.",
-            "context_keywords": "monk, robes, alms, monastic, ordination, forest monk",
-            "phonetic_variants": ["bikkhu", "biku", "bhikku"],
-            "source": "suttacentral_bswa:brahmali",
-            "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
-        },
-        {
-            "pali_diacritic": "bhikkhunī",
-            "pali_plain": "bhikkhuni",
-            "category": "monastic_life",
-            "translation_bodhi": "nun / bhikkhuni",
-            "translation_sujato": "nun",
-            "translation_brahm": "fully ordained Buddhist nun",
-            "translation_brahmali": "nun / bhikkhuni",
-            "english_description": "A fully ordained female Buddhist monastic living under the 311 rules of the Bhikkhuni Patimokkha.",
-            "context_keywords": "nun, ordination, female monk, monastic, dhammasara, sangha",
-            "phonetic_variants": ["bikuni", "bhikkuni", "bikkhuni"],
-            "source": "suttacentral_bswa:brahmali",
-            "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
-        },
-        {
-            "pali_diacritic": "saṅgha",
-            "pali_plain": "sangha",
-            "category": "doctrine",
-            "translation_bodhi": "monastic community / community of noble disciples",
-            "translation_sujato": "community of disciples / monastic community",
-            "translation_brahm": "the monastic community and four pairs of enlightened beings",
-            "translation_brahmali": "monastic community",
-            "english_description": "The third of the Triple Gems; refers conventionally to the community of monks and nuns, and spiritually to the Ariya Sangha of enlightened beings.",
-            "context_keywords": "triple gem, community, monks, nuns, disciples, buddha dhamma sangha",
-            "phonetic_variants": ["sanga", "shanga"],
-            "source": "suttacentral_bswa:brahmali",
-            "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
-        },
-    ]
+        })
+
+    return terms
 
 
 def get_standard_phrase_rules() -> List[Dict]:
@@ -648,7 +585,7 @@ def get_source_document_records() -> List[Dict]:
         sc_text = f"""# Pali Glossary for Bhikkhus Bodhi and Sujato
 **Authors:** Bhikkhu Sujato, Bhikkhu Bodhi, John Kelly
 **Publisher:** SuttaCentral
-**Canonical Source URL:** https://discourse.suttacentral.net/t/pali-glossary-for-bhikkhus-bodhi-and-sujato/12008
+**Canonical Source URL:** {URL_SUTTACENTRAL_BODHI_SUJATO}
 
 <p class="doc-intro-lead">{intro_text}</p>
 
@@ -657,40 +594,125 @@ def get_source_document_records() -> List[Dict]:
     else:
         sc_text = "# SuttaCentral Pali Glossary\n\nCanonical source reference."
 
-    # 2. SuttaCentral Bhikkhu Brahmali Vinaya Reference Text
-    brahmali_text = """# SuttaCentral Vinaya Piṭaka: Monastic Law of the Theravāda School
-Translation & Technical Terminology Reference by Bhikkhu Brahmali.
-URL: https://suttacentral.net/vinaya
+    # 2. SuttaCentral Bhikkhu Brahmali Vinaya Reference Text (1,309 entries)
+    glossary_path = PROJECT_ROOT / "databases" / "suttacentral_brahmali_vinaya_glossary.html"
+    if glossary_path.exists():
+        raw_glossary = glossary_path.read_text(encoding="utf-8")
+        pattern = re.compile(r"<dt[^>]*>\s*<i[^>]*>(.*?)</i>\s*</dt>\s*<dd>(.*?)</dd>", re.DOTALL)
+        matches = pattern.findall(raw_glossary)
+        v_rows = []
+        for pali_raw, desc_raw in matches:
+            pali_clean = html.unescape(re.sub(r"<[^>]+>", "", pali_raw)).strip()
+            desc_clean = html.unescape(re.sub(r"<[^>]+>", "", desc_raw)).strip()
+            pali_clean = re.sub(r"\s+", " ", pali_clean)
+            desc_clean = re.sub(r"\s+", " ", desc_clean)
+            v_rows.append(f'<tr><td>{pali_clean}</td><td>{desc_clean}</td></tr>')
 
-## Key Monastic Terms and Categories
-- **Pātimokkha**: Fundamental code of monastic training rules for bhikkhus (227 rules) and bhikkhunis (311 rules).
-- **Vinaya**: Monastic training, ethical discipline, and jurisprudence governing the Buddhist Sangha.
-- **Uposatha**: Observance day held fortnightly on full moon and new moon for Patimokkha recitation and communal purification.
-- **Pavāraṇā**: End of Rains Retreat invitation ceremony inviting community members to offer compassionate admonition.
-- **Upasampadā**: Higher ordination making a candidate a full monastic member of the Sangha.
-- **Pabbajjā**: Initial ordination leaving lay life to become a novice monk or nun.
-- **Saṅgha**: The monastic assembly and the community of noble disciples.
-- **Kuppa / Akuppa**: Reversible versus irreversible formal legal acts of the Sangha.
-- **Vassa**: The three-month annual monsoon rains retreat devoted to intensive meditation and internal practice.
+        doc2_table_html = f"""<div class="doc-table-container">
+<table class="doc-rendered-table" id="doc-active-table">
+<thead>
+<tr>
+<th>Pāli Vinaya Term</th>
+<th>Bhikkhu Brahmali Definition</th>
+</tr>
+</thead>
+<tbody>
+{'\n'.join(v_rows)}
+</tbody>
+</table>
+</div>"""
+        brahmali_text = f"""# SuttaCentral Vinaya Piṭaka: Monastic Law of the Theravāda School
+**Author:** Bhikkhu Brahmali  
+**Publisher:** SuttaCentral  
+**Canonical Source URL:** {URL_SUTTACENTRAL_BRAHMALI_VINAYA}  
+
+<p class="doc-intro-lead">This official glossary focuses on Vinaya terminology and words used in a special sense in the Vinaya Piṭaka, translated by Bhikkhu Brahmali for SuttaCentral. It contains {len(matches)} comprehensive definitions covering monastic legal acts, robes, dwellings, disciplinary codes, and ecclesiastical procedures.</p>
+
+{doc2_table_html}
 """
+    else:
+        brahmali_text = f"# SuttaCentral Vinaya Piṭaka\nCanonical Source URL: {URL_SUTTACENTRAL_BRAHMALI_VINAYA}\n\nBhikkhu Brahmali Vinaya glossary."
 
-    # 3. BSWA Ajahn Brahm Meditation & Dhamma Reference Text
-    brahm_text = """# BSWA Forest Meditation & Dhamma Lexicon
-Teachings and glossaries from Ajahn Brahm (Mindfulness, Bliss, and Beyond) and the Buddhist Society of Western Australia.
-URL: https://bswa.org/teachings/
+    # 3. BSWA Ajahn Brahm Meditation & Dhamma Reference Text (54 terms)
+    med_terms = get_brahm_meditation_and_bswa_terms()
+    gloss_terms = get_brahm_bswa_glossary()
 
-## Core Meditation States
-- **Ānāpānasati**: Mindfulness of breathing in 16 sequential stages: from present-moment silent awareness to beautiful breath, nimitta, and jhana.
-- **Jhāna**: Four profound absorption states characterized by complete stillness of the body, blissful unification of mind, piti (rapture), and sukha (bliss).
-- **Nimitta**: The mental sign appearing as a radiant light in the mind's eye when physical senses fade, acting as the doorway to jhana.
-- **Nīvaraṇa (Five Hindrances)**: Sensory desire (kāmacchanda), ill will (vyāpāda), sloth & torpor (thīna-middha), restlessness & remorse (uddhacca-kukkucca), and doubt (vicikicchā).
-- **Anattā**: Non-self; the liberating insight that all experiences and thoughts occur without an inner controller or permanent soul.
+    brahm_dict = {}
+    for m in med_terms:
+        brahm_dict[m["pali_plain"]] = {
+            "pali_diacritic": m["pali_diacritic"],
+            "pali_plain": m["pali_plain"],
+            "translation_brahm": m.get("translation_brahm"),
+            "english_description": m.get("english_description"),
+        }
 
-## BSWA Monasteries & Retreat Centres
-- **Bodhinyana Monastery**: Founded in 1983 in Serpentine, WA by Ajahn Brahm and Ajahn Jagaro.
-- **Dhammasara Nuns Monastery**: Forest monastery for fully ordained bhikkhunis in Gidgegannup, WA.
-- **Dhammaloka Buddhist Centre**: Urban centre in Nollamara, Perth, Western Australia.
-- **Jhana Grove**: Purpose-built 9-day meditation retreat facility in Serpentine, Western Australia.
+    for pali_dia, key, cat, gloss in gloss_terms:
+        if key in brahm_dict:
+            if not brahm_dict[key]["translation_brahm"]:
+                brahm_dict[key]["translation_brahm"] = gloss
+        else:
+            brahm_dict[key] = {
+                "pali_diacritic": pali_dia,
+                "pali_plain": key,
+                "translation_brahm": gloss,
+                "english_description": f"Ajahn Brahm: {gloss}",
+            }
+
+    monastic_brahm_defaults = [
+        ("pātimokkha", "patimokkha", "the fundamental training rules (227 rules for monks)", "The core monastic code recited fortnightly on Uposatha days fostering harmony and restraint."),
+        ("vinaya", "vinaya", "monastic training and discipline", "The rules, ethical principles, and procedures governing the Buddhist monastic community (Sangha)."),
+        ("uposatha", "uposatha", "observance day / full moon and new moon recitation day", "The monastic meeting held on full and new moons for Patimokkha recitation and communal purification."),
+        ("pāvāraṇā", "pavarana", "the invitation ceremony concluding the Rains Retreat", "The ceremony concluding the Rains Retreat where monastics invite feedback on any faults."),
+        ("upasampadā", "upasampada", "higher ordination as a bhikkhu or bhikkhuni", "The formal Sangha transaction conferring full ordination into the monastic order."),
+        ("pabbajjā", "pabbajja", "going forth from home to homelessness (novice ordination)", "Renunciation of lay life to take initial ordination as a novice monk or nun."),
+        ("bhikkhu", "bhikkhu", "fully ordained Buddhist monk", "A male Buddhist monastic living under the 227 rules of the Vinaya Patimokkha."),
+        ("bhikkhunī", "bhikkhuni", "fully ordained Buddhist nun", "A female Buddhist monastic living under the 311 rules of the Bhikkhuni Patimokkha."),
+        ("saṅgha", "sangha", "the monastic community and four pairs of enlightened disciples", "The community of monks and nuns, and the noble disciples who have realized stages of awakening."),
+    ]
+    for dia, plain, trans, desc in monastic_brahm_defaults:
+        if plain in brahm_dict:
+            if not brahm_dict[plain]["translation_brahm"]:
+                brahm_dict[plain]["translation_brahm"] = trans
+        else:
+            brahm_dict[plain] = {
+                "pali_diacritic": dia,
+                "pali_plain": plain,
+                "translation_brahm": trans,
+                "english_description": desc,
+            }
+
+    b_rows = []
+    for term in sorted(brahm_dict.values(), key=lambda x: x["pali_plain"]):
+        pali_disp = f"<strong>{term['pali_diacritic'] or term['pali_plain']}</strong>"
+        if term["pali_diacritic"] and term["pali_diacritic"] != term["pali_plain"]:
+            pali_disp += f" <span class=\"lexicon-diacritic\">({term['pali_plain']})</span>"
+        tb = term.get("translation_brahm") or "—"
+        desc = term.get("english_description") or ""
+        b_rows.append(f'<tr class="doc-table-data-row"><td class="td-pali">{pali_disp}</td><td class="td-brahm">{tb}</td><td class="td-desc">{desc}</td></tr>')
+
+    doc3_table_html = f"""<div class="doc-table-container">
+<table class="doc-rendered-table" id="doc-active-table">
+<thead>
+<tr>
+<th>Pāli Term</th>
+<th>Ajahn Brahm Translation</th>
+<th>Doctrinal Meaning &amp; Context</th>
+</tr>
+</thead>
+<tbody>
+{'\n'.join(b_rows)}
+</tbody>
+</table>
+</div>"""
+
+    brahm_text = f"""# The Word of the Buddha: BSWA Forest Meditation & Dhamma Glossary
+**Author:** Ajahn Brahm  
+**Publisher:** Buddhist Society of Western Australia & Bodhinyana International Foundation  
+**Canonical Source URL:** {URL_BSWA_BRAHM_MEDITATION}  
+
+<p class="doc-intro-lead">This authoritative glossary compiles Ajahn Brahm's translations and meditation teachings from his revised edition of <em>The Word of the Buddha</em> (published for his 50th Bhikkhu Anniversary, Bodhinyana International Foundation, 2024; see also <a href="https://www.wordofthebuddha.com/" target="_blank" rel="noopener noreferrer">wordofthebuddha.com</a> and the <a href="https://bswa.org/bswp/wp-content/uploads/2024/11/TheWord0fTheBuddha_eCat.pdf" target="_blank" rel="noopener noreferrer">eCat PDF edition</a>), his meditation manual <em>Mindfulness, Bliss, and Beyond</em>, and the Western Australian forest monastery tradition. It defines {len(brahm_dict)} foundational terms covering stillness (samādhi), non-self (anattā), the four jhānas, breath meditation, the five hindrances, and the noble path.</p>
+
+{doc3_table_html}
 """
 
     docs = [
@@ -924,6 +946,26 @@ def build_buddhism_lexicon_db():
                 "source": "bswa:brahm",
                 "source_url": URL_BSWA_BRAHM_MEDITATION,
             }
+
+    # Layer 5: Ajahn Brahm Monastic vocabulary
+    monastic_brahm_defaults = [
+        ("pātimokkha", "patimokkha", "vinaya", "the fundamental training rules (227 rules for monks)"),
+        ("vinaya", "vinaya", "vinaya", "monastic training and discipline"),
+        ("uposatha", "uposatha", "vinaya", "observance day / full moon and new moon recitation day"),
+        ("pāvāraṇā", "pavarana", "vinaya", "the invitation ceremony concluding the Rains Retreat"),
+        ("upasampadā", "upasampada", "vinaya", "higher ordination as a bhikkhu or bhikkhuni"),
+        ("pabbajjā", "pabbajja", "vinaya", "going forth from home to homelessness (novice ordination)"),
+        ("bhikkhu", "bhikkhu", "monastic_life", "fully ordained Buddhist monk"),
+        ("bhikkhunī", "bhikkhuni", "monastic_life", "fully ordained Buddhist nun"),
+        ("saṅgha", "sangha", "doctrine", "the monastic community and four pairs of enlightened disciples"),
+    ]
+    for pali_diacritic, key, category, gloss in monastic_brahm_defaults:
+        if key in all_terms:
+            if not all_terms[key].get("translation_brahm"):
+                all_terms[key]["translation_brahm"] = gloss
+                all_terms[key]["context_keywords"] += f", {gloss}"
+                if "bswa:brahm" not in all_terms[key]["source"]:
+                    all_terms[key]["source"] += ", bswa:brahm"
 
     # Map URL to integer ID
     cur = conn.execute("SELECT url, id FROM source_documents;")

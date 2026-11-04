@@ -2507,31 +2507,49 @@
     }
 
     const content = doc.content;
-    const isDoc1Table = content.includes('<table>') && content.includes('</table>');
+    const hasTable = content.includes('<table>') && content.includes('</table>');
 
-    if (isDoc1Table) {
-      // Document 1: SuttaCentral comparative table of Bodhi vs Sujato
+    if (hasTable) {
       const tableStartIdx = content.indexOf('<table>');
-      const tableEndIdx = content.indexOf('</table>') + 8;
+      const tableEndIdx = content.lastIndexOf('</table>') + 8;
       const preamble = content.slice(0, tableStartIdx);
       const rawTableHtml = content.slice(tableStartIdx, tableEndIdx);
 
       const renderedPreamble = renderSimpleMarkdown(preamble);
 
       // Enhance table with styling classes
-      let enhancedTable = rawTableHtml
-        .replace('<table>', '<div class="doc-table-container"><table class="doc-rendered-table" id="doc-active-table">')
-        .replace('</table>', '</table></div>');
+      let enhancedTable = rawTableHtml;
+      if (!enhancedTable.includes('doc-table-container')) {
+        enhancedTable = enhancedTable
+          .replace('<table>', '<div class="doc-table-container"><table class="doc-rendered-table" id="doc-active-table">')
+          .replace('</table>', '</table></div>');
+      }
 
-      // Add column semantic classes to rows
-      enhancedTable = enhancedTable
-        .replace(/<tr>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/g, (match, pali, bodhi, sujato) => {
-          return `<tr class="doc-table-data-row">
-            <td class="td-pali">${pali}</td>
-            <td class="td-bodhi">${bodhi}</td>
-            <td class="td-sujato">${sujato}</td>
-          </tr>`;
+      // 3-column rows without classes (e.g. Doc 1: Pali, Bodhi, Sujato)
+      enhancedTable = enhancedTable.replace(/<tr>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/g, (match, pali, bodhi, sujato) => {
+        return `<tr class="doc-table-data-row">
+          <td class="td-pali">${pali}</td>
+          <td class="td-bodhi">${bodhi}</td>
+          <td class="td-sujato">${sujato}</td>
+        </tr>`;
+      });
+
+      // 2-column rows without classes (e.g. Doc 2: Pali, Brahmali)
+      enhancedTable = enhancedTable.replace(/<tr>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<\/tr>/g, (match, pali, brahmali) => {
+        return `<tr class="doc-table-data-row">
+          <td class="td-pali">${pali}</td>
+          <td class="td-brahmali">${brahmali}</td>
+        </tr>`;
+      });
+
+      // Ensure all rows inside tbody have .doc-table-data-row class
+      enhancedTable = enhancedTable.replace(/<tbody>([\s\S]*?)<\/tbody>/, (match, tbodyContent) => {
+        const enhancedBody = tbodyContent.replace(/<tr\b([^>]*)>/g, (trMatch, attrs) => {
+          if (attrs && attrs.includes('doc-table-data-row')) return trMatch;
+          return `<tr class="doc-table-data-row"${attrs || ''}>`;
         });
+        return `<tbody>${enhancedBody}</tbody>`;
+      });
 
       return `
         <div class="doc-preamble-section">${renderedPreamble}</div>
@@ -2539,7 +2557,7 @@
       `;
     }
 
-    // Documents 2 & 3: Clean rich Markdown
+    // Fallback: Clean rich Markdown
     return renderSimpleMarkdown(content);
   }
 

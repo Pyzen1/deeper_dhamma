@@ -161,7 +161,7 @@ class BuddhismLexiconDatabase:
         if mode == "core":
             placeholders = ", ".join(["?"] * len(CORE_CANONICAL_TERMS))
             where_clauses.append(
-                f"(translation_brahm IS NOT NULL OR category != 'sutta_canon' OR pali_plain IN ({placeholders}))"
+                f"(translation_brahm IS NOT NULL OR category IN ('meditation', 'hindrance', 'monastery', 'retreat_centre', 'monastic_calendar') OR pali_plain IN ({placeholders}))"
             )
             params.extend(CORE_CANONICAL_TERMS)
 

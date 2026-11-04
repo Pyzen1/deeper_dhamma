@@ -1675,6 +1675,24 @@ select:hover, select:focus {
   width: 37.5%;
 }
 
+.doc-rendered-table .td-brahmali {
+  color: #e2e8f0;
+  line-height: 1.5;
+}
+
+.doc-rendered-table .td-brahm {
+  color: #fcd34d;
+  font-weight: 600;
+  width: 32%;
+}
+
+.doc-rendered-table .td-desc {
+  color: #cbd5e1;
+  width: 43%;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
 .doc-row-hidden {
   display: none !important;
 }

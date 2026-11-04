@@ -242,10 +242,17 @@ def test_lexicon_source_documents_and_urls(lexicon_db):
     assert doc1["id"] == 1
     assert len(doc1["content"]) > 1000
 
-    # Test get_source_document by url match
-    doc_vinaya = lexicon_db.get_source_document("https://suttacentral.net/vinaya")
+    # Test get_source_document by canonical url match (Doc 2 Brahmali Vinaya)
+    doc_vinaya = lexicon_db.get_source_document("https://suttacentral.net/edition/pli-tv-vi/en/brahmali/appendix-glossary")
     assert doc_vinaya is not None
     assert "vinaya" in doc_vinaya["content"].lower()
+    assert len(doc_vinaya["content"]) > 5000
+
+    # Test get_source_document by canonical url match (Doc 3 Brahm Meditation)
+    doc_brahm = lexicon_db.get_source_document("https://bswa.org/teaching/the-word-of-the-buddha-book/")
+    assert doc_brahm is not None
+    assert "brahm" in doc_brahm["content"].lower()
+    assert len(doc_brahm["content"]) > 3000
 
 
 
