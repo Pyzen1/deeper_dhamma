@@ -52,14 +52,18 @@ While consolidating these files under a single `databases/` folder makes discove
 ## Database Overview & Schemas
 
 ### 1. `buddhism_lexicon.db`
-* **File:** `databases/buddhism_lexicon.db` (~557 KB)
+* **File:** `databases/buddhism_lexicon.db` (~1.17 MB)
 * **Status:** Tracked in Git
 * **Python Interface:** `deeper_dhamma.lexicon.BuddhismLexiconDatabase`, `deeper_dhamma.terminology.TerminologyEditor`
 * **Key Tables:**
-  * `terms`: 1,071 doctrinal entries with diacritics, plain Romanization, categories, and translation columns (`translation_bodhi`, `translation_sujato`, `translation_brahm`, `translation_brahmali`).
+  * `terms`: 2,234 doctrinal & monastic Vinaya entries with diacritics, plain Romanization, categories, foreign key `source_document_id`, and teacher translation columns (`translation_bodhi`, `translation_sujato`, `translation_brahm`, `translation_brahmali`).
   * `phrase_rules`: 14 contextual phonetic correction rules that intercept Whisper ASR misrecognitions.
-  * `source_documents`: 3 raw source documents with compression and SHA-256 integrity hashes.
-  * `fts_terms`: SQLite FTS5 virtual table for fast full-text lexical search.
+  * `source_documents`: 3 canonical offline authority reference documents with raw content (`content_text`), zlib compression (`content_compressed`), and SHA-256 integrity hashes:
+    1. **Pali Glossary for Bhikkhus Bodhi and Sujato** (1,052 terms comparative concordance table; direct URL: `https://discourse.suttacentral.net/t/pali-glossary-for-bhikkhus-bodhi-and-sujato/12008`).
+    2. **SuttaCentral Vinaya Piṭaka: Monastic Law of the Theravāda School** by Bhikkhu Brahmali (1,309 terms monastic law table; direct URL: `https://suttacentral.net/edition/pli-tv-vi/en/brahmali/appendix-glossary`).
+    3. **The Word of the Buddha: BSWA Forest Meditation & Dhamma Glossary** by Ajahn Brahm (54 terms meditation & monastic table; direct URL: `https://bswa.org/teaching/the-word-of-the-buddha-book/`).
+  * `v_terms`: SQL view joining `terms` with `source_documents` for zero-overhead client retrieval.
+  * `fts_terms`: SQLite FTS5 virtual table for sub-millisecond full-text lexical search.
 
 ### 2. `voiceprints.db`
 * **File:** `databases/voiceprints.db` (~324 KB)

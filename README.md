@@ -17,9 +17,18 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - Word-level conversational pause change-point detection: splits multi-speaker exchanges grouped by ASR at natural speech pauses ($\ge 0.45\text{s}$).
   - Candidate-aware hysteresis ($\ge 0.42$ for nominated teachers, $\ge 0.48$ for unprofiled third-party monastics) with paralinguistic resilience against laughter, coughs, and throat-clearing.
   - Uniform acoustic analysis: every turn in every talk is analyzed individually, eliminating false-monologue assumptions.
-- **Buddhist Reference Terminology Editor**:
+- **Buddhist Reference Terminology Editor & Canonical Authority Documents**:
+  - 2,234 canonical Pali entries covering doctrinal concepts and Vinaya monastic law across Theravada traditions.
+  - Three bitstream-verified offline authority reference texts stored with SHA-256 integrity hashes:
+    1. *Bodhi & Sujato Glossary* (1,052 terms comparative concordance table)
+    2. *Brahmali Vinaya Piṭaka* (1,309 terms monastic law table)
+    3. *Ajahn Brahm Meditation & Dhamma Glossary* (54 terms forest retreat meditation table)
   - Canonical dictionary normalization in standard Latin Pali (`jhana`, `samadhi`, `anatta`, `Bodhinyana`, `Rains Retreat`).
-  - Inlines structured audit changelogs into metadata.
+  - Inlines structured audit changelogs into episode metadata.
+- **Dynamic Serverless Web Application (SQLite WASM & REST)**:
+  - 100% dynamic, on-demand querying directly from SQLite (zero hardcoded HTML).
+  - Diacritic-insensitive real-time search filtering across all lexicon terms and authority documents.
+  - Live audio companion highlighting Pali terms dynamically during playback.
 - **Lossless On-Demand Format Generation**:
   - Generates Markdown (`.md`), WebVTT (`.vtt`), or JSON (`.json`) on the fly directly from SQLite.
 
