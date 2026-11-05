@@ -65,7 +65,8 @@ class BuddhismLexiconDatabase:
                         t.phonetic_variants,
                         t.source,
                         t.source_document_id,
-                        s.url AS source_url,
+                        COALESCE(t.source_url, s.url) AS source_url,
+                        s.mirror_url AS source_mirror_url,
                         s.title AS source_title,
                         s.author AS source_author
                     FROM terms t
@@ -79,18 +80,25 @@ class BuddhismLexiconDatabase:
 
     def get_all_terms(self) -> List[Dict]:
         """
-        Returns all canonical Pali terms with definitions and teacher glosses
-        for high-speed client-side companion index and live audio synchronization.
+        Returns all canonical Pali terms with definitions, teacher glosses,
+        and source provenance for high-speed client-side companion index and
+        live audio phrase synchronization.
         """
         with self._get_connection() as conn:
             cur = conn.execute("""
                 SELECT id, pali_plain, pali_diacritic, category,
                        translation_bodhi, translation_sujato, translation_brahm, translation_brahmali,
-                       english_description
-                FROM terms
+                       english_description, phonetic_variants,
+                       source_document_id, source_url, source_mirror_url, source_title
+                FROM v_terms
                 ORDER BY pali_plain ASC;
             """)
-            return [dict(r) for r in cur.fetchall()]
+            items = []
+            for r in cur.fetchall():
+                d = dict(r)
+                d["phonetic_variants"] = json.loads(d.get("phonetic_variants") or "[]")
+                items.append(d)
+            return items
 
     def lookup_term(self, term: str) -> Optional[Dict]:
         """Look up a term by plain Latin or diacritic form, including source document details."""
@@ -270,7 +278,7 @@ class BuddhismLexiconDatabase:
         with self._get_connection() as conn:
             cur = conn.execute(
                 """
-                SELECT id, url, title, author, publisher, retrieved_date,
+                SELECT id, url, mirror_url, title, author, publisher, retrieved_date,
                        content_format, uncompressed_bytes, compressed_bytes, sha256
                 FROM source_documents
                 ORDER BY id ASC;

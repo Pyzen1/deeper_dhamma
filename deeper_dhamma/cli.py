@@ -35,6 +35,7 @@ from deeper_dhamma.config import (
     ARCHIVE_DIR,
     DEFAULT_WEB_HOST,
     DEFAULT_WEB_PORT,
+    DIST_DIR,
     TRANSCRIPTS_DB_PATH,
 )
 from deeper_dhamma.storage import TranscriptDatabase
@@ -621,7 +622,7 @@ def cmd_serve(args):
     print("[i] Python is used solely for localized transcription and website buildout.")
     print("[i] Launching static preview server...\n")
     from deeper_dhamma.export_web import run_web_preview
-    run_web_preview(host=args.host, port=args.port, dist_dir="dist")
+    run_web_preview(host=args.host, port=args.port, dist_dir=DIST_DIR)
 
 
 def cmd_web(args):
@@ -634,7 +635,7 @@ def cmd_web(args):
             args.subparser.print_help()
         return
 
-    out_dir = getattr(args, "output_dir", None) or "dist"
+    out_dir = getattr(args, "output_dir", None) or DIST_DIR
 
     if has_build:
         from deeper_dhamma.export_web import export_static_site
@@ -850,8 +851,8 @@ def main(argv=None):
     )
     p_web.add_argument(
         "--output-dir", "-o",
-        default="dist",
-        help="Target distribution directory for build (default: dist)",
+        default=str(DIST_DIR),
+        help=f"Target distribution directory for build (default: {DIST_DIR})",
     )
     p_web.set_defaults(func=cmd_web, subparser=p_web)
 

@@ -872,10 +872,21 @@ self.onmessage = async (e) => {
       case 'get_all_terms': {
         const terms = queryAll(`
           SELECT id, pali_plain, pali_diacritic, category, 
-                 translation_bodhi, translation_sujato, translation_brahm, translation_brahmali, english_description 
-          FROM terms 
+                 translation_bodhi, translation_sujato, translation_brahm, translation_brahmali,
+                 english_description, phonetic_variants,
+                 source_document_id, source_url, source_mirror_url, source_title
+          FROM v_terms 
           ORDER BY pali_plain ASC;
         `);
+        terms.forEach(item => {
+          if (typeof item.phonetic_variants === 'string') {
+            try {
+              item.phonetic_variants = JSON.parse(item.phonetic_variants);
+            } catch (_) {
+              item.phonetic_variants = [];
+            }
+          }
+        });
         self.postMessage({ id, success: true, data: terms });
         break;
       }
@@ -886,7 +897,7 @@ self.onmessage = async (e) => {
       }
       case 'get_source_documents': {
         const docs = queryAll(`
-          SELECT id, url, title, author, publisher, retrieved_date,
+          SELECT id, url, mirror_url, title, author, publisher, retrieved_date,
                  content_format, uncompressed_bytes, compressed_bytes, sha256
           FROM source_documents
           ORDER BY id ASC;
@@ -899,7 +910,7 @@ self.onmessage = async (e) => {
         let doc = null;
         if (typeof query === 'number' || (typeof query === 'string' && /^\d+$/.test(query.trim()))) {
           doc = queryOne(`
-            SELECT id, url, title, author, publisher, retrieved_date,
+            SELECT id, url, mirror_url, title, author, publisher, retrieved_date,
                    content_format, uncompressed_bytes, compressed_bytes, sha256,
                    content_text, content_compressed
             FROM source_documents
@@ -908,7 +919,7 @@ self.onmessage = async (e) => {
         } else if (query) {
           const qStr = String(query).trim();
           doc = queryOne(`
-            SELECT id, url, title, author, publisher, retrieved_date,
+            SELECT id, url, mirror_url, title, author, publisher, retrieved_date,
                    content_format, uncompressed_bytes, compressed_bytes, sha256,
                    content_text, content_compressed
             FROM source_documents

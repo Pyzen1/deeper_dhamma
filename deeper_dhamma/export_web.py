@@ -25,6 +25,7 @@ from deeper_dhamma.config import (
     BUDDHISM_LEXICON_DB_PATH,
     DEFAULT_WEB_HOST,
     DEFAULT_WEB_PORT,
+    DIST_DIR,
     PROJECT_ROOT,
     TRANSCRIPTS_DB_PATH,
 )
@@ -112,7 +113,8 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
                 t.phonetic_variants,
                 t.source,
                 t.source_document_id,
-                s.url AS source_url,
+                COALESCE(t.source_url, s.url) AS source_url,
+                s.mirror_url AS source_mirror_url,
                 s.title AS source_title,
                 s.author AS source_author
             FROM terms t
@@ -189,11 +191,19 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
     }
 
 
-def export_static_site(output_dir: Path | str = "dist") -> Path:
+def _resolve_repo_path(path_or_str: Path | str) -> Path:
+    """Resolves relative paths against PROJECT_ROOT so nothing leaks into parent CWD."""
+    p = Path(path_or_str)
+    if not p.is_absolute():
+        return (PROJECT_ROOT / p).resolve()
+    return p.resolve()
+
+
+def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
     """
     Builds the complete self-contained static site and SQLite WASM bundle.
     """
-    out_path = Path(output_dir).resolve()
+    out_path = _resolve_repo_path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
     today = datetime.now()
@@ -244,6 +254,15 @@ def export_static_site(output_dir: Path | str = "dist") -> Path:
             shutil.rmtree(words_dst)
         shutil.copytree(words_src, words_dst)
         copied_files += len(list(words_src.glob("*.bin")))
+
+    # Mirror pristine local document sources into dist/sources/ for user verification
+    sources_src = PROJECT_ROOT / "databases" / "sources"
+    if sources_src.exists() and sources_src.is_dir():
+        sources_dst = out_path / "sources"
+        if sources_dst.exists():
+            shutil.rmtree(sources_dst)
+        shutil.copytree(sources_src, sources_dst)
+        copied_files += len([f for f in sources_src.iterdir() if f.is_file()])
 
     # Deploy pure SQLite WASM client adapter to dist/db_client.js and static/db_client.js
     wasm_adapter = STATIC_SRC_DIR / "adapters" / "wasm_client.js"
@@ -302,6 +321,7 @@ def _is_dist_stale(dist_path: Path) -> bool:
         STATIC_SRC_DIR / "db_worker.js",
         STATIC_SRC_DIR / "adapters" / "wasm_client.js",
         TRANSCRIPTS_DB_PATH,
+        BUDDHISM_LEXICON_DB_PATH,
     ]
     for src in candidates:
         if src.exists() and src.stat().st_mtime > dist_mtime:
@@ -309,11 +329,11 @@ def _is_dist_stale(dist_path: Path) -> bool:
     return False
 
 
-def run_web_preview(host: str = DEFAULT_WEB_HOST, port: str | int = DEFAULT_WEB_PORT, dist_dir: Path | str = "dist") -> None:
+def run_web_preview(host: str = DEFAULT_WEB_HOST, port: str | int = DEFAULT_WEB_PORT, dist_dir: Path | str = DIST_DIR) -> None:
     """
     Serves the static distribution folder using Bottle with native HTTP Range request support.
     """
-    dist_path = Path(dist_dir).resolve()
+    dist_path = _resolve_repo_path(dist_dir)
     if _is_dist_stale(dist_path):
         print(f"[*] Rebuilding static bundle in '{dist_path}' to ensure latest assets...")
         export_static_site(dist_path)

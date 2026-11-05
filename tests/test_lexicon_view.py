@@ -228,10 +228,11 @@ def test_lexicon_source_documents_and_urls(lexicon_db):
 
     # Test list_source_documents
     docs = lexicon_db.list_source_documents()
-    assert len(docs) == 3
+    assert len(docs) == 4
     for d in docs:
         assert d["id"] is not None
         assert d["url"].startswith("http")
+        assert d["mirror_url"].startswith("sources/")
         assert d["title"]
         assert d["author"]
         assert d["sha256"]
@@ -248,11 +249,200 @@ def test_lexicon_source_documents_and_urls(lexicon_db):
     assert "vinaya" in doc_vinaya["content"].lower()
     assert len(doc_vinaya["content"]) > 5000
 
-    # Test get_source_document by canonical url match (Doc 3 Brahm Meditation)
+    # Test get_source_document by canonical url match (Doc 3 Brahm Word of the Buddha)
     doc_brahm = lexicon_db.get_source_document("https://bswa.org/teaching/the-word-of-the-buddha-book/")
     assert doc_brahm is not None
     assert "brahm" in doc_brahm["content"].lower()
     assert len(doc_brahm["content"]) > 3000
+
+    # Test get_source_document by canonical url match (Doc 4 SuttaCentral Tipitaka Canon)
+    doc_canon = lexicon_db.get_source_document("https://suttacentral.net/pitaka/sutta")
+    assert doc_canon is not None
+    assert "majjhima nikāya" in doc_canon["content"].lower()
+    assert "sabbāsava sutta" in doc_canon["content"].lower()
+
+
+def test_canonical_multiword_phrases_and_local_source_mirrors(lexicon_db, wsgi_client):
+    """
+    Verifies that canonical multi-word phrases (Majjhima Nikāya, Dīgha Nikāya,
+    Sabbāsava Sutta, Yoniso Manasikāra) are present in the lexicon with authentic
+    external URLs and local mirrored source files in databases/sources/ and dist/sources/.
+    """
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    mn = lexicon_db.lookup_term("majjhima nikaya")
+    assert mn is not None
+    assert mn["pali_diacritic"] == "Majjhima Nikāya"
+    assert mn["translation_brahm"] == "The Middle Length Discourses"
+    assert mn["translation_sujato"] == "Middle Discourses Collection"
+    assert mn["source_url"] == "https://suttacentral.net/mn"
+    assert mn["source_mirror_url"].startswith("sources/")
+
+    sabbasava = lexicon_db.lookup_term("sabbasava sutta")
+    assert sabbasava is not None
+    assert sabbasava["pali_diacritic"] == "Sabbāsava Sutta"
+    assert sabbasava["translation_bodhi"] == "All the Taints"
+    assert sabbasava["translation_sujato"] == "All the Defilements"
+    assert sabbasava["source_url"] == "https://suttacentral.net/mn2"
+
+    yoniso = lexicon_db.lookup_term("yoniso manasikara")
+    assert yoniso is not None
+    assert yoniso["pali_diacritic"] == "yoniso manasikāra"
+    assert yoniso["translation_bodhi"] == "careful attention"
+    assert yoniso["translation_sujato"] == "proper attention"
+    assert "work of the mind" in yoniso["translation_brahm"]
+
+    # Verify all source documents have local mirror files whose SHA-256 matches the database record
+    import hashlib
+    from deeper_dhamma.export_web import export_static_site
+
+    dist_dir = PROJECT_ROOT / "dist"
+    if not (dist_dir / "sources").exists():
+        export_static_site(dist_dir)
+
+    for doc in lexicon_db.list_source_documents():
+        local_path = PROJECT_ROOT / "databases" / doc["mirror_url"]
+        dist_mirror_path = dist_dir / doc["mirror_url"]
+        assert local_path.exists(), f"Missing local source file: {local_path}"
+        assert dist_mirror_path.exists(), f"Missing mirrored dist source file: {dist_mirror_path}"
+        raw_bytes = local_path.read_bytes()
+        assert dist_mirror_path.read_bytes() == raw_bytes
+        actual_sha = hashlib.sha256(raw_bytes).hexdigest()
+        assert actual_sha == doc["sha256"], f"SHA-256 mismatch for {local_path}"
+        assert len(raw_bytes) == doc["uncompressed_bytes"]
+
+
+def test_wordsync_multiword_phrase_highlighting_and_seeking(lexicon_db):
+    """
+    Verifies in headless Chrome that WordSync.formatTurnParagraphs greedily highlights
+    multi-word canonical Pali phrases ('Majjhima Nikaya', 'Sabbasava Sutta', 'Yoniso Manasikara')
+    as unified .pali-phrase spans with combined [wFirst.s, wLast.e] boundaries and shared domId.
+    """
+    import http.server
+    import subprocess
+    import tempfile
+    import threading
+    from pathlib import Path
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found for headless WordSync phrase test")
+
+    word_sync_js = (PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "word_sync.js").read_text(encoding="utf-8")
+    all_terms_json = json.dumps(lexicon_db.get_all_terms(), ensure_ascii=False)
+    report = {}
+
+    class PhraseHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            report.update(json.loads(body.decode("utf-8")))
+            self.send_response(200)
+            self.end_headers()
+
+        def do_GET(self):
+            html_doc = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+            <div id="container"></div>
+            <script>{word_sync_js}</script>
+            <script>
+            const terms = {all_terms_json};
+            WordSync.setPaliTerms(terms);
+
+            // Simulate Turn 18 with word timings
+            const sampleText = "It is defined in the Sabbasava Sutta, which is the second sutta of the Majjhima Nikaya, explaining Yoniso Manasikara.";
+            const rawTokens = sampleText.trim().split(/\\s+/);
+            WordSync.words = rawTokens.map((t, i) => ({{
+                s: 100 + i * 0.5,
+                e: 100 + i * 0.5 + 0.4,
+                turnIdx: 18,
+                wordIdxInTurn: i,
+                id: 'tw-' + i
+            }}));
+            WordSync.turnWordMap[18] = WordSync.words;
+
+            const renderedHtml = WordSync.formatTurnParagraphs(sampleText, 18);
+            const container = document.getElementById('container');
+            container.innerHTML = renderedHtml;
+
+            const paliSpans = Array.from(container.querySelectorAll('.pali-term')).map(el => ({{
+                text: el.textContent,
+                pali: el.dataset.pali,
+                isPhrase: el.classList.contains('pali-phrase'),
+                id: el.id,
+                start: parseFloat(el.dataset.start),
+                end: parseFloat(el.dataset.end)
+            }}));
+
+            // Check domId mapping for 'Majjhima' (word 14) and 'Nikaya,' (word 15)
+            const wMajjhima = WordSync.words[14];
+            const wNikaya = WordSync.words[15];
+
+            fetch('/report', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{
+                    paliSpans,
+                    majjhimaDomId: wMajjhima.domId,
+                    nikayaDomId: wNikaya.domId
+                }})
+            }});
+            </script></body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html_doc)))
+            self.end_headers()
+            self.wfile.write(html_doc)
+
+    class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
+        daemon_threads = True
+
+    server = ThreadedHTTPServer(("127.0.0.1", 0), PhraseHandler)
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_dir:
+            proc = subprocess.Popen([
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_dir}",
+                f"http://127.0.0.1:{port}/",
+            ])
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+    finally:
+        server.shutdown()
+
+    assert "paliSpans" in report
+    spans = report["paliSpans"]
+    pali_keys = [s["pali"] for s in spans]
+
+    # Must match unified phrases rather than fragmented 'majjhima' + 'nikaya'
+    assert "sabbasava sutta" in pali_keys
+    assert "sutta" in pali_keys
+    assert "majjhima nikaya" in pali_keys
+    assert "yoniso manasikara" in pali_keys
+    assert "majjhima" not in pali_keys
+    assert "nikaya" not in pali_keys
+
+    mn_span = next(s for s in spans if s["pali"] == "majjhima nikaya")
+    assert mn_span["isPhrase"] is True
+    assert mn_span["text"] == "Majjhima Nikaya,"
+    # Word 14 starts at 107.0s, Word 15 ends at 107.9s
+    assert abs(mn_span["start"] - 107.0) < 0.01
+    assert abs(mn_span["end"] - 107.9) < 0.01
+    assert report["majjhimaDomId"] == mn_span["id"]
+    assert report["nikayaDomId"] == mn_span["id"]
+
+
 
 
 

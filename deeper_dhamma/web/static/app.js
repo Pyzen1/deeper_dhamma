@@ -156,6 +156,7 @@
     docActiveTitle: document.getElementById('doc-active-title'),
     docActiveByline: document.getElementById('doc-active-byline'),
     docActiveRemoteLink: document.getElementById('doc-active-remote-link'),
+    docActiveMirrorLink: document.getElementById('doc-active-mirror-link'),
     docChipRetrieved: document.getElementById('doc-chip-retrieved'),
     docChipFormat: document.getElementById('doc-chip-format'),
     docChipSize: document.getElementById('doc-chip-size'),
@@ -2581,6 +2582,9 @@
     if (item.source_document_id) {
       sourceHtml += ` <button type="button" class="btn-lexicon-view-doc" data-doc-id="${escapeHtml(String(item.source_document_id))}" title="Read offline reference document in viewer">📜 View Offline Document</button>`;
     }
+    if (item.source_mirror_url) {
+      sourceHtml += ` <a href="${escapeHtml(item.source_mirror_url)}" target="_blank" rel="noopener noreferrer" class="lexicon-source-link" title="Inspect raw local source file (${escapeHtml(item.source_mirror_url)})">📦 Local Source Mirror ↗</a>`;
+    }
 
     return `
       <div class="lexicon-card">
@@ -2766,6 +2770,14 @@
       if (els.docActiveByline) els.docActiveByline.textContent = `Author: ${doc.author} • Publisher: ${doc.publisher || 'Canonical Reference'}`;
       if (els.docActiveRemoteLink) {
         els.docActiveRemoteLink.href = doc.url || '#';
+      }
+      if (els.docActiveMirrorLink) {
+        if (doc.mirror_url) {
+          els.docActiveMirrorLink.href = doc.mirror_url;
+          els.docActiveMirrorLink.style.display = 'inline-flex';
+        } else {
+          els.docActiveMirrorLink.style.display = 'none';
+        }
       }
       if (els.docChipRetrieved) els.docChipRetrieved.textContent = `📅 Retrieved: ${doc.retrieved_date || 'N/A'}`;
       if (els.docChipFormat) els.docChipFormat.textContent = `📄 Format: ${doc.content_format || 'text/markdown'}`;
@@ -3284,7 +3296,11 @@
         translation_brahm: termData.translation_brahm,
         translation_bodhi: termData.translation_bodhi,
         translation_sujato: termData.translation_sujato,
+        translation_brahmali: termData.translation_brahmali,
         english_description: termData.english_description,
+        source_url: termData.source_url,
+        source_mirror_url: termData.source_mirror_url,
+        source_document_id: termData.source_document_id,
         startSec: startSec,
         turnIdx: turnIdx,
         wordId: el.id || null,

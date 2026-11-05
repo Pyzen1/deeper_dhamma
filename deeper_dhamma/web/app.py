@@ -63,6 +63,13 @@ def create_app() -> Bottle:
         res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         return res
 
+    @app.route("/sources/<filepath:path>")
+    def serve_source_mirror(filepath: str):
+        sources_root = BUDDHISM_LEXICON_DB_PATH.parent / "sources"
+        res = static_file(filepath, root=str(sources_root))
+        res.set_header("Access-Control-Allow-Origin", "*")
+        return res
+
     @app.route("/")
     @app.route("/browse")
     @app.route("/lexicon")

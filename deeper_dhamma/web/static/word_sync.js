@@ -76,35 +76,122 @@
     },
 
     /**
-     * Ingests canonical Pali terms and establishes fast dual-keyed Map index.
+     * Ingests canonical Pali terms and establishes fast multi-keyed Map index
+     * supporting single words, multi-word canonical phrases, hyphenated compounds,
+     * and closed/spaced compound variants.
      */
     setPaliTerms: function (terms) {
       this.paliTermsMap.clear();
       if (!Array.isArray(terms)) return;
+
+      const registerKey = (rawKey, termObj) => {
+        if (!rawKey) return;
+        const k = String(rawKey).trim().toLowerCase().replace(/\s+/g, ' ');
+        if (!k) return;
+        if (!this.paliTermsMap.has(k)) {
+          this.paliTermsMap.set(k, termObj);
+        }
+        const folded = this.foldDiacritics(k);
+        if (folded && !this.paliTermsMap.has(folded)) {
+          this.paliTermsMap.set(folded, termObj);
+        }
+      };
+
       for (let i = 0; i < terms.length; i++) {
         const t = terms[i];
         if (!t) continue;
         if (t.pali_plain) {
           const plain = t.pali_plain.trim().toLowerCase();
-          this.paliTermsMap.set(plain, t);
-          this.paliTermsMap.set(this.foldDiacritics(plain), t);
+          registerKey(plain, t);
+          if (plain.includes('-')) {
+            registerKey(plain.replace(/-/g, ' '), t);
+            registerKey(plain.replace(/-/g, ''), t);
+          }
+          if (plain.includes(' ')) {
+            registerKey(plain.replace(/\s+/g, ''), t);
+          }
         }
         if (t.pali_diacritic) {
           const dia = t.pali_diacritic.trim().toLowerCase();
-          this.paliTermsMap.set(dia, t);
-          this.paliTermsMap.set(this.foldDiacritics(dia), t);
+          registerKey(dia, t);
+          if (dia.includes('-')) {
+            registerKey(dia.replace(/-/g, ' '), t);
+          }
+        }
+        let variants = t.phonetic_variants;
+        if (typeof variants === 'string') {
+          try {
+            variants = JSON.parse(variants);
+          } catch (_) {
+            variants = [];
+          }
+        }
+        if (Array.isArray(variants)) {
+          for (let j = 0; j < variants.length; j++) {
+            registerKey(variants[j], t);
+          }
         }
       }
     },
 
     /**
-     * Checks if a token corresponds to a registered canonical Pali term.
+     * Checks if a single token corresponds to a registered canonical Pali term.
      */
     matchPaliTerm: function (token) {
       if (!token || !this.paliTermsMap || this.paliTermsMap.size === 0) return null;
       const clean = token.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '').toLowerCase();
       if (clean.length < 3) return null;
       return this.paliTermsMap.get(clean) || this.paliTermsMap.get(this.foldDiacritics(clean)) || null;
+    },
+
+    /**
+     * Greedily matches the longest canonical Pali phrase (up to 4 words) or single term
+     * starting at `tokens[startIdx]` (where `tokens = sent.split(/(\s+)/)`).
+     */
+    matchPhraseAt: function (tokens, startIdx) {
+      if (!tokens || startIdx >= tokens.length || !this.paliTermsMap || this.paliTermsMap.size === 0) {
+        return null;
+      }
+
+      const candidates = [];
+      for (let step = 0; step < 4; step++) {
+        const ti = startIdx + step * 2;
+        if (ti >= tokens.length) break;
+        const rawTok = tokens[ti];
+        if (!rawTok || /^\s+$/.test(rawTok)) break;
+        const clean = rawTok.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '').toLowerCase();
+        if (!clean) break;
+        candidates.push({ tokenIndex: ti, raw: rawTok, clean });
+        // Do not bridge across clause-separating punctuation at the end of a token
+        if (/[,;:!?\)\]\u201d"']$/.test(rawTok)) break;
+      }
+
+      if (candidates.length === 0) return null;
+
+      for (let k = candidates.length; k >= 1; k--) {
+        if (k === 1) {
+          const single = candidates[0].clean;
+          if (single.length < 3) return null;
+          const term = this.paliTermsMap.get(single) || this.paliTermsMap.get(this.foldDiacritics(single));
+          if (term) {
+            return { term, wordCount: 1, endTokenIndex: candidates[0].tokenIndex };
+          }
+        } else {
+          const slice = candidates.slice(0, k);
+          const spaced = slice.map(c => c.clean).join(' ');
+          const closed = slice.map(c => c.clean).join('');
+          const term =
+            this.paliTermsMap.get(spaced) ||
+            this.paliTermsMap.get(this.foldDiacritics(spaced)) ||
+            this.paliTermsMap.get(closed) ||
+            this.paliTermsMap.get(this.foldDiacritics(closed));
+          if (term) {
+            return { term, wordCount: k, endTokenIndex: slice[k - 1].tokenIndex };
+          }
+        }
+      }
+
+      return null;
     },
 
     /**
@@ -793,46 +880,79 @@
           const wrappedSents = sents.map(sent => {
             const sIdx = sentCursorInTurn++;
             const tokens = sent.split(/(\s+)/);
-            const wrappedTokens = tokens.map(token => {
-              if (!token || /^\s+$/.test(token)) return token;
-              const pali = this.matchPaliTerm(token);
-              if (pali) {
-                return `<span class="pali-term" data-pali="${this.escapeHtml(pali.pali_plain)}" title="Pali: ${this.escapeHtml(pali.pali_diacritic)} — Click to view definition">${this.escapeHtml(token)}</span>`;
+            const wrappedTokens = [];
+            for (let i = 0; i < tokens.length; i++) {
+              const token = tokens[i];
+              if (!token || /^\s+$/.test(token)) {
+                wrappedTokens.push(token);
+                continue;
               }
-              return this.escapeHtml(token);
-            });
+              const match = this.matchPhraseAt(tokens, i);
+              if (match) {
+                const pali = match.term;
+                const phraseClass = match.wordCount > 1 ? ' pali-phrase' : '';
+                const spanText = tokens.slice(i, match.endTokenIndex + 1).join('');
+                wrappedTokens.push(
+                  `<span class="pali-term${phraseClass}" data-pali="${this.escapeHtml(pali.pali_plain)}" title="Pali: ${this.escapeHtml(pali.pali_diacritic)} — Click to view definition">${this.escapeHtml(spanText)}</span>`
+                );
+                i = match.endTokenIndex;
+              } else {
+                wrappedTokens.push(this.escapeHtml(token));
+              }
+            }
             return `<span class="transcript-sentence" id="turn-${turnIdx}-sent-${sIdx}" data-turn-idx="${turnIdx}" data-sent-idx="${sIdx}">${wrappedTokens.join('')}</span>`;
           });
           return `<p class="turn-p">${wrappedSents.join('')}</p>`;
         }).join('');
       }
 
-      // If exact word timings ARE available, wrap words inline without changing any whitespace
+      // If exact word timings ARE available, wrap words and multi-word canonical phrases inline
       let wordCursorInTurn = 0;
       return paragraphs.map(pText => {
         const sents = pText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [pText];
         const wrappedSents = sents.map(sent => {
           const sIdx = sentCursorInTurn++;
           const tokens = sent.split(/(\s+)/);
-          const wrappedTokens = tokens.map(token => {
+          const wrappedTokens = [];
+          for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
             if (!token || /^\s+$/.test(token)) {
-              return token; // Preserves exact whitespace
+              wrappedTokens.push(token); // Preserves exact whitespace
+              continue;
             }
-            const pali = this.matchPaliTerm(token);
-            const paliClass = pali ? ' pali-term' : '';
+            const match = this.matchPhraseAt(tokens, i);
+            const pali = match ? match.term : null;
+            const numWords = match ? match.wordCount : 1;
+            const spanText = match ? tokens.slice(i, match.endTokenIndex + 1).join('') : token;
+            const paliClass = pali ? (numWords > 1 ? ' pali-term pali-phrase' : ' pali-term') : '';
             const paliAttr = pali ? ` data-pali="${this.escapeHtml(pali.pali_plain)}"` : '';
+
             if (wordCursorInTurn < turnWords.length) {
-              const w = turnWords[wordCursorInTurn++];
+              const wFirst = turnWords[wordCursorInTurn];
+              let wLast = wFirst;
+              for (let wStep = 0; wStep < numWords && wordCursorInTurn < turnWords.length; wStep++) {
+                const w = turnWords[wordCursorInTurn++];
+                w.domId = wFirst.id;
+                wLast = w;
+              }
               const titleText = pali
                 ? `Pali: ${pali.pali_diacritic} — Click to seek / view definition`
-                : `Click to seek to ${this.formatSeconds(w.s)}`;
-              return `<span class="transcript-word${paliClass}" id="${w.id}" data-turn-idx="${turnIdx}" data-word-idx="${w.wordIdxInTurn}" data-start="${w.s}" data-end="${w.e}"${paliAttr} title="${this.escapeHtml(titleText)}">${this.escapeHtml(token)}</span>`;
+                : `Click to seek to ${this.formatSeconds(wFirst.s)}`;
+              wrappedTokens.push(
+                `<span class="transcript-word${paliClass}" id="${wFirst.id}" data-turn-idx="${turnIdx}" data-word-idx="${wFirst.wordIdxInTurn}" data-start="${wFirst.s}" data-end="${wLast.e}"${paliAttr} title="${this.escapeHtml(titleText)}">${this.escapeHtml(spanText)}</span>`
+              );
+            } else if (pali) {
+              wrappedTokens.push(
+                `<span class="pali-term${numWords > 1 ? ' pali-phrase' : ''}"${paliAttr} title="Pali: ${this.escapeHtml(pali.pali_diacritic)} — Click to view definition">${this.escapeHtml(spanText)}</span>`
+              );
+            } else {
+              wrappedTokens.push(this.escapeHtml(spanText));
             }
-            if (pali) {
-              return `<span class="pali-term"${paliAttr} title="Pali: ${this.escapeHtml(pali.pali_diacritic)} — Click to view definition">${this.escapeHtml(token)}</span>`;
+
+            if (match) {
+              i = match.endTokenIndex;
             }
-            return this.escapeHtml(token);
-          });
+          }
           return `<span class="transcript-sentence" id="turn-${turnIdx}-sent-${sIdx}" data-turn-idx="${turnIdx}" data-sent-idx="${sIdx}">${wrappedTokens.join('')}</span>`;
         });
         return `<p class="turn-p">${wrappedSents.join('')}</p>`;
@@ -859,7 +979,8 @@
       if (targetIdx >= 0) {
         if (this.activeWordIdx !== targetIdx) {
           const targetWord = this.words[targetIdx];
-          const newSpan = document.getElementById(targetWord.id);
+          const spanId = targetWord.domId || targetWord.id;
+          const newSpan = document.getElementById(spanId);
 
           if (newSpan) {
             this.activeWordIdx = targetIdx;
@@ -869,15 +990,16 @@
             newSpan.classList.add('active-word');
             this.activeWordEl = newSpan;
 
-            // Trigger live companion lookup if word is an annotated Pali doctrinal term
+            // Trigger live companion lookup if word/phrase is an annotated Pali doctrinal term
             if (newSpan.classList.contains('pali-term') && newSpan.dataset && newSpan.dataset.pali) {
-              if (this._lastSpokenWordId !== targetWord.id) {
-                this._lastSpokenWordId = targetWord.id;
+              if (this._lastSpokenWordId !== spanId) {
+                this._lastSpokenWordId = spanId;
                 const pKey = newSpan.dataset.pali;
+                const spanStart = parseFloat(newSpan.dataset.start);
                 if (typeof this.onPaliTermSpoken === 'function') {
                   this.onPaliTermSpoken(pKey, this.paliTermsMap.get(pKey), {
-                    wordId: targetWord.id,
-                    startSec: targetWord.s,
+                    wordId: spanId,
+                    startSec: !isNaN(spanStart) ? spanStart : targetWord.s,
                   });
                 }
               }

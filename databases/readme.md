@@ -4,7 +4,8 @@ This directory centralizes all SQLite databases utilized by the BSWA Deeper Dham
 
 ```text
 databases/
-├── buddhism_lexicon.db     # Master Pali terminology, translations & phonetic rules
+├── sources/                # Pristine local copies of upstream authority documents (mirrored to dist/sources/)
+├── buddhism_lexicon.db     # Master Pali terminology, canonical phrases, translations & phonetic rules
 ├── dhamma_transcripts.db   # Canonical transcripts archive & FTS5 search index
 ├── voiceprints.db          # Reference speaker embeddings gallery (ECAPA-TDNN)
 └── readme.md               # Architecture, lifecycle & separation rationale
@@ -51,18 +52,20 @@ While consolidating these files under a single `databases/` folder makes discove
 
 ## Database Overview & Schemas
 
-### 1. `buddhism_lexicon.db`
-* **File:** `databases/buddhism_lexicon.db` (~1.17 MB)
+### 1. `buddhism_lexicon.db` & `databases/sources/`
+* **File:** `databases/buddhism_lexicon.db` (~1.25 MB)
+* **Local Upstream Archive:** `databases/sources/` (mirrored into `dist/sources/` during `python main.py web --build`)
 * **Status:** Tracked in Git
-* **Python Interface:** `deeper_dhamma.lexicon.BuddhismLexiconDatabase`, `deeper_dhamma.terminology.TerminologyEditor`
+* **Python Interface:** `deeper_dhamma.lexicon.BuddhismLexiconDatabase`, `deeper_dhamma.terminology.TerminologyEditor`, `deeper_dhamma.build_lexicon`
 * **Key Tables:**
-  * `terms`: 2,234 doctrinal & monastic Vinaya entries with diacritics, plain Romanization, categories, foreign key `source_document_id`, and teacher translation columns (`translation_bodhi`, `translation_sujato`, `translation_brahm`, `translation_brahmali`).
-  * `phrase_rules`: 14 contextual phonetic correction rules that intercept Whisper ASR misrecognitions.
-  * `source_documents`: 3 canonical offline authority reference documents with raw content (`content_text`), zlib compression (`content_compressed`), and SHA-256 integrity hashes:
-    1. **Pali Glossary for Bhikkhus Bodhi and Sujato** (1,052 terms comparative concordance table; direct URL: `https://discourse.suttacentral.net/t/pali-glossary-for-bhikkhus-bodhi-and-sujato/12008`).
-    2. **SuttaCentral Vinaya Piṭaka: Monastic Law of the Theravāda School** by Bhikkhu Brahmali (1,309 terms monastic law table; direct URL: `https://suttacentral.net/edition/pli-tv-vi/en/brahmali/appendix-glossary`).
-    3. **The Word of the Buddha: BSWA Forest Meditation & Dhamma Glossary** by Ajahn Brahm (54 terms meditation & monastic table; direct URL: `https://bswa.org/teaching/the-word-of-the-buddha-book/`).
-  * `v_terms`: SQL view joining `terms` with `source_documents` for zero-overhead client retrieval.
+  * `terms`: 2,447 doctrinal, canonical text/sutta, & monastic Vinaya entries with diacritics, plain Romanization, categories, foreign key `source_document_id`, per-item `source_url`, and teacher translation columns (`translation_bodhi`, `translation_sujato`, `translation_brahm`, `translation_brahmali`). Zero terms are hardcoded in Python; all entries are deterministically parsed from `databases/sources/`.
+  * `phrase_rules`: Contextual phonetic correction rules that intercept Whisper ASR misrecognitions.
+  * `source_documents`: 4 canonical offline authority reference documents with local mirror path (`mirror_url`), raw content (`content_text`), zlib compression (`content_compressed`), and SHA-256 integrity hashes of the pristine source files:
+    1. **Pali Glossary for Bhikkhus Bodhi and Sujato** (1,063 terms comparative concordance table; local source: `sources/suttacentral_bodhi_sujato_glossary.json`; canonical URL: `https://discourse.suttacentral.net/t/pali-glossary-for-bhikkhus-bodhi-and-sujato/12008`).
+    2. **SuttaCentral Vinaya Piṭaka: Monastic Law of the Theravāda School** by Bhikkhu Brahmali (1,302 unique terms monastic law table; local source: `sources/suttacentral_brahmali_vinaya_glossary.html`; canonical URL: `https://suttacentral.net/edition/pli-tv-vi/en/brahmali/appendix-glossary`).
+    3. **The Word of the Buddha: BSWA Glossary & Canonical Translations** by Ajahn Brahm (55 terms & canonical book titles parsed from `sources/bswa_word_of_the_buddha_2024.pdf`; canonical URL: `https://bswa.org/teaching/the-word-of-the-buddha-book/`).
+    4. **SuttaCentral Tipiṭaka: Canonical Nikāyas & Discourses (DN & MN)** by Bhikkhu Sujato & Bhikkhu Bodhi (219 Piṭaka, Nikāya, and DN/MN sutta titles parsed from `sources/suttacentral_super_name_root.json`, `sources/suttacentral_super_name_en_sujato.json`, `sources/suttacentral_suttaplex_dn.json`, and `sources/suttacentral_suttaplex_mn.json`; canonical URL: `https://suttacentral.net/pitaka/sutta`).
+  * `v_terms`: SQL view joining `terms` with `source_documents` (`COALESCE(t.source_url, s.url) AS source_url`, `s.mirror_url AS source_mirror_url`) for zero-overhead client retrieval.
   * `fts_terms`: SQLite FTS5 virtual table for sub-millisecond full-text lexical search.
 
 ### 2. `voiceprints.db`

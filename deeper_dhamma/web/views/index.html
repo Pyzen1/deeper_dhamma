@@ -41,7 +41,7 @@
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-documents-btn" data-tab="documents-view">
           <span class="nav-icon">📜</span>
           <span class="nav-label">Documents</span>
-          <span class="badge" id="docs-count-badge">3</span>
+          <span class="badge" id="docs-count-badge">4</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-transcript-btn" data-tab="transcript-view" style="display: none;">
           <span class="nav-icon">📜</span>
@@ -313,11 +313,10 @@
             <span class="filter-label">Category:</span>
             <button type="button" class="cat-pill active" data-cat="all">All</button>
             <button type="button" class="cat-pill" data-cat="meditation">Meditation</button>
-            <button type="button" class="cat-pill" data-cat="hindrance">Hindrances</button>
             <button type="button" class="cat-pill" data-cat="doctrine">Doctrine</button>
+            <button type="button" class="cat-pill" data-cat="sutta_canon">Sutta Canon</button>
             <button type="button" class="cat-pill" data-cat="vinaya">Vinaya</button>
             <button type="button" class="cat-pill" data-cat="monastic_life">Monastic Life</button>
-            <button type="button" class="cat-pill" data-cat="monastery">Monasteries</button>
           </div>
 
           <!-- Alphabet A-Z Bar (for Browse All mode) -->
@@ -389,7 +388,7 @@
               <span class="doc-tab-icon">📘</span>
               <span class="doc-tab-text">
                 <span class="doc-tab-name">Bodhi &amp; Sujato Glossary</span>
-                <span class="doc-tab-sub">1,052 Terms Comparative Table</span>
+                <span class="doc-tab-sub">1,063 Terms Comparative Table</span>
               </span>
             </button>
             <button type="button" class="doc-tab-btn" data-doc-id="2" id="doc-tab-btn-2">
@@ -402,8 +401,15 @@
             <button type="button" class="doc-tab-btn" data-doc-id="3" id="doc-tab-btn-3">
               <span class="doc-tab-icon">🪷</span>
               <span class="doc-tab-text">
-                <span class="doc-tab-name">Ajahn Brahm Meditation</span>
-                <span class="doc-tab-sub">54 Terms Forest Dhamma Table</span>
+                <span class="doc-tab-name">The Word of the Buddha</span>
+                <span class="doc-tab-sub">55 Terms Ajahn Brahm 2024 PDF</span>
+              </span>
+            </button>
+            <button type="button" class="doc-tab-btn" data-doc-id="4" id="doc-tab-btn-4">
+              <span class="doc-tab-icon">🏛️</span>
+              <span class="doc-tab-text">
+                <span class="doc-tab-name">SuttaCentral Tipiṭaka Canon</span>
+                <span class="doc-tab-sub">219 Nikāya &amp; Sutta Titles</span>
               </span>
             </button>
           </div>
@@ -416,7 +422,10 @@
               <h3 class="doc-meta-title" id="doc-active-title">Loading document...</h3>
               <div class="doc-meta-byline" id="doc-active-byline"></div>
             </div>
-            <div class="doc-meta-actions">
+            <div class="doc-meta-actions" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <a href="#" target="_blank" rel="noopener noreferrer" class="btn-secondary" id="doc-active-mirror-link" title="Download or inspect the local mirrored source document used to build this database">
+                📦 Local Source Mirror ↗
+              </a>
               <a href="#" target="_blank" rel="noopener noreferrer" class="btn-primary" id="doc-active-remote-link">
                 Open Canonical Source ↗
               </a>

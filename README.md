@@ -18,11 +18,14 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - Candidate-aware hysteresis ($\ge 0.42$ for nominated teachers, $\ge 0.48$ for unprofiled third-party monastics) with paralinguistic resilience against laughter, coughs, and throat-clearing.
   - Uniform acoustic analysis: every turn in every talk is analyzed individually, eliminating false-monologue assumptions.
 - **Buddhist Reference Terminology Editor & Canonical Authority Documents**:
-  - 2,234 canonical Pali entries covering doctrinal concepts and Vinaya monastic law across Theravada traditions.
-  - Three bitstream-verified offline authority reference texts stored with SHA-256 integrity hashes:
+  - 2,447 canonical Pali entries & multi-word phrases covering doctrinal concepts, Tipiṭaka text titles, and Vinaya monastic law across Theravada traditions.
+  - Deterministically compiled from pristine local upstream sources (`databases/sources/`) with authentic external links (`source_url`) and mirrored offline verification copies (`dist/sources/`).
+  - Four bitstream-verified offline authority reference texts stored with SHA-256 integrity hashes:
     1. *Bodhi & Sujato Glossary* (1,052 terms comparative concordance table)
     2. *Brahmali Vinaya Piṭaka* (1,309 terms monastic law table)
-    3. *Ajahn Brahm Meditation & Dhamma Glossary* (54 terms forest retreat meditation table)
+    3. *Ajahn Brahm Meditation & Dhamma Glossary* (16 terms extracted from *The Word of the Buddha*, BSWA 2024 PDF)
+    4. *SuttaCentral Tipiṭaka Canon* (216 canonical basket/nikāya names and DN/MN sutta titles)
+  - Greedy multi-word phrase highlighting and phrase-level audio seeking (`Majjhima Nikāya`, `Sabbāsava Sutta`, `Yoniso Manasikāra`, etc.) in the live Lexicon Companion.
   - Canonical dictionary normalization in standard Latin Pali (`jhana`, `samadhi`, `anatta`, `Bodhinyana`, `Rains Retreat`).
   - Inlines structured audit changelogs into episode metadata.
 - **Dynamic Serverless Web Application (SQLite WASM & REST)**:
@@ -107,13 +110,15 @@ deeper_dhamma/
 ├── main.py                     # Unified CLI entry point
 ├── pyproject.toml              # Modern Python package configuration
 ├── databases/                  # Centralized SQLite databases directory
-│   ├── README.md               # Architecture & lifecycle documentation
-│   ├── buddhism_lexicon.db     # Master SQLite Lexicon (SuttaCentral Bodhi/Sujato & BSWA Brahm/Brahmali)
+│   ├── readme.md               # Architecture & lifecycle documentation
+│   ├── sources/                # Pristine upstream authority documents (JSON, HTML, PDF)
+│   ├── buddhism_lexicon.db     # Master SQLite Lexicon (SuttaCentral & BSWA authorities)
 │   ├── dhamma_transcripts.db   # Canonical SQLite database & FTS5 search index
 │   └── voiceprints.db          # Reference speaker embeddings gallery
 ├── deeper_dhamma/              # Consolidated Python package
 │   ├── config.py               # C:\ai-models env vars & Windows DLL loading
 │   ├── cli.py                  # Subcommand router
+│   ├── build_lexicon.py        # Deterministic lexicon compiler from databases/sources/
 │   ├── catalog.py              # Monastic catalog & era determination
 │   ├── audio.py                # Sliced soundfile loading & resampling
 │   ├── encoder.py              # SpeechBrain ECAPA-TDNN embeddings
