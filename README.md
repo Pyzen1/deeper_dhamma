@@ -29,6 +29,10 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - 100% dynamic, on-demand querying directly from SQLite (zero hardcoded HTML).
   - Diacritic-insensitive real-time search filtering across all lexicon terms and authority documents.
   - Live audio companion highlighting Pali terms dynamically during playback.
+  - Full browser Back and Forward history support (`popstate` SPA history routing) without interrupting audio streaming.
+  - Universal shareable URLs for text messages and email: supports hashes (`/#talk/pb28113880`), query parameters (`/?talk=pb28113880`), and clean server paths (`/talk/pb28113880`).
+  - Precision timestamp links (`?t=125` or `?t=2m05s` or `?t=02:05`): automatically scrolls to the turn, highlights the speech segment, and starts playback at that exact second.
+  - 1-click "Share Talk" and "Share Moment" (🔗) copy-to-clipboard buttons with toast feedback.
 - **Lossless On-Demand Format Generation**:
   - Generates Markdown (`.md`), WebVTT (`.vtt`), or JSON (`.json`) on the fly directly from SQLite.
 

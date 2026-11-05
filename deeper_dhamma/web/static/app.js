@@ -16,6 +16,7 @@
     playbackSpeed: 1.0,
     activeTab: 'search-view',
     previousTab: 'search-view',
+    historyDepth: 0,
     stats: null,
     teachers: {},
     catalog: [],
@@ -171,6 +172,7 @@
     drawerMetaInfo: document.getElementById('drawer-meta-info'),
     drawerPlayFullBtn: document.getElementById('drawer-play-full-btn'),
     drawerPodbeanLink: document.getElementById('drawer-podbean-link'),
+    drawerShareBtn: document.getElementById('drawer-share-btn'),
     drawerTurns: document.getElementById('drawer-turns-container'),
 
     // Lexicon Companion Elements
@@ -375,6 +377,234 @@
   }
 
   // ==========================================================================
+  // Timestamp & URL Parsing Helpers
+  // ==========================================================================
+
+  function parseTimestampToSeconds(val) {
+    if (typeof val === 'number') return val;
+    if (!val || typeof val !== 'string') return 0;
+    const s = val.trim().toLowerCase();
+
+    // 1. Colon format mm:ss or hh:mm:ss
+    if (s.includes(':')) {
+      const parts = s.split(':').map(Number);
+      if (parts.some(isNaN)) return 0;
+      if (parts.length === 2) return parts[0] * 60 + parts[1];
+      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+
+    // 2. Unit format like 1h2m3s or 90s or 5m
+    let totalSec = 0;
+    let matchedUnit = false;
+    const hMatch = s.match(/(\d+(?:\.\d+)?)\s*h/);
+    if (hMatch) { totalSec += parseFloat(hMatch[1]) * 3600; matchedUnit = true; }
+    const mMatch = s.match(/(\d+(?:\.\d+)?)\s*m/);
+    if (mMatch) { totalSec += parseFloat(mMatch[1]) * 60; matchedUnit = true; }
+    const sMatch = s.match(/(\d+(?:\.\d+)?)\s*s/);
+    if (sMatch) { totalSec += parseFloat(sMatch[1]); matchedUnit = true; }
+    if (matchedUnit) return totalSec;
+
+    // 3. Fallback raw integer / float
+    const num = parseFloat(s);
+    return isNaN(num) ? 0 : Math.max(0, num);
+  }
+
+  // ==========================================================================
+  // Toast & Clipboard Helpers
+  // ==========================================================================
+
+  function showToast(message) {
+    let toast = document.getElementById('app-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'app-toast';
+      toast.className = 'app-toast';
+      document.body.appendChild(toast);
+    }
+    toast.innerHTML = `<span class="toast-icon">✓</span> <span>${escapeHtml(message)}</span>`;
+    toast.classList.add('show');
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => {
+      toast.classList.remove('show');
+    }, 2800);
+  }
+
+  function copyTextToClipboard(text, successMsg = 'Link copied to clipboard!') {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => {
+        showToast(successMsg);
+      }).catch(() => {
+        fallbackCopyText(text, successMsg);
+      });
+    } else {
+      fallbackCopyText(text, successMsg);
+    }
+  }
+
+  function fallbackCopyText(text, successMsg) {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      showToast(successMsg);
+    } catch (err) {
+      window.prompt('Copy this link:', text);
+    }
+    document.body.removeChild(textArea);
+  }
+
+  // ==========================================================================
+  // SPA History & Hash Router
+  // ==========================================================================
+
+  const router = {
+    parseLocation() {
+      const searchParams = new URLSearchParams(window.location.search || '');
+      const hash = window.location.hash.replace(/^#\/?/, '').trim();
+      const pathname = window.location.pathname.replace(/^\/+/, '').trim();
+
+      let route = 'search';
+      let id = null;
+      const params = {};
+
+      // 1. Parse Query String parameters (?talk=pb... or ?q=... or ?t=...)
+      for (const [k, v] of searchParams.entries()) {
+        params[k.toLowerCase()] = v;
+      }
+
+      if (params.talk || params.episode || params.ep || params.id) {
+        route = 'talk';
+        id = params.talk || params.episode || params.ep || params.id;
+      } else if (params.q) {
+        route = 'search';
+      } else if (params.pali || params.term) {
+        route = 'lexicon';
+        params.term = params.pali || params.term;
+      } else if (params.doc || params.document) {
+        route = 'documents';
+        params.id = params.doc || params.document;
+      } else if (params.tab) {
+        route = params.tab.replace(/-view$/, '').toLowerCase();
+      }
+
+      // 2. Parse Pathname (/talk/pb... or /browse or /lexicon or /documents)
+      if (pathname) {
+        if (pathname.startsWith('talk/')) {
+          route = 'talk';
+          id = pathname.replace('talk/', '').split('/')[0].trim();
+        } else if (['browse', 'lexicon', 'documents', 'search'].includes(pathname)) {
+          route = pathname;
+        }
+      }
+
+      // 3. Parse Hash (#talk/pb... or #browse or #search?q=...)
+      if (hash) {
+        const [pathPart, hashQueryPart] = hash.split('?');
+        if (hashQueryPart) {
+          const hashParams = new URLSearchParams(hashQueryPart);
+          for (const [k, v] of hashParams.entries()) {
+            params[k.toLowerCase()] = v;
+          }
+        }
+        const cleanPath = pathPart.replace(/^\/+/, '').trim();
+        if (cleanPath.startsWith('talk/')) {
+          route = 'talk';
+          id = cleanPath.replace('talk/', '').trim();
+        } else if (['browse', 'lexicon', 'documents', 'search'].includes(cleanPath)) {
+          route = cleanPath;
+        } else if (cleanPath) {
+          route = cleanPath;
+        }
+      }
+
+      // Parse timestamp if present (t=120 or t=2:05)
+      if (params.t) {
+        params.time = parseTimestampToSeconds(params.t);
+      }
+
+      return { route, id, params };
+    },
+
+    navigate(hashString, replace = false) {
+      const cleanHash = '#' + hashString.replace(/^#/, '');
+      if (window.location.hash === cleanHash) return;
+
+      if (replace) {
+        window.history.replaceState({ route: cleanHash }, '', cleanHash);
+      } else {
+        state.historyDepth++;
+        window.history.pushState({ route: cleanHash }, '', cleanHash);
+      }
+      this.handleRoute();
+    },
+
+    async handleRoute() {
+      const { route, id, params } = this.parseLocation();
+
+      switch (route) {
+        case 'talk':
+          if (id) {
+            const targetOpts = (params.time !== undefined && !isNaN(params.time)) ? {
+              fallbackSec: params.time,
+              autoPlay: true,
+            } : null;
+            await openTranscriptDrawer(id, targetOpts, { skipHistory: true });
+          } else {
+            this.navigate('search', true);
+          }
+          break;
+
+        case 'browse':
+          switchTab('browse-view', { skipHistory: true });
+          break;
+
+        case 'lexicon':
+          switchTab('lexicon-view', { skipHistory: true });
+          if (params.term) {
+            if (els.lexiconInput) els.lexiconInput.value = params.term;
+            if (els.lexAlphabetBar) els.lexAlphabetBar.style.display = 'none';
+            if (els.lexPagination) els.lexPagination.style.display = 'none';
+            if (els.lexCountText) els.lexCountText.textContent = `Search results for "${params.term}"`;
+            executeLexiconSearch(params.term);
+          }
+          break;
+
+        case 'documents':
+          if (params.id) {
+            state.documents.activeDocId = parseInt(params.id, 10) || 1;
+          }
+          switchTab('documents-view', { skipHistory: true });
+          break;
+
+        case 'search':
+        default:
+          switchTab('search-view', { skipHistory: true });
+          const targetQ = params.q || '';
+          if (targetQ !== state.currentQuery) {
+            if (els.searchInput) {
+              els.searchInput.value = targetQ;
+              els.clearSearchBtn.style.display = targetQ.length > 0 ? 'inline-block' : 'none';
+            }
+            executeSearch(targetQ, { skipHistory: true });
+          } else if (!targetQ && state.currentQuery) {
+            if (els.searchInput) {
+              els.searchInput.value = '';
+              els.clearSearchBtn.style.display = 'none';
+            }
+            executeSearch('', { skipHistory: true });
+          }
+          break;
+      }
+    },
+  };
+
+  // ==========================================================================
   // Initialization
   // ==========================================================================
 
@@ -392,6 +622,18 @@
         loadBrowseCatalog(),
         ensurePaliTermsLoaded(),
       ]);
+
+      // Initialize router state from URL (hash, search params, or pathname)
+      const hasInitialRoute = Boolean(
+        window.location.hash ||
+        window.location.search ||
+        (window.location.pathname && window.location.pathname.length > 1)
+      );
+      if (hasInitialRoute) {
+        await router.handleRoute();
+      } else {
+        window.history.replaceState({ route: '#search' }, '', '#search');
+      }
     } catch (err) {
       console.error('[App] Failed to initialize database service:', err);
       if (els.browseGrid) {
@@ -1163,7 +1405,7 @@
           const query = btn.dataset.query;
           els.searchInput.value = query;
           els.clearSearchBtn.style.display = 'inline-block';
-          executeSearch(query);
+          executeSearch(query, { pushHistory: true });
         }
       });
     }
@@ -1181,9 +1423,19 @@
 
     if (els.transcriptBackBtn) {
       els.transcriptBackBtn.addEventListener('click', () => {
-        switchTab(state.previousTab || 'search-view');
+        if (state.historyDepth > 0 && window.location.hash.startsWith('#talk/')) {
+          window.history.back();
+        } else {
+          switchTab(state.previousTab || 'search-view');
+        }
       });
     }
+
+    // Browser Back / Forward History Navigation
+    window.addEventListener('popstate', () => {
+      state.historyDepth = Math.max(0, state.historyDepth - 1);
+      router.handleRoute();
+    });
 
     const btnToggleWordSync = document.getElementById('btn-toggle-word-sync');
     if (btnToggleWordSync) {
@@ -1367,11 +1619,11 @@
         if (btn) {
           const term = btn.dataset.term;
           if (term) {
-            switchTab('search-view');
             if (els.searchInput) {
               els.searchInput.value = term;
-              executeSearch(term);
+              els.clearSearchBtn.style.display = 'inline-block';
             }
+            executeSearch(term, { pushHistory: true });
           }
           return;
         }
@@ -1432,7 +1684,11 @@
           return;
         }
         if (state.activeTab === 'transcript-view') {
-          switchTab(state.previousTab || 'search-view');
+          if (state.historyDepth > 0 && window.location.hash.startsWith('#talk/')) {
+            window.history.back();
+          } else {
+            switchTab(state.previousTab || 'search-view');
+          }
           return;
         }
       }
@@ -1450,7 +1706,7 @@
     });
   }
 
-  function switchTab(viewId) {
+  function switchTab(viewId, options = {}) {
     state.activeTab = viewId;
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === viewId);
@@ -1465,7 +1721,25 @@
       loadLexiconView();
     }
     if (viewId === 'documents-view') {
-      loadDocumentInView(state.documents.activeDocId, state.documents.filterQuery);
+      loadDocumentInView(state.documents.activeDocId, state.documents.filterQuery, { skipHistory: options.skipHistory });
+    }
+
+    if (!options.skipHistory) {
+      const tabToRouteMap = {
+        'search-view': state.currentQuery ? `search?q=${encodeURIComponent(state.currentQuery)}` : 'search',
+        'browse-view': 'browse',
+        'lexicon-view': 'lexicon',
+        'documents-view': state.documents.activeDocId ? `documents?id=${state.documents.activeDocId}` : 'documents',
+        'transcript-view': state.currentEpisode ? `talk/${state.currentEpisode.id}` : 'search',
+      };
+      const targetRoute = tabToRouteMap[viewId];
+      if (targetRoute) {
+        const cleanHash = '#' + targetRoute.replace(/^#/, '');
+        if (window.location.hash !== cleanHash) {
+          state.historyDepth++;
+          window.history.pushState({ route: cleanHash }, '', cleanHash);
+        }
+      }
     }
   }
 
@@ -1473,7 +1747,7 @@
   // Full-Text Search Execution
   // ==========================================================================
 
-  async function executeSearch(query) {
+  async function executeSearch(query, options = {}) {
     state.currentQuery = query;
     const teacherVal = (els.teacherFilter && els.teacherFilter.value) || '';
     const yearVal = (els.yearFilter && els.yearFilter.value) || '';
@@ -1500,11 +1774,29 @@
       state.currentFilteredTalks = [];
       if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = '0';
       if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = true;
+
+      if (!options.skipHistory && state.activeTab === 'search-view') {
+        if (window.location.hash !== '#search') {
+          window.history.replaceState({ route: '#search' }, '', '#search');
+        }
+      }
       return;
     }
 
-    // Make sure we are on search tab
-    switchTab('search-view');
+    // Make sure we are on search tab without pushing a duplicate state
+    switchTab('search-view', { skipHistory: true });
+
+    if (!options.skipHistory) {
+      const searchHash = query ? `#search?q=${encodeURIComponent(query)}` : '#search';
+      if (window.location.hash !== searchHash) {
+        if (options.pushHistory) {
+          state.historyDepth++;
+          window.history.pushState({ route: searchHash }, '', searchHash);
+        } else {
+          window.history.replaceState({ route: searchHash }, '', searchHash);
+        }
+      }
+    }
 
     // Case 1: Search query provided (FTS search)
     if (query) {
@@ -2433,8 +2725,16 @@
   // Canonical Authority Source Documents Tab & Rendered Viewer
   // ==========================================================================
 
-  async function loadDocumentInView(docId = 1, filterTerm = '') {
+  async function loadDocumentInView(docId = 1, filterTerm = '', options = {}) {
     state.documents.activeDocId = parseInt(docId, 10) || 1;
+
+    if (!options.skipHistory && state.activeTab === 'documents-view') {
+      const docHash = `#documents?id=${state.documents.activeDocId}`;
+      if (window.location.hash !== docHash) {
+        state.historyDepth++;
+        window.history.pushState({ route: docHash }, '', docHash);
+      }
+    }
 
     // Update active tab button in doc-tabs-bar
     document.querySelectorAll('.doc-tab-btn').forEach(btn => {
@@ -2839,7 +3139,12 @@
 
   function openFullLexiconEntry(termKey) {
     if (!termKey) return;
-    switchTab('lexicon-view');
+    switchTab('lexicon-view', { skipHistory: true });
+    const cleanHash = `#lexicon?term=${encodeURIComponent(termKey)}`;
+    if (window.location.hash !== cleanHash) {
+      state.historyDepth++;
+      window.history.pushState({ route: cleanHash }, '', cleanHash);
+    }
     if (els.lexiconInput) {
       els.lexiconInput.value = termKey;
     }
@@ -3124,7 +3429,7 @@
   // Transcript Drawer / Modal
   // ==========================================================================
 
-  async function openTranscriptDrawer(episodeId, targetOpts = null) {
+  async function openTranscriptDrawer(episodeId, targetOpts = null, options = {}) {
     resetLexCompanion();
     if (state.activeTab !== 'transcript-view') {
       state.previousTab = state.activeTab;
@@ -3132,7 +3437,16 @@
     if (els.tabTranscriptBtn) {
       els.tabTranscriptBtn.style.display = 'inline-flex';
     }
-    switchTab('transcript-view');
+    switchTab('transcript-view', { skipHistory: true });
+
+    if (!options.skipHistory) {
+      const cleanHash = `#talk/${episodeId}`;
+      if (window.location.hash !== cleanHash) {
+        state.historyDepth++;
+        window.history.pushState({ route: cleanHash }, '', cleanHash);
+      }
+    }
+
     if (!targetOpts) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -3163,6 +3477,16 @@
         els.drawerPodbeanLink.style.display = 'inline-flex';
       } else {
         els.drawerPodbeanLink.style.display = 'none';
+      }
+
+      if (els.drawerShareBtn) {
+        els.drawerShareBtn.onclick = () => {
+          let shareUrl = `${window.location.origin}/#talk/${ep.id}`;
+          if (els.nativeAudio && !els.nativeAudio.paused && state.currentEpisode && state.currentEpisode.id === ep.id && els.nativeAudio.currentTime > 5) {
+            shareUrl += `?t=${Math.floor(els.nativeAudio.currentTime)}`;
+          }
+          copyTextToClipboard(shareUrl, 'Talk link copied to clipboard!');
+        };
       }
 
       els.drawerPlayFullBtn.onclick = () => {
@@ -3201,9 +3525,14 @@
                   <span class="turn-speaker-badge" title="${escapeHtml(seg.speaker_display || 'Speaker')}">${escapeHtml(initials)}</span>
                   ${escapeHtml(seg.speaker_display || 'Speaker')}
                 </span>
-                <button type="button" class="turn-time-btn" data-start="${seg.start_sec}" title="Seek audio to this turn">
-                  ▶ ${startStr}
-                </button>
+                <div class="turn-actions">
+                  <button type="button" class="turn-time-btn" data-start="${seg.start_sec}" title="Seek audio to this turn">
+                    ▶ ${startStr}
+                  </button>
+                  <button type="button" class="turn-share-btn" data-turn-idx="${tIdx}" data-start="${seg.start_sec}" title="Copy shareable link to this moment">
+                    🔗
+                  </button>
+                </div>
               </div>
               <div class="turn-text">${formattedText}</div>
             </div>
@@ -3223,6 +3552,16 @@
               teacher: ep.primary_display,
               start_sec: start,
             });
+          });
+        });
+
+        // Click on share moment icon copies link to this exact quote / second!
+        els.drawerTurns.querySelectorAll('.turn-share-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const startSec = Math.floor(parseFloat(btn.dataset.start) || 0);
+            const shareUrl = `${window.location.origin}/#talk/${ep.id}?t=${startSec}`;
+            copyTextToClipboard(shareUrl, `Moment link at ${formatSeconds(startSec)} copied to clipboard!`);
           });
         });
 
@@ -3271,13 +3610,25 @@
         updateActiveCompanionTerm(physCur);
       }
 
-      // If opened from a sentence context match, scroll to that sentence/word and start audio at exact word time!
-      if (targetOpts && typeof targetOpts.turnIndex === 'number') {
-        const tIdx = targetOpts.turnIndex;
+      // If opened from a sentence context match or timestamp (e.g. from shared link ?t=120)
+      if (targetOpts && (typeof targetOpts.turnIndex === 'number' || typeof targetOpts.fallbackSec === 'number')) {
+        let tIdx = typeof targetOpts.turnIndex === 'number' ? targetOpts.turnIndex : 0;
         const sIdx = typeof targetOpts.sentIdxInTurn === 'number' ? targetOpts.sentIdxInTurn : 0;
         const wOffset = typeof targetOpts.wordOffsetInTurn === 'number' ? targetOpts.wordOffsetInTurn : 0;
-
         let exactWordSec = typeof targetOpts.fallbackSec === 'number' ? targetOpts.fallbackSec : 0;
+
+        // If turnIndex was not explicitly given, find the turn matching fallbackSec
+        if (typeof targetOpts.turnIndex !== 'number' && typeof targetOpts.fallbackSec === 'number' && ep.segments && ep.segments.length > 0) {
+          const sec = targetOpts.fallbackSec;
+          for (let i = 0; i < ep.segments.length; i++) {
+            const s = ep.segments[i];
+            const nextStart = ep.segments[i + 1] ? ep.segments[i + 1].start_sec : Infinity;
+            if (sec >= s.start_sec && sec < nextStart) {
+              tIdx = s.turn_index !== undefined ? Number(s.turn_index) : i;
+              break;
+            }
+          }
+        }
         let targetWordEl = null;
 
         // 1. Resolve exact word timestamp and DOM element from WordSync turnWordMap if available

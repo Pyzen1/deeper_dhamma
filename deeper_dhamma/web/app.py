@@ -64,7 +64,11 @@ def create_app() -> Bottle:
         return res
 
     @app.route("/")
-    def index():
+    @app.route("/browse")
+    @app.route("/lexicon")
+    @app.route("/documents")
+    @app.route("/talk/<episode_id>")
+    def index(episode_id=None):
         index_file = VIEWS_DIR / "index.html"
         if not index_file.exists():
             return "Web UI template missing."

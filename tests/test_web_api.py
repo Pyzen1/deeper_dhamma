@@ -34,8 +34,13 @@ def wsgi_client():
             "wsgi.run_once": False,
         }
         body = b"".join(app(environ, start_response))
-        data = json.loads(body.decode("utf-8")) if body else {}
-        return status_box[0], dict(headers_box), data
+        headers = dict(headers_box)
+        content_type = headers.get("Content-Type", "")
+        if "application/json" in content_type:
+            data = json.loads(body.decode("utf-8")) if body else {}
+        else:
+            data = body.decode("utf-8") if body else ""
+        return status_box[0], headers, data
 
     return _get
 
@@ -114,3 +119,12 @@ def test_api_lexicon_source_doc(wsgi_client):
     assert status.startswith("200")
     assert "vinaya" in doc["title"].lower()
     assert len(doc["content"]) > 0
+
+
+def test_html_deep_link_routes(wsgi_client):
+    """Verify Bottle serves index.html for direct talk and view links."""
+    for path in ["/", "/browse", "/lexicon", "/documents", "/talk/pb28113880"]:
+        status, headers, body = wsgi_client(path)
+        assert status.startswith("200"), f"Failed for path {path}"
+        assert "text/html" in headers.get("Content-Type", "")
+        assert "Deeper Dhamma" in body

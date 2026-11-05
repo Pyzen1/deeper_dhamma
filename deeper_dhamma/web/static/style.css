@@ -3309,6 +3309,72 @@ select:hover, select:focus {
   }
 }
 
+/* ==========================================================================
+   Turn Actions, Share Moment Buttons & Toast Notifications
+   ========================================================================== */
+
+.turn-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.turn-share-btn {
+  background: color-mix(in srgb, var(--turn-color, var(--primary)) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--turn-color, var(--primary)) 20%, transparent);
+  color: var(--text-muted);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all var(--transition-fast);
+  padding: 0;
+}
+
+.turn-share-btn:hover {
+  background: var(--surface-hover);
+  color: var(--turn-color, var(--primary));
+  border-color: var(--turn-color, var(--primary));
+  transform: scale(1.1);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--turn-color, var(--primary)) 30%, transparent);
+}
+
+.app-toast {
+  position: fixed;
+  bottom: 5.5rem;
+  right: 1.5rem;
+  background: var(--surface-card, #131b2e);
+  color: #fff;
+  border: 1px solid var(--primary, #f59e0b);
+  border-radius: var(--radius-md, 8px);
+  padding: 0.65rem 1.25rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+.app-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.app-toast .toast-icon {
+  color: var(--primary, #f59e0b);
+  font-weight: 800;
+}
+
 
 
 
