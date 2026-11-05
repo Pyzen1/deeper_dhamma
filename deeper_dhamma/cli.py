@@ -438,7 +438,8 @@ def cmd_lexicon(args):
         results = db.search_context(args.search, limit=args.limit)
         print(f"\n[*] Context search for \"{args.search}\" ({len(results)} matches):\n")
         for r in results:
-            print(f"  - {r['pali_plain']:<20} ({r['pali_diacritic']}): {r['english_description'][:80]}...")
+            gloss = r.get("translation_brahm") or r.get("translation_sujato") or r.get("translation_bodhi") or r.get("translation_brahmali") or r.get("english_description") or ""
+            print(f"  - {r['pali_plain']:<20} ({r['pali_diacritic']}): {gloss[:80]}")
         print()
     else:
         print("[-] Please specify --lookup <term>, --search <query>, --sources, or --source-content <query>.\n")

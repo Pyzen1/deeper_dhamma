@@ -2257,7 +2257,6 @@
 
   function renderLexiconCard(item) {
     const diacritic = item.pali_diacritic ? `(${escapeHtml(item.pali_diacritic)})` : '';
-    const english = item.english_description || item.english_translation || item.preferred_translation || '';
     const isCore = !!item.translation_brahm || (item.category && item.category !== 'sutta_canon');
 
     // Build teacher translations gloss if present
@@ -2275,7 +2274,6 @@
       teacherGloss.push(`<div class="lexicon-gloss-item"><span class="gloss-teacher">Ajahn Brahmali:</span> <span class="gloss-quote">“${escapeHtml(item.translation_brahmali)}”</span></div>`);
     }
 
-    const notes = item.context_keywords || item.doctrinal_notes || '';
     const sourceLabel = item.source_title
       ? `${item.source_title}${item.source_author ? ' — ' + item.source_author : ''}`
       : (item.source || 'SuttaCentral / Bodhinyana Reference');
@@ -2300,18 +2298,12 @@
           ${item.category ? `<span class="category-badge">${escapeHtml(item.category.replace(/_/g, ' '))}</span>` : ''}
           ${isCore ? `<span class="core-badge">⭐ CORE</span>` : ''}
         </div>
-        ${english ? `
-          <div class="lexicon-meaning">
-            <strong>Doctrinal Definition:</strong> ${escapeHtml(english)}
-          </div>
-        ` : ''}
         ${teacherGloss.length > 0 ? `
           <div class="lexicon-teacher-glosses">
             <div class="glosses-title">Teacher Translations:</div>
             ${teacherGloss.join('')}
           </div>
         ` : ''}
-        ${notes ? `<div class="lexicon-meta"><strong>Context / Keywords:</strong> ${escapeHtml(notes)}</div>` : ''}
         <div class="lexicon-meta"><strong>Authority Source:</strong> ${sourceHtml}</div>
         <div class="lexicon-actions">
           <button type="button" class="btn-lexicon-talks" data-term="${escapeHtml(item.pali_plain)}" title="Search transcripts for this Pali term">
@@ -2809,6 +2801,7 @@
     const brahm = term.translation_brahm ? String(term.translation_brahm).trim() : '';
     const bodhi = term.translation_bodhi ? String(term.translation_bodhi).trim() : '';
     const sujato = term.translation_sujato ? String(term.translation_sujato).trim() : '';
+    const brahmali = term.translation_brahmali ? String(term.translation_brahmali).trim() : '';
     const desc = term.english_description ? String(term.english_description).trim() : '';
 
     // 1. Ajahn Brahm: highest priority living forest tradition definition
@@ -2831,12 +2824,17 @@
       return { text: cleanDefinitionText(sujato), source: 'Sujato' };
     }
 
-    // 5. English description fallback
-    if (desc && !desc.startsWith('Canonical early Buddhist term')) {
+    // 5. Ajahn Brahmali: Vinaya & monastic translation
+    if (brahmali) {
+      return { text: cleanDefinitionText(brahmali), source: 'Ajahn Brahmali' };
+    }
+
+    // 6. English description fallback if meaningful
+    if (desc && !desc.startsWith('Canonical early Buddhist term') && !desc.startsWith('Vinaya (Brahmali)')) {
       return { text: cleanDefinitionText(desc), source: 'Lexicon' };
     }
 
-    return { text: cleanDefinitionText(desc || 'Canonical Buddhist doctrinal term.'), source: 'Lexicon' };
+    return { text: cleanDefinitionText('Canonical Buddhist doctrinal term.'), source: 'Lexicon' };
   }
 
   function openFullLexiconEntry(termKey) {

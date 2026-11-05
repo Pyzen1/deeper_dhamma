@@ -81,8 +81,8 @@ def parse_suttacentral_bodhi_sujato_table(file_path: Path) -> List[Dict]:
                 "translation_sujato": s_clean if s_clean not in ("—", "") else None,
                 "translation_brahm": None,
                 "translation_brahmali": None,
-                "english_description": f"Canonical early Buddhist term in SuttaCentral. Bodhi: '{b_clean}' | Sujato: '{s_clean}'",
-                "context_keywords": f"{plain}, {b_clean}, {s_clean}".replace("—", "").strip(", "),
+                "english_description": None,
+                "context_keywords": f"{plain}, {p}".strip(", "),
                 "phonetic_variants": [],
                 "source": "suttacentral:bodhi_sujato",
                 "source_url": URL_SUTTACENTRAL_BODHI_SUJATO,
@@ -446,7 +446,6 @@ def get_brahmali_vinaya_terms() -> List[Dict]:
             for existing in terms:
                 if existing["pali_plain"] == plain:
                     existing["translation_brahmali"] += f"; {desc_clean}"
-                    existing["english_description"] += f" | Vinaya (Brahmali): {desc_clean}"
                     break
             continue
 
@@ -459,8 +458,8 @@ def get_brahmali_vinaya_terms() -> List[Dict]:
             "translation_sujato": None,
             "translation_brahm": None,
             "translation_brahmali": desc_clean,
-            "english_description": f"Vinaya (Brahmali): {desc_clean}",
-            "context_keywords": f"vinaya, {plain}, monastic law, {primary_pali}",
+            "english_description": None,
+            "context_keywords": f"vinaya, monastic law, {primary_pali}",
             "phonetic_variants": variants,
             "source": "suttacentral:brahmali",
             "source_url": URL_SUTTACENTRAL_BRAHMALI_VINAYA,
@@ -902,8 +901,6 @@ def build_buddhism_lexicon_db():
         if key in all_terms:
             all_terms[key]["category"] = entry.get("category", all_terms[key]["category"])
             all_terms[key]["translation_brahmali"] = entry["translation_brahmali"]
-            all_terms[key]["english_description"] += f" | Vinaya (Brahmali): {entry['translation_brahmali']}"
-            all_terms[key]["context_keywords"] += f", {entry['context_keywords']}"
             all_terms[key]["source"] += f", {entry['source']}"
         else:
             all_terms[key] = entry
@@ -915,8 +912,6 @@ def build_buddhism_lexicon_db():
         if key in all_terms:
             all_terms[key]["category"] = entry.get("category", all_terms[key]["category"])
             all_terms[key]["translation_brahm"] = entry["translation_brahm"]
-            all_terms[key]["english_description"] = entry["english_description"] + f" [Bodhi: {all_terms[key]['translation_bodhi']}] [Sujato: {all_terms[key]['translation_sujato']}]"
-            all_terms[key]["context_keywords"] += f", {entry['context_keywords']}"
             all_terms[key]["phonetic_variants"] = list(set(all_terms[key]["phonetic_variants"] + entry["phonetic_variants"]))
             all_terms[key]["source"] += f", {entry['source']}"
             all_terms[key]["source_url"] = entry["source_url"]
@@ -928,7 +923,6 @@ def build_buddhism_lexicon_db():
         if key in all_terms:
             if not all_terms[key].get("translation_brahm"):
                 all_terms[key]["translation_brahm"] = gloss
-                all_terms[key]["context_keywords"] += f", {gloss}"
                 if "bswa:brahm" not in all_terms[key]["source"]:
                     all_terms[key]["source"] += ", bswa:brahm"
         else:
@@ -940,7 +934,7 @@ def build_buddhism_lexicon_db():
                 "translation_sujato": None,
                 "translation_brahm": gloss,
                 "translation_brahmali": None,
-                "english_description": f"Ajahn Brahm: {gloss}",
+                "english_description": None,
                 "context_keywords": f"{key}, {gloss}",
                 "phonetic_variants": [],
                 "source": "bswa:brahm",
