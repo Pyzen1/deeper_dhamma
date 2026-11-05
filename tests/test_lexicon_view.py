@@ -443,6 +443,24 @@ def test_wordsync_multiword_phrase_highlighting_and_seeking(lexicon_db):
     assert report["nikayaDomId"] == mn_span["id"]
 
 
+def test_lexicon_and_documents_shareable_url_routing():
+    """
+    Verifies thatapp.js updates and parses shareable deep-link URLs for:
+    1. Specific lexicon terms: #lexicon?term=dhamma
+    2. Filtered offline source documents: #documents?id=1&q=dhamma
+    """
+    from pathlib import Path
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    app_js = (PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "#lexicon?term=" in app_js
+    assert "#documents?id=" in app_js
+    assert "btn-lexicon-share" in app_js
+    assert "View in Offline Source" in app_js
+    assert "Raw Archive File" in app_js
+
+
+
 
 
 

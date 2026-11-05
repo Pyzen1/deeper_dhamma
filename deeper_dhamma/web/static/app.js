@@ -24,6 +24,7 @@
     dateFilterMode: 'year',
     archiveCancelRequested: false,
     lexicon: {
+      term: '',
       mode: 'core',
       category: 'all',
       letter: 'all',
@@ -568,17 +569,27 @@
         case 'lexicon':
           switchTab('lexicon-view', { skipHistory: true });
           if (params.term) {
+            state.lexicon.term = params.term;
             if (els.lexiconInput) els.lexiconInput.value = params.term;
             if (els.lexAlphabetBar) els.lexAlphabetBar.style.display = 'none';
             if (els.lexPagination) els.lexPagination.style.display = 'none';
             if (els.lexCountText) els.lexCountText.textContent = `Search results for "${params.term}"`;
             executeLexiconSearch(params.term);
+          } else if (state.lexicon.term) {
+            state.lexicon.term = '';
+            if (els.lexiconInput) els.lexiconInput.value = '';
+            if (els.lexCategoryBar) els.lexCategoryBar.style.display = 'flex';
+            if (els.lexAlphabetBar && state.lexicon.mode === 'all') els.lexAlphabetBar.style.display = 'flex';
+            loadLexiconView();
           }
           break;
 
         case 'documents':
           if (params.id) {
             state.documents.activeDocId = parseInt(params.id, 10) || 1;
+          }
+          if (params.q !== undefined || params.filter !== undefined || params.term !== undefined) {
+            state.documents.filterQuery = params.q || params.filter || params.term || '';
           }
           switchTab('documents-view', { skipHistory: true });
           break;
@@ -1492,13 +1503,21 @@
     if (els.lexiconInput) {
       els.lexiconInput.addEventListener('input', () => {
         const term = els.lexiconInput.value.trim();
+        state.lexicon.term = term;
         clearTimeout(state.lexiconDebounceTimer);
         state.lexiconDebounceTimer = setTimeout(() => {
           if (!term) {
+            if (state.activeTab === 'lexicon-view' && window.location.hash !== '#lexicon') {
+              window.history.replaceState({ route: '#lexicon' }, '', '#lexicon');
+            }
             if (els.lexCategoryBar) els.lexCategoryBar.style.display = 'flex';
             if (els.lexAlphabetBar && state.lexicon.mode === 'all') els.lexAlphabetBar.style.display = 'flex';
             loadLexiconView();
           } else {
+            const lexHash = `#lexicon?term=${encodeURIComponent(term)}`;
+            if (state.activeTab === 'lexicon-view' && window.location.hash !== lexHash) {
+              window.history.replaceState({ route: lexHash }, '', lexHash);
+            }
             if (els.lexAlphabetBar) els.lexAlphabetBar.style.display = 'none';
             if (els.lexPagination) els.lexPagination.style.display = 'none';
             if (els.lexCountText) els.lexCountText.textContent = `Search results for "${term}"`;
@@ -1613,7 +1632,7 @@
       });
     }
 
-    // Delegated clicks on lexicon cards (Find Talks & View Offline Document)
+    // Delegated clicks on lexicon cards (Find Talks, View Offline Document, Share Term Link, Click Term Title)
     if (els.lexiconResults) {
       els.lexiconResults.addEventListener('click', (e) => {
         const btn = e.target.closest('.btn-lexicon-talks');
@@ -1629,11 +1648,36 @@
           return;
         }
 
+        const shareBtn = e.target.closest('.btn-lexicon-share');
+        if (shareBtn) {
+          const term = shareBtn.dataset.term || '';
+          const cleanHash = `#lexicon?term=${encodeURIComponent(term)}`;
+          state.lexicon.term = term;
+          if (window.location.hash !== cleanHash) {
+            state.historyDepth++;
+            window.history.pushState({ route: cleanHash }, '', cleanHash);
+          }
+          const shareUrl = `${window.location.origin}/${cleanHash}`;
+          copyTextToClipboard(shareUrl, `Lexicon link for "${term}" copied to clipboard!`);
+          return;
+        }
+
+        const termTitle = e.target.closest('.lexicon-term-title .pali-term');
+        if (termTitle) {
+          const term = termTitle.textContent.trim();
+          if (term) {
+            openFullLexiconEntry(term);
+          }
+          return;
+        }
+
         const docBtn = e.target.closest('.btn-lexicon-view-doc');
         if (docBtn) {
           const docId = docBtn.dataset.docId || 1;
-          const term = docBtn.closest('.lexicon-card')?.querySelector('.pali-term')?.textContent || '';
-          switchTab('documents-view');
+          const term = docBtn.dataset.term || docBtn.closest('.lexicon-card')?.querySelector('.pali-term')?.textContent || '';
+          state.documents.activeDocId = parseInt(docId, 10) || 1;
+          state.documents.filterQuery = term;
+          switchTab('documents-view', { skipHistory: true });
           loadDocumentInView(docId, term);
           return;
         }
@@ -1726,11 +1770,16 @@
     }
 
     if (!options.skipHistory) {
+      const activeDocId = state.documents.activeDocId || 1;
+      const docFilter = (state.documents.filterQuery || '').trim();
+      const docRoute = docFilter
+        ? `documents?id=${activeDocId}&q=${encodeURIComponent(docFilter)}`
+        : `documents?id=${activeDocId}`;
       const tabToRouteMap = {
         'search-view': state.currentQuery ? `search?q=${encodeURIComponent(state.currentQuery)}` : 'search',
         'browse-view': 'browse',
-        'lexicon-view': 'lexicon',
-        'documents-view': state.documents.activeDocId ? `documents?id=${state.documents.activeDocId}` : 'documents',
+        'lexicon-view': state.lexicon.term ? `lexicon?term=${encodeURIComponent(state.lexicon.term)}` : 'lexicon',
+        'documents-view': docRoute,
         'transcript-view': state.currentEpisode ? `talk/${state.currentEpisode.id}` : 'search',
       };
       const targetRoute = tabToRouteMap[viewId];
@@ -2580,16 +2629,17 @@
       `;
     }
     if (item.source_document_id) {
-      sourceHtml += ` <button type="button" class="btn-lexicon-view-doc" data-doc-id="${escapeHtml(String(item.source_document_id))}" title="Read offline reference document in viewer">📜 View Offline Document</button>`;
+      sourceHtml += ` <button type="button" class="btn-lexicon-view-doc" data-doc-id="${escapeHtml(String(item.source_document_id))}" data-term="${escapeHtml(item.pali_plain)}" title="Open offline reference document filtered to '${escapeHtml(item.pali_plain)}'">📜 View in Offline Source (“${escapeHtml(item.pali_plain)}”)</button>`;
     }
     if (item.source_mirror_url) {
-      sourceHtml += ` <a href="${escapeHtml(item.source_mirror_url)}" target="_blank" rel="noopener noreferrer" class="lexicon-source-link" title="Inspect raw local source file (${escapeHtml(item.source_mirror_url)})">📦 Local Source Mirror ↗</a>`;
+      const mirrorExt = (item.source_mirror_url.split('.').pop() || 'file').toUpperCase();
+      sourceHtml += ` <a href="${escapeHtml(item.source_mirror_url)}" target="_blank" rel="noopener noreferrer" class="lexicon-source-link" title="Inspect raw upstream archive file (${escapeHtml(item.source_mirror_url)}) used to compile the database">📦 Raw Archive File (.${escapeHtml(mirrorExt)}) ↗</a>`;
     }
 
     return `
       <div class="lexicon-card">
         <div class="lexicon-term-title">
-          <span class="pali-term">${escapeHtml(item.pali_plain)}</span>
+          <span class="pali-term" title="Click to focus &amp; update URL for ${escapeHtml(item.pali_plain)}" style="cursor: pointer;">${escapeHtml(item.pali_plain)}</span>
           <span class="lexicon-diacritic">${diacritic}</span>
           ${item.category ? `<span class="category-badge">${escapeHtml(item.category.replace(/_/g, ' '))}</span>` : ''}
           ${isCore ? `<span class="core-badge">⭐ CORE</span>` : ''}
@@ -2601,9 +2651,12 @@
           </div>
         ` : ''}
         <div class="lexicon-meta"><strong>Authority Source:</strong> ${sourceHtml}</div>
-        <div class="lexicon-actions">
+        <div class="lexicon-actions" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
           <button type="button" class="btn-lexicon-talks" data-term="${escapeHtml(item.pali_plain)}" title="Search transcripts for this Pali term">
             🔍 Find Talks Mentioning "${escapeHtml(item.pali_plain)}"
+          </button>
+          <button type="button" class="btn-secondary btn-lexicon-share" data-term="${escapeHtml(item.pali_plain)}" title="Copy shareable link to this lexicon term">
+            🔗 Share Term Link
           </button>
         </div>
       </div>
@@ -2731,9 +2784,13 @@
 
   async function loadDocumentInView(docId = 1, filterTerm = '', options = {}) {
     state.documents.activeDocId = parseInt(docId, 10) || 1;
+    const cleanFilter = (filterTerm || '').trim();
+    state.documents.filterQuery = cleanFilter;
 
     if (!options.skipHistory && state.activeTab === 'documents-view') {
-      const docHash = `#documents?id=${state.documents.activeDocId}`;
+      const docHash = cleanFilter
+        ? `#documents?id=${state.documents.activeDocId}&q=${encodeURIComponent(cleanFilter)}`
+        : `#documents?id=${state.documents.activeDocId}`;
       if (window.location.hash !== docHash) {
         state.historyDepth++;
         window.history.pushState({ route: docHash }, '', docHash);
@@ -2773,7 +2830,9 @@
       }
       if (els.docActiveMirrorLink) {
         if (doc.mirror_url) {
+          const mirrorExt = (doc.mirror_url.split('.').pop() || 'file').toUpperCase();
           els.docActiveMirrorLink.href = doc.mirror_url;
+          els.docActiveMirrorLink.textContent = `📦 Raw Archive File (.${mirrorExt}) ↗`;
           els.docActiveMirrorLink.style.display = 'inline-flex';
         } else {
           els.docActiveMirrorLink.style.display = 'none';
@@ -2797,8 +2856,8 @@
 
       // Set filter if provided
       if (els.docFilterInput) {
-        els.docFilterInput.value = filterTerm || '';
-        filterActiveDocument(filterTerm || '');
+        els.docFilterInput.value = cleanFilter;
+        filterActiveDocument(cleanFilter, { skipHistory: true, scrollToMatch: Boolean(cleanFilter) });
       }
     } catch (err) {
       console.error('Failed to load document:', err);
@@ -2971,10 +3030,19 @@
       .toLowerCase();
   }
 
-  function filterActiveDocument(query) {
+  function filterActiveDocument(query, options = {}) {
     const rawQ = (query || '').trim().toLowerCase();
     const q = normalizePaliSearch(rawQ);
     state.documents.filterQuery = rawQ;
+
+    if (!options.skipHistory && state.activeTab === 'documents-view') {
+      const docHash = rawQ
+        ? `#documents?id=${state.documents.activeDocId}&q=${encodeURIComponent(rawQ)}`
+        : `#documents?id=${state.documents.activeDocId}`;
+      if (window.location.hash !== docHash) {
+        window.history.replaceState({ route: docHash }, '', docHash);
+      }
+    }
 
     if (els.clearDocFilterBtn) {
       els.clearDocFilterBtn.style.display = rawQ ? 'inline-block' : 'none';
@@ -2983,17 +3051,26 @@
     const tableRows = els.docRenderedBody ? els.docRenderedBody.querySelectorAll('.doc-table-data-row') : [];
     if (tableRows.length > 0) {
       let visibleCount = 0;
+      let firstMatchedRow = null;
       tableRows.forEach(row => {
         const text = row.textContent.toLowerCase();
         const normText = normalizePaliSearch(text);
         const matches = !q || text.includes(rawQ) || normText.includes(q);
         row.classList.toggle('doc-row-hidden', !matches);
-        if (matches) visibleCount++;
+        if (matches) {
+          visibleCount++;
+          if (!firstMatchedRow && q) firstMatchedRow = row;
+        }
       });
       if (els.docFilterCount) {
         els.docFilterCount.textContent = rawQ 
           ? `Showing ${visibleCount.toLocaleString()} of ${tableRows.length.toLocaleString()} terms`
           : `${tableRows.length.toLocaleString()} terms`;
+      }
+      if (firstMatchedRow && options.scrollToMatch) {
+        requestAnimationFrame(() => {
+          firstMatchedRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
       }
       return;
     }
@@ -3151,6 +3228,7 @@
 
   function openFullLexiconEntry(termKey) {
     if (!termKey) return;
+    state.lexicon.term = termKey;
     switchTab('lexicon-view', { skipHistory: true });
     const cleanHash = `#lexicon?term=${encodeURIComponent(termKey)}`;
     if (window.location.hash !== cleanHash) {
