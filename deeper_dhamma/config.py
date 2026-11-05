@@ -52,6 +52,7 @@ BUDDHISM_LEXICON_DB_PATH = DATABASES_DIR / "buddhism_lexicon.db"
 LEXICON_DB_PATH = BUDDHISM_LEXICON_DB_PATH
 VOICEPRINTS_DB_PATH = DATABASES_DIR / "voiceprints.db"
 TRANSCRIPTS_DB_PATH = DATABASES_DIR / "dhamma_transcripts.db"
+PIPELINE_DB_PATH = DATABASES_DIR / "pipeline_state.db"
 
 # Legacy directory aliases for backward compatibility
 DATA_DIR = DATABASES_DIR

@@ -3,8 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Deeper Dhamma — AI Search & Audio Player</title>
-  <meta name="description" content="Instant full-text search across 30+ years of Theravada Buddhist talks by Ajahn Brahm and BSWA monastics, with direct turn-level audio streaming.">
+  <title>Deeper Dhamma — BSWA Study Tool, Pali Lexicon & Audio Archive</title>
+  <meta name="description" content="Interactive study tool and online reference guide for 30+ years of Theravada Buddhist teachings by Ajahn Brahm, Ajahn Brahmali, Bhante Sujato, and BSWA monastics. Features 6-tier FTS5 search, word-level audio sync, and a 2,447-term comparative Pali lexicon.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Deeper Dhamma — BSWA Study Tool, Pali Lexicon & Audio Archive">
+  <meta property="og:description" content="Search transcripts with sub-second word synchronization, stream 3,247 monastic talks directly from Podbean, and compare 2,447 canonical Pali terms across four teachers.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Deeper Dhamma — BSWA Study Tool & Pali Reference Guide">
+  <meta name="twitter:description" content="Interactive Theravada Buddhist transcript search, synchronized audio reader, and comparative Pali lexicon.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1120'/%3E%3Ctext x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-size='40' fill='%23f59e0b'%3E%E2%98%B8%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
@@ -263,9 +270,13 @@
         <div class="browse-header">
           <div class="browse-header-info">
             <h2>Archive Catalog</h2>
-            <p class="section-desc">Browse talks and retreats. Transcribed talks feature turn-level timestamps and searchable text.</p>
+            <p class="section-desc">Browse talks and retreats. All talks stream directly in the audio player; transcribed talks include word-synced text.</p>
           </div>
           <div class="browse-filter-bar">
+            <button type="button" id="browse-transcribed-only-btn" class="btn-toggle-transcribed active" aria-pressed="true" title="Show only talks with full synchronized transcripts (click to browse all 3,247 audio talks)">
+              <span class="toggle-check-icon" id="browse-transcribed-icon">✓</span>
+              <span id="browse-transcribed-label">Transcribed Only</span>
+            </button>
             <select id="browse-teacher-filter-select" aria-label="Filter by Monastic Teacher">
               <option value="">All Monastics</option>
             </select>
@@ -276,6 +287,11 @@
         </div>
         <div class="browse-grid" id="browse-episodes-grid">
           <div class="loading-spinner">Loading talks...</div>
+        </div>
+        <div class="browse-load-more-wrap" id="browse-load-more-wrap" style="display: none;">
+          <button type="button" class="btn-secondary btn-load-more" id="btn-browse-load-more">
+            + Load More Talks
+          </button>
         </div>
       </div>
 

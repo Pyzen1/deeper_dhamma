@@ -6,7 +6,8 @@ This directory centralizes all SQLite databases utilized by the BSWA Deeper Dham
 databases/
 ├── sources/                # Pristine local copies of upstream authority documents (mirrored to dist/sources/)
 ├── buddhism_lexicon.db     # Master Pali terminology, canonical phrases, translations & phonetic rules
-├── dhamma_transcripts.db   # Canonical transcripts archive & FTS5 search index
+├── dhamma_transcripts.db   # Canonical transcripts archive & FTS5 search index (pure domain data)
+├── pipeline_state.db       # Local ingestion state: archive filepaths & error tracking (excluded from web)
 ├── voiceprints.db          # Reference speaker embeddings gallery (ECAPA-TDNN)
 └── readme.md               # Architecture, lifecycle & separation rationale
 ```
@@ -15,20 +16,20 @@ databases/
 
 ## Why Separate Database Files? (Architecture & Rationale)
 
-While consolidating these files under a single `databases/` folder makes discovery, backup, and inspection intuitive, keeping them as **three distinct SQLite database files** is a deliberate architectural decision based on the following factors:
+While consolidating these files under a single `databases/` folder makes discovery, backup, and inspection intuitive, keeping them as **four distinct SQLite database files** is a deliberate architectural decision based on the following factors:
 
 ```text
-+-----------------------------------------------------------------------------------------+
-|                                    LIFECYCLE SEPARATION                                 |
-+-----------------------------------------------------------------------------------------+
-|                                                                                         |
-|  [buddhism_lexicon.db]           [voiceprints.db]             [dhamma_transcripts.db]   |
-|  - Role: Code Reference Asset    - Role: Model Gallery Cache  - Role: Operational Store |
-|  - Mutability: Static / Read     - Mutability: Model Rebuilds - Mutability: High Writes |
-|  - Git: TRACKED IN GIT           - Git: IGNORED               - Git: IGNORED            |
-|  - Size: ~550 KB                 - Size: <5 MB                - Size: Scales to GBs     |
-|                                                                                         |
-+-----------------------------------------------------------------------------------------+
++-------------------------------------------------------------------------------------------------------------+
+|                                             LIFECYCLE SEPARATION                                            |
++-------------------------------------------------------------------------------------------------------------+
+|                                                                                                             |
+|  [buddhism_lexicon.db]       [voiceprints.db]           [dhamma_transcripts.db]     [pipeline_state.db]     |
+|  - Role: Reference Asset     - Role: Gallery Cache      - Role: Domain Warehouse    - Role: Local Ops State |
+|  - Mutability: Static/Read   - Mutability: Rebuilds     - Mutability: High Writes   - Mutability: Local Ops |
+|  - Git: TRACKED IN GIT       - Git: IGNORED             - Git: IGNORED              - Git: IGNORED          |
+|  - Web: Merged to dist/      - Web: EXCLUDED            - Web: Merged to dist/      - Web: EXCLUDED         |
+|                                                                                                             |
++-------------------------------------------------------------------------------------------------------------+
 ```
 
 ### 1. Version Control & Distribution Boundary
@@ -77,13 +78,20 @@ While consolidating these files under a single `databases/` folder makes discove
   * `voiceprints`: Consolidated speaker embeddings table.
 
 ### 3. `dhamma_transcripts.db`
-* **File:** `databases/dhamma_transcripts.db` (~168 KB initial)
-* **Status:** Ignored by Git (primary operational store)
+* **File:** `databases/dhamma_transcripts.db`
+* **Status:** Ignored by Git (pure domain warehouse)
 * **Python Interface:** `deeper_dhamma.storage.TranscriptDatabase`
 * **Key Tables:**
-  * `episodes`: High-level talk metadata (id, title, date, year, primary teacher, media URL, audio duration, multi-speaker flags, speaker shares, and JSON terminology changelogs).
-  * `speech_segments`: Granular timestamped dialogue turns (`start_sec`, `end_sec`, `speaker_slug`, `speaker_display`, `text`).
+  * `episodes`: High-level talk metadata (`id`, `title`, `date`, `year`, `primary_teacher`, `primary_display`, `identified_teachers`, `media_url`, `duration_sec`, `is_transcribed`, `is_multi_speaker`, `speaker_shares_json`, `terminology_changes_json`). Contains zero local filesystem paths or operational error logs.
+  * `speech_segments`: Granular timestamped dialogue turns (`id`, `episode_id`, `start_sec`, `end_sec`, `speaker_slug`, `speaker_display`, `text`).
   * `transcripts_fts`: SQLite FTS5 external content table with synchronization triggers on `speech_segments` enabling sub-5ms full-text search.
+
+### 4. `pipeline_state.db`
+* **File:** `databases/pipeline_state.db`
+* **Status:** Ignored by Git (local operational state, never exported to `dist/`)
+* **Python Interface:** `deeper_dhamma.storage.PipelineStateDatabase`
+* **Key Tables:**
+  * `episode_states`: Tracks local archive file paths (`filepath`) and operational download/audit/transcription error states (`last_error`, `last_error_at`, `last_error_op`) keyed by surrogate primary key `id INTEGER PRIMARY KEY AUTOINCREMENT` and `episode_uid TEXT UNIQUE NOT NULL`. Decoupling local operational state from `dhamma_transcripts.db` ensures the domain database is always clean and ready for static web publication without post-hoc scrubbing.
 
 ---
 
@@ -111,31 +119,32 @@ ORDER BY turn_count DESC;
 
 ## Static Web Distribution Compilation (`dhamma_web.db`)
 
-While `buddhism_lexicon.db`, `voiceprints.db`, and `dhamma_transcripts.db` remain strictly separated during ingestion, training, and transcription on the developer system, the web application runs 100% serverless via in-browser **SQLite WASM**:
+While `buddhism_lexicon.db`, `voiceprints.db`, `pipeline_state.db`, and `dhamma_transcripts.db` remain strictly separated during ingestion, training, and transcription on the developer system, the web application runs 100% serverless via in-browser **SQLite WASM**:
 
 ```text
-=================== DEVELOPMENT / INGESTION (Source) ===================
-  [buddhism_lexicon.db]       [voiceprints.db]       [dhamma_transcripts.db]
-  - Tracked in Git            - Ignored by Git       - Ignored by Git
-  - Doctrinal reference       - 192-d ECAPA vectors  - Live transcription writes
-           |                          |                         |
-           | (Doctrinal terms)        x (EXCLUDED FROM WEB)     | (Segments, FTS5)
-           +--------------------------+-------------------------+
-                                      |
-                                      v  python main.py web --build
-=================== STATIC WEB DISTRIBUTION (dist/) ====================
-                           [dhamma_web.db]
-                   - episodes & speech_segments
-                   - transcripts_fts (FTS5)
-                   - terms & lexicon_fts
-                   - PRAGMA user_version = <YYYYMMDD>
-                   - VACUUM (zero fragmentation, ~2.5 MB)
-                                      |
-                                      v
-                             Shipped to Browser
+=========================== DEVELOPMENT / INGESTION (Source) ===========================
+  [buddhism_lexicon.db]    [voiceprints.db]    [pipeline_state.db]    [dhamma_transcripts.db]
+  - Tracked in Git         - Ignored by Git    - Ignored by Git       - Ignored by Git
+  - Doctrinal reference    - 192-d ECAPA       - Local filepaths &    - Pure domain records
+                             vectors             error logs             (keyed by pbXXXXXXX)
+           |                      |                   |                         |
+           | (Doctrinal terms)    x (EXCLUDED)        x (EXCLUDED)              | (Episodes, FTS5)
+           +----------------------+-------------------+-------------------------+
+                                              |
+                                              v  python main.py web --build
+=========================== STATIC WEB DISTRIBUTION (dist/) ============================
+                                       [dhamma_web.db]
+                               - episodes & speech_segments
+                               - transcripts_fts (FTS5)
+                               - terms, source_documents & v_terms
+                               - PRAGMA user_version = <timestamp>
+                               - VACUUM (zero fragmentation, ~4.14 MB)
+                                              |
+                                              v
+                                     Shipped to Browser
 ```
 
-* **Why Combine for Web?** The browser is 100% read-only (zero write lock contention) and does not perform acoustic inference (`voiceprints.db` is excluded). Consolidating into `dhamma_web.db` allows the browser to download and query a single vacuumed file.
+* **Why Combine for Web?** The browser is 100% read-only (zero write lock contention) and does not perform acoustic inference or local filesystem operations (`voiceprints.db` and `pipeline_state.db` are excluded). Consolidating `dhamma_transcripts.db` and `buddhism_lexicon.db` into `dhamma_web.db` allows the browser to download and query a single vacuumed file with zero post-hoc scrubbing.
 * **Cache Validation**: The build script stamps `PRAGMA user_version = <YYYYMMDD>` at byte offset 60..63 of the file header. The client worker issues a 100-byte HTTP Range probe (`Range: bytes=0-99`) to validate local `IndexedDB` caching before fetching any updates.
 
 ## Pluggable Web Architecture: Zero Code Duplication

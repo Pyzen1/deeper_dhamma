@@ -341,7 +341,12 @@ def create_app() -> Bottle:
 
             years = [
                 r[0] for r in conn.execute(
-                    "SELECT DISTINCT year FROM episodes WHERE is_transcribed = 1 AND year IS NOT NULL ORDER BY year DESC;"
+                    "SELECT DISTINCT year FROM episodes WHERE is_transcribed = 1 AND year IS NOT NULL AND year > 0 ORDER BY year DESC;"
+                ).fetchall()
+            ]
+            all_years = [
+                r[0] for r in conn.execute(
+                    "SELECT DISTINCT year FROM episodes WHERE year IS NOT NULL AND year > 0 ORDER BY year DESC;"
                 ).fetchall()
             ]
 
@@ -353,6 +358,7 @@ def create_app() -> Bottle:
             "teachers": teachers,
             "teacher_map": teacher_map,
             "years": years,
+            "all_years": all_years,
         })
 
     return app

@@ -319,7 +319,7 @@ def inspect_unknown_audio(
     with trans_db._get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, title, filepath, year
+            SELECT id, title, year
             FROM episodes
             WHERE primary_teacher = 'unknown_teacher'
                OR identified_teachers = 'Unknown Teacher'
@@ -344,7 +344,7 @@ def inspect_unknown_audio(
     results = []
     for ep in unknown_candidates:
         ep_id = ep["id"]
-        filepath_str = ep.get("filepath")
+        filepath_str = trans_db.pipeline_db.get_filepath(ep_id)
         file_path = Path(filepath_str) if filepath_str else None
 
         if not file_path or not file_path.exists():

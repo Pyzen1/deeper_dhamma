@@ -20,6 +20,12 @@
     stats: null,
     teachers: {},
     catalog: [],
+    browse: {
+      transcribedOnly: true,
+      offset: 0,
+      limit: 60,
+      total: 0,
+    },
     currentFilteredTalks: [],
     dateFilterMode: 'year',
     archiveCancelRequested: false,
@@ -131,6 +137,11 @@
 
     // Browse Content
     browseGrid: document.getElementById('browse-episodes-grid'),
+    browseTranscribedBtn: document.getElementById('browse-transcribed-only-btn'),
+    browseTranscribedIcon: document.getElementById('browse-transcribed-icon'),
+    browseTranscribedLabel: document.getElementById('browse-transcribed-label'),
+    browseLoadMoreWrap: document.getElementById('browse-load-more-wrap'),
+    btnBrowseLoadMore: document.getElementById('btn-browse-load-more'),
 
     // Lexicon Content
     lexiconInput: document.getElementById('lexicon-search-input'),
@@ -676,7 +687,8 @@
       }
 
       if (els.statEpisodes) {
-        els.statEpisodes.textContent = `${data.transcribed_episodes} transcribed talks • ${data.transcribed_hours} hrs indexed`;
+        const totalTalks = (data.total_episodes || 0).toLocaleString();
+        els.statEpisodes.textContent = `${data.transcribed_episodes} transcribed (${data.transcribed_hours} hrs) • ${totalTalks} audio talks`;
       }
 
       // Populate filter dropdowns
@@ -697,20 +709,22 @@
         });
       }
 
-      if (data.years) {
+      if (data.years && els.yearFilter) {
         data.years.forEach(y => {
-          if (els.yearFilter) {
-            const opt1 = document.createElement('option');
-            opt1.value = y;
-            opt1.textContent = y;
-            els.yearFilter.appendChild(opt1);
-          }
-          if (els.browseYearFilter) {
-            const opt2 = document.createElement('option');
-            opt2.value = y;
-            opt2.textContent = y;
-            els.browseYearFilter.appendChild(opt2);
-          }
+          const opt1 = document.createElement('option');
+          opt1.value = y;
+          opt1.textContent = y;
+          els.yearFilter.appendChild(opt1);
+        });
+      }
+
+      const browseYears = (data.all_years && data.all_years.length > 0) ? data.all_years : (data.years || []);
+      if (browseYears.length > 0 && els.browseYearFilter) {
+        browseYears.forEach(y => {
+          const opt2 = document.createElement('option');
+          opt2.value = y;
+          opt2.textContent = y;
+          els.browseYearFilter.appendChild(opt2);
         });
       }
 
@@ -1397,15 +1411,28 @@
 
     setupDownloadDropdowns();
 
+    if (els.browseTranscribedBtn) {
+      els.browseTranscribedBtn.addEventListener('click', () => {
+        setBrowseTranscribedOnly(!state.browse.transcribedOnly);
+      });
+    }
+
     if (els.browseTeacherFilter) {
       els.browseTeacherFilter.addEventListener('change', () => {
-        loadBrowseCatalog();
+        loadBrowseCatalog({ append: false });
       });
     }
 
     if (els.browseYearFilter) {
       els.browseYearFilter.addEventListener('change', () => {
-        loadBrowseCatalog();
+        loadBrowseCatalog({ append: false });
+      });
+    }
+
+    if (els.btnBrowseLoadMore) {
+      els.btnBrowseLoadMore.addEventListener('click', () => {
+        state.browse.offset += state.browse.limit;
+        loadBrowseCatalog({ append: true });
       });
     }
 
@@ -2481,113 +2508,174 @@
   // Browse Catalog View
   // ==========================================================================
 
-  async function loadBrowseCatalog() {
-    const teacherVal = (els.browseTeacherFilter && els.browseTeacherFilter.value) || (els.teacherFilter && els.teacherFilter.value) || '';
-    const yearVal = (els.browseYearFilter && els.browseYearFilter.value) || (els.yearFilter && els.yearFilter.value) || '';
+  function setBrowseTranscribedOnly(enabled) {
+    state.browse.transcribedOnly = Boolean(enabled);
+    if (els.browseTranscribedBtn) {
+      els.browseTranscribedBtn.classList.toggle('active', state.browse.transcribedOnly);
+      els.browseTranscribedBtn.setAttribute('aria-pressed', state.browse.transcribedOnly ? 'true' : 'false');
+    }
+    if (els.browseTranscribedIcon) {
+      els.browseTranscribedIcon.textContent = state.browse.transcribedOnly ? '✓' : '○';
+    }
+    loadBrowseCatalog({ append: false });
+  }
+
+  function renderBrowseEpisodeCardHtml(ep) {
+    const isTranscribed = Boolean(ep.is_transcribed);
+    const durMin = Math.round((ep.duration_sec || 0) / 60);
+    return `
+      <div class="episode-card">
+        <div>
+          <div class="result-meta-line" style="margin-bottom: 0.5rem;">
+            ${renderTeacherBadgesHtml(ep)}
+            <span>📅 ${escapeHtml(ep.date || '')}</span>
+            ${durMin > 0 ? `<span>• ⏱️ ${durMin} mins</span>` : ''}
+            ${isTranscribed
+              ? '<span class="status-pill transcribed-pill" title="Full synchronized transcript available">✓ Transcribed</span>'
+              : '<span class="status-pill audio-only-pill" title="Stream audio directly from Podbean CDN">🎧 Audio</span>'
+            }
+          </div>
+          <h3 class="episode-title">${escapeHtml(ep.title)}</h3>
+        </div>
+
+        <div class="episode-footer">
+          <button type="button" class="btn-primary" data-action="play-ep-start" data-ep-id="${escapeHtml(ep.id)}">
+            ▶ Play Talk
+          </button>
+          ${isTranscribed ? `
+            <button type="button" class="btn-secondary" data-action="view-transcript" data-ep-id="${escapeHtml(ep.id)}">
+              📜 Transcript
+            </button>
+            <div class="download-dropdown-wrapper">
+              <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
+                📥 Download ▾
+              </button>
+              <div class="download-dropdown-menu">
+                <div class="dropdown-menu-header">Export Transcript</div>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown</span>
+                    <span class="download-opt-desc">Formatted notes (.md)</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text</span>
+                    <span class="download-opt-desc">Clean transcript text (.txt)</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles</span>
+                    <span class="download-opt-desc">For VLC / media players (.srt)</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions</span>
+                    <span class="download-opt-desc">Web caption track (.vtt)</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data</span>
+                    <span class="download-opt-desc">Structured turn array (.json)</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
+          ` : ''}
+          ${ep.permalink ? `
+            <a href="${getPodbeanUrl(ep.permalink)}" target="_blank" rel="noopener noreferrer" class="link-btn">
+              ↗ Podbean
+            </a>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  async function loadBrowseCatalog({ append = false } = {}) {
+    if (!append) {
+      state.browse.offset = 0;
+    }
+    const teacherVal = (els.browseTeacherFilter && els.browseTeacherFilter.value) || '';
+    const yearVal = (els.browseYearFilter && els.browseYearFilter.value) || '';
     const opts = {
-      transcribedOnly: !teacherVal,
-      limit: 60,
+      transcribedOnly: Boolean(state.browse.transcribedOnly),
+      limit: state.browse.limit,
+      offset: state.browse.offset,
     };
     if (teacherVal) opts.teacher = teacherVal;
     if (yearVal) opts.year = yearVal;
 
     try {
       const data = await dbService.getEpisodes(opts);
-      state.catalog = data.episodes || [];
+      const batch = data.episodes || [];
+      const total = data.total !== undefined ? data.total : batch.length;
+      state.browse.total = total;
 
-      els.browseCountBadge.textContent = String(data.total || data.episodes.length);
+      if (append) {
+        state.catalog = state.catalog.concat(batch);
+      } else {
+        state.catalog = batch;
+      }
 
-      if (!data.episodes || data.episodes.length === 0) {
+      if (els.browseCountBadge) {
+        els.browseCountBadge.textContent = String(total);
+      }
+
+      if (!state.catalog || state.catalog.length === 0) {
+        if (els.browseLoadMoreWrap) els.browseLoadMoreWrap.style.display = 'none';
         els.browseGrid.innerHTML = `
           <div class="empty-state" style="grid-column: 1 / -1;">
             <div class="empty-icon">📂</div>
-            <h3>No transcribed episodes match the selected filter</h3>
+            <h3>${state.browse.transcribedOnly ? 'No transcribed talks match the selected filter' : 'No talks match the selected filter'}</h3>
+            ${state.browse.transcribedOnly ? `
+              <p style="margin-top: 0.4rem;">Toggle off "Transcribed Only" to browse and stream all audio talks in the archive.</p>
+              <button type="button" class="btn-secondary" id="btn-empty-show-all-talks" style="margin-top: 0.5rem;">
+                🎧 Show All Audio Talks
+              </button>
+            ` : ''}
           </div>
         `;
+        const btnShowAll = document.getElementById('btn-empty-show-all-talks');
+        if (btnShowAll) {
+          btnShowAll.addEventListener('click', () => setBrowseTranscribedOnly(false));
+        }
         return;
       }
 
-      let html = '';
-      data.episodes.forEach(ep => {
-        const durMin = Math.round((ep.duration_sec || 0) / 60);
-        html += `
-          <div class="episode-card">
-            <div>
-              <div class="result-meta-line" style="margin-bottom: 0.5rem;">
-                ${renderTeacherBadgesHtml(ep)}
-                <span>📅 ${escapeHtml(ep.date || '')}</span>
-                <span>• ⏱️ ${durMin} mins</span>
-              </div>
-              <h3 class="episode-title">${escapeHtml(ep.title)}</h3>
-            </div>
+      if (append) {
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = batch.map(renderBrowseEpisodeCardHtml).join('');
+        attachCardEventListeners(tempDiv, batch);
+        while (tempDiv.firstElementChild) {
+          els.browseGrid.appendChild(tempDiv.firstElementChild);
+        }
+      } else {
+        els.browseGrid.innerHTML = batch.map(renderBrowseEpisodeCardHtml).join('');
+        attachCardEventListeners(els.browseGrid, state.catalog);
+      }
 
-            <div class="episode-footer">
-              <button type="button" class="btn-primary" data-action="play-ep-start" data-ep-id="${escapeHtml(ep.id)}">
-                ▶ Play Talk
-              </button>
-              <button type="button" class="btn-secondary" data-action="view-transcript" data-ep-id="${escapeHtml(ep.id)}">
-                📜 Transcript
-              </button>
-              <div class="download-dropdown-wrapper">
-                <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
-                  📥 Download ▾
-                </button>
-                <div class="download-dropdown-menu">
-                  <div class="dropdown-menu-header">Export Transcript</div>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="md">
-                    <span class="download-opt-icon">📝</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">Markdown</span>
-                      <span class="download-opt-desc">Formatted notes (.md)</span>
-                    </div>
-                    <span class="download-opt-badge">.md</span>
-                  </button>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="txt">
-                    <span class="download-opt-icon">📄</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">Plain Text</span>
-                      <span class="download-opt-desc">Clean transcript text (.txt)</span>
-                    </div>
-                    <span class="download-opt-badge">.txt</span>
-                  </button>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="srt">
-                    <span class="download-opt-icon">🎬</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">SubRip Subtitles</span>
-                      <span class="download-opt-desc">For VLC / media players (.srt)</span>
-                    </div>
-                    <span class="download-opt-badge">.srt</span>
-                  </button>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="vtt">
-                    <span class="download-opt-icon">🌐</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">WebVTT Captions</span>
-                      <span class="download-opt-desc">Web caption track (.vtt)</span>
-                    </div>
-                    <span class="download-opt-badge">.vtt</span>
-                  </button>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="json">
-                    <span class="download-opt-icon">📊</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">JSON Data</span>
-                      <span class="download-opt-desc">Structured turn array (.json)</span>
-                    </div>
-                    <span class="download-opt-badge">.json</span>
-                  </button>
-                </div>
-              </div>
-              ${ep.permalink ? `
-                <a href="${getPodbeanUrl(ep.permalink)}" target="_blank" rel="noopener noreferrer" class="link-btn">
-                  ↗ Podbean
-                </a>
-              ` : ''}
-            </div>
-          </div>
-        `;
-      });
-
-      els.browseGrid.innerHTML = html;
-      attachCardEventListeners(els.browseGrid, data.episodes);
+      if (els.browseLoadMoreWrap && els.btnBrowseLoadMore) {
+        if (state.catalog.length < total) {
+          els.browseLoadMoreWrap.style.display = 'flex';
+          els.btnBrowseLoadMore.textContent = `+ Load More Talks (${state.catalog.length.toLocaleString()} of ${total.toLocaleString()} shown)`;
+        } else {
+          els.browseLoadMoreWrap.style.display = 'none';
+        }
+      }
     } catch (err) {
       console.error('Failed to load browse catalog:', err);
     }

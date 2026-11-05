@@ -841,6 +841,79 @@ select:hover, select:focus {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.btn-toggle-transcribed {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 0.42rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.btn-toggle-transcribed:hover {
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.btn-toggle-transcribed.active {
+  background: rgba(245, 158, 11, 0.16);
+  border-color: var(--accent-saffron);
+  color: var(--accent-saffron-light);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+}
+
+.btn-toggle-transcribed .toggle-check-icon {
+  font-weight: 800;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.14rem 0.5rem;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.status-pill.transcribed-pill {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+}
+
+.status-pill.audio-only-pill {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-secondary);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.browse-load-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.75rem;
+  margin-bottom: 1rem;
+}
+
+.btn-load-more {
+  padding: 0.6rem 1.4rem;
+  font-size: 0.86rem;
+  font-weight: 600;
 }
 
 .browse-grid {
@@ -2340,6 +2413,56 @@ select:hover, select:focus {
   }
   .app-main {
     padding-bottom: 12rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .app-sidebar {
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+    z-index: 950;
+  }
+
+  .sidebar-top {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .sidebar-brand {
+    margin-bottom: 0;
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    gap: 0.35rem;
+  }
+
+  .sidebar-nav-item {
+    padding: 0.45rem 0.65rem;
+  }
+
+  .app-main {
+    margin-left: 0;
+    width: 100%;
+    padding: 1rem 0.85rem 13rem 0.85rem;
+  }
+
+  .browse-grid {
+    grid-template-columns: 1fr;
   }
 }
 

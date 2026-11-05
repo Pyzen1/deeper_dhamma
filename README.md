@@ -5,7 +5,8 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
 ## Architecture & Features
 
 - **Centralized Database Storage (`databases/`)**: 
-  - `databases/dhamma_transcripts.db`: Canonical transcripts warehouse & zero-copy FTS5 search index.
+  - `databases/dhamma_transcripts.db`: Canonical transcripts warehouse & zero-copy FTS5 search index (pure domain data keyed by `pbXXXXXXX`, zero local filepaths).
+  - `databases/pipeline_state.db`: Local operational ingestion state (archive filepaths, transcription flags, and error logs; excluded from web distribution).
   - `databases/voiceprints.db`: Era-tagged speaker embeddings gallery.
   - `databases/buddhism_lexicon.db`: Master Pali terminology, translation matrix, and phonetic rule definitions.
 - **High-Accuracy Speech-to-Text (`faster-whisper-large-v3`)**:
@@ -23,7 +24,7 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - Four bitstream-verified offline authority reference texts stored with SHA-256 integrity hashes:
     1. *Bodhi & Sujato Glossary* (1,052 terms comparative concordance table)
     2. *Brahmali Vinaya Piṭaka* (1,309 terms monastic law table)
-    3. *Ajahn Brahm Meditation & Dhamma Glossary* (16 terms extracted from *The Word of the Buddha*, BSWA 2024 PDF)
+    3. *Ajahn Brahm Meditation & Dhamma Glossary* (55 terms extracted from *The Word of the Buddha*, BSWA 2024 PDF)
     4. *SuttaCentral Tipiṭaka Canon* (216 canonical basket/nikāya names and DN/MN sutta titles)
   - Greedy multi-word phrase highlighting and phrase-level audio seeking (`Majjhima Nikāya`, `Sabbāsava Sutta`, `Yoniso Manasikāra`, etc.) in the live Lexicon Companion.
   - Canonical dictionary normalization in standard Latin Pali (`jhana`, `samadhi`, `anatta`, `Bodhinyana`, `Rains Retreat`).
@@ -31,6 +32,7 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
 - **Dynamic Serverless Web Application (SQLite WASM & REST)**:
   - 100% dynamic, on-demand querying directly from SQLite (zero hardcoded HTML).
   - Diacritic-insensitive real-time search filtering across all lexicon terms and authority documents.
+  - Full 3,246-talk playable archive in Browse Talks with a "Transcribed Only" toggle (default ON) and paginated "Load More" browsing.
   - Live audio companion highlighting Pali terms dynamically during playback.
   - Full browser Back and Forward history support (`popstate` SPA history routing) without interrupting audio streaming.
   - Universal shareable URLs for text messages and email: supports hashes (`/#talk/pb28113880`), query parameters (`/?talk=pb28113880`), and clean server paths (`/talk/pb28113880`).
@@ -113,7 +115,8 @@ deeper_dhamma/
 │   ├── readme.md               # Architecture & lifecycle documentation
 │   ├── sources/                # Pristine upstream authority documents (JSON, HTML, PDF)
 │   ├── buddhism_lexicon.db     # Master SQLite Lexicon (SuttaCentral & BSWA authorities)
-│   ├── dhamma_transcripts.db   # Canonical SQLite database & FTS5 search index
+│   ├── dhamma_transcripts.db   # Canonical SQLite domain warehouse & FTS5 search index
+│   ├── pipeline_state.db       # Local operational state (archive filepaths & error tracking)
 │   └── voiceprints.db          # Reference speaker embeddings gallery
 ├── deeper_dhamma/              # Consolidated Python package
 │   ├── config.py               # C:\ai-models env vars & Windows DLL loading

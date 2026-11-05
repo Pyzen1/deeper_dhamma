@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from deeper_dhamma.config import ARCHIVE_DIR, TRANSCRIPTS_DB_PATH
+from deeper_dhamma.config import ARCHIVE_DIR, PIPELINE_DB_PATH, TRANSCRIPTS_DB_PATH
 
 logger = logging.getLogger("storage")
 
@@ -34,12 +34,248 @@ def format_timestamp_vtt(seconds: float) -> str:
     return f"{hrs:02d}:{mins:02d}:{secs:02d}.{ms:03d}"
 
 
+class PipelineStateDatabase:
+    """
+    Manages local operational state, disk audio file paths, transcription progress tracking,
+    and pipeline error logs in a separate database (databases/pipeline_state.db) so that
+    dhamma_transcripts.db contains only pure, publishable domain data.
+    """
+
+    def __init__(self, db_path: Union[Path, str] = PIPELINE_DB_PATH):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_schema()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        return conn
+
+    def _init_schema(self) -> None:
+        with self._get_connection() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS episode_states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_uid TEXT UNIQUE NOT NULL,
+                    title TEXT,
+                    filepath TEXT,
+                    filename_stem TEXT,
+                    year INTEGER,
+                    is_transcribed INTEGER DEFAULT 0,
+                    last_error TEXT,
+                    last_error_at TEXT,
+                    last_error_op TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_episode_states_stem ON episode_states(filename_stem);
+                CREATE INDEX IF NOT EXISTS idx_episode_states_transcribed ON episode_states(is_transcribed);
+                """
+            )
+
+    def upsert_file_state(
+        self,
+        episode_uid: str,
+        title: Optional[str] = None,
+        filepath: Optional[str] = None,
+        year: Optional[int] = None,
+        is_transcribed: Optional[int] = None,
+        clear_error: bool = False,
+    ) -> None:
+        stem = Path(filepath).stem if filepath else None
+        trans_val = 1 if is_transcribed else 0
+        with self._get_connection() as conn:
+            with conn:
+                if clear_error:
+                    conn.execute(
+                        """
+                        INSERT INTO episode_states (
+                            episode_uid, title, filepath, filename_stem, year, is_transcribed,
+                            last_error, last_error_at, last_error_op, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, CURRENT_TIMESTAMP)
+                        ON CONFLICT(episode_uid) DO UPDATE SET
+                            title = COALESCE(NULLIF(excluded.title, ''), episode_states.title),
+                            filepath = COALESCE(NULLIF(excluded.filepath, ''), episode_states.filepath),
+                            filename_stem = COALESCE(NULLIF(excluded.filename_stem, ''), episode_states.filename_stem),
+                            year = COALESCE(NULLIF(excluded.year, 0), episode_states.year),
+                            is_transcribed = CASE WHEN excluded.is_transcribed = 1 THEN 1 ELSE episode_states.is_transcribed END,
+                            last_error = NULL,
+                            last_error_at = NULL,
+                            last_error_op = NULL,
+                            updated_at = CURRENT_TIMESTAMP;
+                        """,
+                        (episode_uid, title, filepath, stem, year, trans_val),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO episode_states (
+                            episode_uid, title, filepath, filename_stem, year, is_transcribed, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(episode_uid) DO UPDATE SET
+                            title = COALESCE(NULLIF(excluded.title, ''), episode_states.title),
+                            filepath = COALESCE(NULLIF(excluded.filepath, ''), episode_states.filepath),
+                            filename_stem = COALESCE(NULLIF(excluded.filename_stem, ''), episode_states.filename_stem),
+                            year = COALESCE(NULLIF(excluded.year, 0), episode_states.year),
+                            is_transcribed = CASE WHEN excluded.is_transcribed = 1 THEN 1 ELSE episode_states.is_transcribed END,
+                            updated_at = CURRENT_TIMESTAMP;
+                        """,
+                        (episode_uid, title, filepath, stem, year, trans_val),
+                    )
+
+    def get_filepath(self, identifier: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT filepath FROM episode_states
+                WHERE episode_uid = ? OR filename_stem = ?
+                LIMIT 1;
+                """,
+                (identifier, identifier),
+            ).fetchone()
+            return row["filepath"] if row and row["filepath"] else None
+
+    def get_filepath_map(self) -> Dict[str, str]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT episode_uid, filename_stem, filepath FROM episode_states WHERE filepath IS NOT NULL AND filepath != '';"
+            ).fetchall()
+            mapping: Dict[str, str] = {}
+            for r in rows:
+                mapping[r["episode_uid"]] = r["filepath"]
+                if r["filename_stem"]:
+                    mapping[r["filename_stem"]] = r["filepath"]
+            return mapping
+
+    def resolve_episode_uid(self, identifier: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT episode_uid FROM episode_states
+                WHERE episode_uid = ? OR filename_stem = ? OR filepath LIKE ?
+                LIMIT 1;
+                """,
+                (identifier, identifier, f"%{identifier}%"),
+            ).fetchone()
+            return row["episode_uid"] if row else None
+
+    def record_error(
+        self,
+        episode_id: str,
+        error_message: str,
+        operation: Optional[str] = None,
+        filepath: Optional[str] = None,
+        title: Optional[str] = None,
+        year: Optional[int] = None,
+    ) -> None:
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        clean_err = str(error_message).strip()
+        stem = Path(filepath).stem if filepath else None
+        if not year and filepath:
+            for part in Path(filepath).parts:
+                if part.isdigit() and len(part) == 4:
+                    year = int(part)
+                    break
+
+        with self._get_connection() as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO episode_states (
+                        episode_uid, title, filepath, filename_stem, year, is_transcribed,
+                        last_error, last_error_at, last_error_op, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(episode_uid) DO UPDATE SET
+                        title = COALESCE(NULLIF(excluded.title, ''), episode_states.title),
+                        filepath = COALESCE(NULLIF(excluded.filepath, ''), episode_states.filepath),
+                        filename_stem = COALESCE(NULLIF(excluded.filename_stem, ''), episode_states.filename_stem),
+                        year = COALESCE(NULLIF(excluded.year, 0), episode_states.year),
+                        last_error = excluded.last_error,
+                        last_error_at = excluded.last_error_at,
+                        last_error_op = excluded.last_error_op,
+                        updated_at = CURRENT_TIMESTAMP;
+                    """,
+                    (episode_id, title or episode_id, filepath, stem, year, clean_err, now_iso, operation),
+                )
+
+    def get_error(self, episode_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT id AS state_id, episode_uid AS id, title, filepath, year,
+                       last_error, last_error_at, last_error_op
+                FROM episode_states
+                WHERE (episode_uid = ? OR filename_stem = ?)
+                  AND last_error IS NOT NULL AND last_error != ''
+                LIMIT 1;
+                """,
+                (episode_id, episode_id),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def clear_error(self, episode_id: str) -> None:
+        with self._get_connection() as conn:
+            with conn:
+                conn.execute(
+                    """
+                    UPDATE episode_states
+                    SET last_error = NULL,
+                        last_error_at = NULL,
+                        last_error_op = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE episode_uid = ? OR filename_stem = ?;
+                    """,
+                    (episode_id, episode_id),
+                )
+
+    def list_errors(self, operation: Optional[str] = None) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            if operation:
+                cur = conn.execute(
+                    """
+                    SELECT id AS state_id, episode_uid AS id, title, filepath, year,
+                           last_error, last_error_at, last_error_op
+                    FROM episode_states
+                    WHERE last_error IS NOT NULL AND last_error != '' AND last_error_op = ?
+                    ORDER BY last_error_at DESC;
+                    """,
+                    (operation,),
+                )
+            else:
+                cur = conn.execute(
+                    """
+                    SELECT id AS state_id, episode_uid AS id, title, filepath, year,
+                           last_error, last_error_at, last_error_op
+                    FROM episode_states
+                    WHERE last_error IS NOT NULL AND last_error != ''
+                    ORDER BY last_error_at DESC;
+                    """
+                )
+            return [dict(r) for r in cur.fetchall()]
+
+
 class TranscriptDatabase:
     """Manages the canonical SQLite transcripts and FTS5 search database."""
 
-    def __init__(self, db_path: Union[Path, str] = TRANSCRIPTS_DB_PATH):
+    def __init__(
+        self,
+        db_path: Union[Path, str] = TRANSCRIPTS_DB_PATH,
+        pipeline_db_path: Optional[Union[Path, str]] = None,
+    ):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if pipeline_db_path is not None:
+            resolved_pipe_path = Path(pipeline_db_path)
+        elif self.db_path.resolve() == TRANSCRIPTS_DB_PATH.resolve():
+            resolved_pipe_path = PIPELINE_DB_PATH
+        else:
+            resolved_pipe_path = self.db_path.with_name(f"{self.db_path.stem}_pipeline.db")
+        self.pipeline_db = PipelineStateDatabase(resolved_pipe_path)
         self._init_schema()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -66,7 +302,6 @@ class TranscriptDatabase:
                     primary_teacher TEXT,
                     primary_display TEXT,
                     identified_teachers TEXT,
-                    filepath TEXT,
                     is_transcribed INTEGER DEFAULT 0,
                     media_url TEXT,
                     permalink TEXT,
@@ -74,9 +309,6 @@ class TranscriptDatabase:
                     is_multi_speaker INTEGER DEFAULT 0,
                     speaker_shares TEXT,
                     terminology_changelog TEXT,
-                    last_error TEXT,
-                    last_error_at TEXT,
-                    last_error_op TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -157,29 +389,6 @@ class TranscriptDatabase:
                 """
             )
 
-            # Ensure columns exist on legacy episodes table
-            cur = conn.execute("PRAGMA table_info(episodes);")
-            cols = {row["name"] for row in cur.fetchall()}
-            if "identified_teachers" not in cols:
-                conn.execute("ALTER TABLE episodes ADD COLUMN identified_teachers TEXT;")
-            if "filepath" not in cols:
-                conn.execute("ALTER TABLE episodes ADD COLUMN filepath TEXT;")
-            if "is_transcribed" not in cols:
-                conn.execute("ALTER TABLE episodes ADD COLUMN is_transcribed INTEGER DEFAULT 0;")
-                conn.execute("UPDATE episodes SET is_transcribed = 1 WHERE duration_sec > 0;")
-            if "last_error" not in cols:
-                conn.execute("ALTER TABLE episodes ADD COLUMN last_error TEXT;")
-            if "last_error_at" not in cols:
-                conn.execute("ALTER TABLE episodes ADD COLUMN last_error_at TEXT;")
-            if "last_error_op" not in cols:
-                conn.execute("ALTER TABLE episodes ADD COLUMN last_error_op TEXT;")
-
-            # Ensure color column exists on teachers table
-            cur_t = conn.execute("PRAGMA table_info(teachers);")
-            t_cols = {row["name"] for row in cur_t.fetchall()}
-            if "color" not in t_cols:
-                conn.execute("ALTER TABLE teachers ADD COLUMN color TEXT DEFAULT '#f59e0b';")
-
         self.seed_teachers()
 
     def save_episode(
@@ -220,8 +429,8 @@ class TranscriptDatabase:
                         id, title, date, year, primary_teacher, primary_display,
                         identified_teachers, is_transcribed,
                         media_url, permalink, duration_sec, is_multi_speaker,
-                        speaker_shares, terminology_changelog, filepath
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+                        speaker_shares, terminology_changelog
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         date = excluded.date,
@@ -235,17 +444,13 @@ class TranscriptDatabase:
                         duration_sec = excluded.duration_sec,
                         is_multi_speaker = excluded.is_multi_speaker,
                         speaker_shares = excluded.speaker_shares,
-                        terminology_changelog = excluded.terminology_changelog,
-                        filepath = COALESCE(NULLIF(excluded.filepath, ''), episodes.filepath),
-                        last_error = NULL,
-                        last_error_at = NULL,
-                        last_error_op = NULL;
+                        terminology_changelog = excluded.terminology_changelog;
                     """,
                     (
                         ep_id, title, date_display, year_int, primary_slug, primary_display,
                         primary_display,
                         media_url, permalink, duration_sec, is_multi,
-                        shares_json, changelog_json, filepath,
+                        shares_json, changelog_json,
                     ),
                 )
 
@@ -273,6 +478,15 @@ class TranscriptDatabase:
                     segment_rows,
                 )
 
+        self.pipeline_db.upsert_file_state(
+            episode_uid=ep_id,
+            title=title,
+            filepath=filepath or None,
+            year=year_int,
+            is_transcribed=1,
+            clear_error=True,
+        )
+
         if primary_slug and primary_slug != "unknown_teacher":
             self.associate_teacher(
                 episode_id=ep_id,
@@ -296,37 +510,6 @@ class TranscriptDatabase:
         added = 0
         with self._get_connection() as conn:
             with conn:
-                # Legacy migration for Bhante Sujato: update slug from ajahn_sujato if present
-                sujato_row = conn.execute("SELECT id FROM teachers WHERE slug = 'bhante_sujato'").fetchone()
-                ajahn_row = conn.execute("SELECT id FROM teachers WHERE slug = 'ajahn_sujato'").fetchone()
-                if ajahn_row:
-                    if sujato_row:
-                        conn.execute("UPDATE OR IGNORE episode_teachers SET teacher_id = ? WHERE teacher_id = ?", (sujato_row[0], ajahn_row[0]))
-                        conn.execute("DELETE FROM episode_teachers WHERE teacher_id = ?", (ajahn_row[0],))
-                        conn.execute("DELETE FROM teachers WHERE id = ?", (ajahn_row[0],))
-                    else:
-                        conn.execute(
-                            """
-                            UPDATE teachers
-                            SET slug = 'bhante_sujato', display_name = 'Bhante Sujato', color = '#10b981'
-                            WHERE slug = 'ajahn_sujato';
-                            """
-                        )
-                conn.execute(
-                    """
-                    UPDATE episodes
-                    SET primary_teacher = 'bhante_sujato', primary_display = 'Bhante Sujato'
-                    WHERE primary_teacher = 'ajahn_sujato';
-                    """
-                )
-                conn.execute(
-                    """
-                    UPDATE speech_segments
-                    SET speaker_slug = 'bhante_sujato', speaker_display = 'Bhante Sujato'
-                    WHERE speaker_slug = 'ajahn_sujato';
-                    """
-                )
-
                 for t in teachers:
                     cur = conn.execute(
                         """
@@ -444,7 +627,13 @@ class TranscriptDatabase:
         Indexes all audio files on disk into `episodes` and creates initial teacher
         associations in `episode_teachers` and `identified_teachers` from filenames.
         """
-        from deeper_dhamma.catalog import identify_primary_teacher, parse_episode_metadata
+        from deeper_dhamma.catalog import (
+            extract_year_and_date,
+            identify_all_teachers,
+            identify_primary_teacher,
+            is_english_talk,
+            parse_episode_metadata,
+        )
         from deeper_dhamma.config import CATALOG_PATH
         import html
 
@@ -454,18 +643,34 @@ class TranscriptDatabase:
         associated_teachers = 0
 
         catalog_map = {}
+        catalog_by_id = {}
         if CATALOG_PATH and Path(CATALOG_PATH).exists():
             try:
                 with open(CATALOG_PATH, "r", encoding="utf-8") as f:
                     cat_list = json.load(f)
                 for ep in cat_list:
+                    ep_id_val = ep.get("id")
+                    if ep_id_val:
+                        catalog_by_id[ep_id_val] = ep
                     _, _, fname = parse_episode_metadata(ep.get("title", ""), ep.get("upload_date", ""))
-                    catalog_map[fname] = ep
+                    if fname not in catalog_map or ep.get("media_url"):
+                        catalog_map[fname] = ep
             except Exception as e:
                 logger.warning(f"Could not load catalog in scan_archive_directory: {e}")
 
+        permanently_broken_ids = {
+            r["id"]
+            for r in self.pipeline_db.list_errors()
+            if "404" in (r.get("last_error") or "") or "removed from cdn" in (r.get("last_error") or "").lower()
+        }
+
         with self._get_connection() as conn:
             with conn:
+                teacher_id_map = {
+                    r["slug"]: (r["id"], r["display_name"])
+                    for r in conn.execute("SELECT id, slug, display_name FROM teachers;").fetchall()
+                }
+
                 for p in archive_dir.rglob("*"):
                     if not p.is_file():
                         continue
@@ -476,80 +681,296 @@ class TranscriptDatabase:
 
                     total_files += 1
                     stem = p.stem
-                    year_val, _, _ = parse_episode_metadata(p.name, "")
+                    year_str, _, _ = parse_episode_metadata(p.name, "")
+                    year_val = int(year_str) if str(year_str).isdigit() else 0
                     teacher_slug, teacher_display = identify_primary_teacher(p.name)
 
                     cat_ep = catalog_map.get(stem)
                     if cat_ep:
+                        ep_id = cat_ep.get("id") or stem
                         clean_title = html.unescape(cat_ep.get("title", stem))
                         media_url = cat_ep.get("media_url")
                         permalink = cat_ep.get("permalink")
                         upload_date = cat_ep.get("upload_date", "")
-                        date_display = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}" if len(upload_date) == 8 else str(year_val)
+                        yr_s, date_display = extract_year_and_date(clean_title, upload_date)
+                        if str(yr_s).isdigit():
+                            year_val = int(yr_s)
+                        t_slug, t_disp = identify_primary_teacher(clean_title)
+                        if t_slug != "unknown_teacher":
+                            teacher_slug, teacher_display = t_slug, t_disp
                     else:
+                        ep_id = stem
                         clean_title = stem.replace("_", " ").title()
                         media_url = None
                         permalink = None
-                        date_display = str(year_val)
+                        date_display = str(year_val) if year_val else ""
 
-                    # Check if episode exists
+                    # Check if canonical episode exists
                     cur = conn.execute(
-                        "SELECT id, is_transcribed, identified_teachers FROM episodes WHERE id = ?;",
-                        (stem,),
+                        "SELECT id, is_transcribed, primary_teacher, primary_display, identified_teachers FROM episodes WHERE id = ?;",
+                        (ep_id,),
                     )
                     row = cur.fetchone()
+                    is_trans_val = 1 if (row and row["is_transcribed"]) else 0
+
+                    # Record local filepath and transcription state in pipeline_state.db
+                    self.pipeline_db.upsert_file_state(
+                        episode_uid=ep_id,
+                        title=clean_title,
+                        filepath=str(p),
+                        year=year_val,
+                        is_transcribed=is_trans_val,
+                    )
+
+                    if ep_id in permanently_broken_ids and not is_trans_val:
+                        continue
+
                     if not row:
+                        if media_url or is_trans_val:
+                            conn.execute(
+                                """
+                                INSERT INTO episodes (
+                                    id, title, date, year, primary_teacher, primary_display,
+                                    duration_sec, is_transcribed, identified_teachers,
+                                    media_url, permalink
+                                ) VALUES (?, ?, ?, ?, ?, ?, 0.0, 0, ?, ?, ?);
+                                """,
+                                (
+                                    ep_id,
+                                    clean_title,
+                                    date_display,
+                                    year_val,
+                                    teacher_slug,
+                                    teacher_display,
+                                    teacher_display,
+                                    media_url,
+                                    permalink,
+                                ),
+                            )
+                            added_episodes += 1
+                    else:
                         conn.execute(
                             """
-                            INSERT INTO episodes (
-                                id, title, date, year, primary_teacher, primary_display,
-                                duration_sec, is_transcribed, filepath, identified_teachers,
-                                media_url, permalink
-                            ) VALUES (?, ?, ?, ?, ?, ?, 0.0, 0, ?, ?, ?, ?);
+                            UPDATE episodes SET
+                                date = COALESCE(NULLIF(date, ''), ?),
+                                year = COALESCE(NULLIF(year, 0), ?),
+                                primary_teacher = CASE WHEN primary_teacher IS NULL OR primary_teacher = '' OR primary_teacher = 'unknown_teacher' THEN ? ELSE primary_teacher END,
+                                primary_display = CASE WHEN primary_display IS NULL OR primary_display = '' OR primary_display = 'Unknown Teacher' THEN ? ELSE primary_display END,
+                                identified_teachers = COALESCE(NULLIF(identified_teachers, ''), ?),
+                                media_url = COALESCE(NULLIF(media_url, ''), ?),
+                                permalink = COALESCE(NULLIF(permalink, ''), ?),
+                                title = CASE WHEN title LIKE '%.mp3' OR title LIKE '%.m4a' OR title = id THEN ? ELSE title END
+                            WHERE id = ?;
                             """,
                             (
-                                stem,
-                                clean_title,
                                 date_display,
                                 year_val,
                                 teacher_slug,
                                 teacher_display,
-                                str(p),
                                 teacher_display,
+                                media_url,
+                                permalink,
+                                clean_title,
+                                ep_id,
+                            ),
+                        )
+
+                    # Associate initial teacher from filename/title if episode exists in episodes
+                    if row or media_url:
+                        t_info = teacher_id_map.get(teacher_slug)
+                        if t_info:
+                            t_id = t_info[0]
+                            cur_assoc = conn.execute(
+                                """
+                                INSERT INTO episode_teachers (
+                                    episode_id, teacher_id, detection_source, confidence, share
+                                ) VALUES (?, ?, 'filename', 1.0, 1.0)
+                                ON CONFLICT(episode_id, teacher_id, detection_source) DO NOTHING;
+                                """,
+                                (ep_id, t_id),
+                            )
+                            if cur_assoc.rowcount > 0:
+                                associated_teachers += 1
+
+                # Reconcile any remaining catalog episodes in database
+                for ep_id, cat_ep in catalog_by_id.items():
+                    if ep_id in permanently_broken_ids:
+                        continue
+                    raw_title = cat_ep.get("title", "")
+                    clean_title = html.unescape(raw_title)
+                    if not is_english_talk(clean_title):
+                        continue
+                    media_url = cat_ep.get("media_url") or None
+                    permalink = cat_ep.get("permalink") or None
+                    upload_date = cat_ep.get("upload_date", "")
+                    yr_s, date_display = extract_year_and_date(clean_title, upload_date)
+                    year_val = int(yr_s) if str(yr_s).isdigit() else 0
+                    t_slug, t_disp = identify_primary_teacher(clean_title)
+                    all_t = identify_all_teachers(clean_title)
+                    id_teachers_str = ", ".join(d for _, d in all_t) if all_t else t_disp
+
+                    existing = conn.execute(
+                        "SELECT id, date, year, primary_teacher, primary_display, identified_teachers, media_url FROM episodes WHERE id = ?;",
+                        (ep_id,),
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            """
+                            UPDATE episodes SET
+                                title = COALESCE(NULLIF(title, ''), ?),
+                                date = COALESCE(NULLIF(date, ''), ?),
+                                year = COALESCE(NULLIF(year, 0), ?),
+                                primary_teacher = CASE WHEN primary_teacher IS NULL OR primary_teacher = '' OR primary_teacher = 'unknown_teacher' THEN ? ELSE primary_teacher END,
+                                primary_display = CASE WHEN primary_display IS NULL OR primary_display = '' OR primary_display = 'Unknown Teacher' THEN ? ELSE primary_display END,
+                                identified_teachers = COALESCE(NULLIF(identified_teachers, ''), ?),
+                                media_url = COALESCE(NULLIF(media_url, ''), ?),
+                                permalink = COALESCE(NULLIF(permalink, ''), ?)
+                            WHERE id = ?;
+                            """,
+                            (
+                                clean_title,
+                                date_display,
+                                year_val,
+                                t_slug,
+                                t_disp,
+                                id_teachers_str,
+                                media_url,
+                                permalink,
+                                ep_id,
+                            ),
+                        )
+                    elif media_url:
+                        conn.execute(
+                            """
+                            INSERT INTO episodes (
+                                id, title, date, year, primary_teacher, primary_display,
+                                duration_sec, is_transcribed, identified_teachers,
+                                media_url, permalink
+                            ) VALUES (?, ?, ?, ?, ?, ?, 0.0, 0, ?, ?, ?);
+                            """,
+                            (
+                                ep_id,
+                                clean_title,
+                                date_display,
+                                year_val,
+                                t_slug,
+                                t_disp,
+                                id_teachers_str,
                                 media_url,
                                 permalink,
                             ),
                         )
                         added_episodes += 1
-                    else:
+
+                    if not existing and not media_url:
+                        continue
+
+                    # Ensure all teachers identified in title are linked in episode_teachers
+                    for slug_item, _ in (all_t or [(t_slug, t_disp)]):
+                        t_info = teacher_id_map.get(slug_item)
+                        if t_info:
+                            conn.execute(
+                                """
+                                INSERT INTO episode_teachers (
+                                    episode_id, teacher_id, detection_source, confidence, share
+                                ) VALUES (?, ?, 'filename', 1.0, 1.0)
+                                ON CONFLICT(episode_id, teacher_id, detection_source) DO NOTHING;
+                                """,
+                                (ep_id, t_info[0]),
+                            )
+
+                # Recompute identified_teachers where episode_teachers has voiceprint or catalog_scan entries
+                ep_rows = conn.execute(
+                    """
+                    SELECT DISTINCT episode_id FROM episode_teachers
+                    WHERE detection_source IN ('voiceprint', 'catalog_scan', 'pipeline');
+                    """
+                ).fetchall()
+                for er in ep_rows:
+                    eid = er["episode_id"]
+                    assoc_rows = conn.execute(
+                        """
+                        SELECT t.slug, t.display_name, et.detection_source, et.confidence
+                        FROM episode_teachers et
+                        JOIN teachers t ON et.teacher_id = t.id
+                        WHERE et.episode_id = ?
+                        ORDER BY
+                            CASE et.detection_source
+                                WHEN 'pipeline' THEN 1
+                                WHEN 'catalog_scan' THEN 2
+                                WHEN 'voiceprint' THEN 3
+                                ELSE 4
+                            END ASC,
+                            et.confidence DESC,
+                            et.id ASC;
+                        """,
+                        (eid,),
+                    ).fetchall()
+                    if assoc_rows:
+                        items = []
+                        primary_cand = None
+                        for a in assoc_rows:
+                            if a["display_name"] == "Unknown Teacher" and len(assoc_rows) > 1:
+                                continue
+                            if primary_cand is None and a["slug"] != "unknown_teacher":
+                                primary_cand = (a["slug"], a["display_name"])
+                            if a["detection_source"] == "voiceprint":
+                                items.append(f"{a['display_name']} (voiceprint {a['confidence']:.2f})")
+                            else:
+                                items.append(a["display_name"])
+                        unique_items = list(dict.fromkeys(items))
+                        if unique_items:
+                            conn.execute(
+                                "UPDATE episodes SET identified_teachers = ? WHERE id = ?;",
+                                (", ".join(unique_items), eid),
+                            )
+                        if primary_cand:
+                            conn.execute(
+                                """
+                                UPDATE episodes
+                                SET primary_teacher = CASE WHEN primary_teacher IS NULL OR primary_teacher = '' OR primary_teacher = 'unknown_teacher' THEN ? ELSE primary_teacher END,
+                                    primary_display = CASE WHEN primary_display IS NULL OR primary_display = '' OR primary_display = 'Unknown Teacher' THEN ? ELSE primary_display END
+                                WHERE id = ?;
+                                """,
+                                (primary_cand[0], primary_cand[1], eid),
+                            )
+
+                # Clean up any leftover non-pb rows that match catalog_map and any empty unplayable draft rows
+                leftover_stems = conn.execute(
+                    "SELECT id, primary_teacher, primary_display, identified_teachers FROM episodes WHERE id NOT LIKE 'pb%' AND is_transcribed = 0;"
+                ).fetchall()
+                for lr in leftover_stems:
+                    l_stem = lr["id"]
+                    c_ep = catalog_map.get(l_stem)
+                    if c_ep and c_ep.get("id") and c_ep.get("id") != l_stem:
+                        target_pb = c_ep["id"]
                         conn.execute(
                             """
-                            UPDATE episodes SET
-                                filepath = COALESCE(NULLIF(filepath, ''), ?),
-                                media_url = COALESCE(media_url, ?),
-                                permalink = COALESCE(permalink, ?),
-                                title = CASE WHEN title LIKE '%.mp3' OR title LIKE '%.m4a' THEN ? ELSE title END
-                            WHERE id = ?;
-                            """,
-                            (str(p), media_url, permalink, clean_title, stem),
-                        )
-
-                    # Associate initial teacher from filename
-                    cur_t = conn.execute("SELECT id FROM teachers WHERE slug = ?;", (teacher_slug,))
-                    t_row = cur_t.fetchone()
-                    if t_row:
-                        t_id = t_row["id"]
-                        cur_assoc = conn.execute(
-                            """
-                            INSERT INTO episode_teachers (
+                            INSERT OR IGNORE INTO episode_teachers (
                                 episode_id, teacher_id, detection_source, confidence, share
-                            ) VALUES (?, ?, 'filename', 1.0, 1.0)
-                            ON CONFLICT(episode_id, teacher_id, detection_source) DO NOTHING;
+                            )
+                            SELECT ?, teacher_id, detection_source, confidence, share
+                            FROM episode_teachers WHERE episode_id = ?;
                             """,
-                            (stem, t_id),
+                            (target_pb, l_stem),
                         )
-                        if cur_assoc.rowcount > 0:
-                            associated_teachers += 1
+                        conn.execute("DELETE FROM episode_teachers WHERE episode_id = ?;", (l_stem,))
+                        conn.execute("DELETE FROM episodes WHERE id = ? AND is_transcribed = 0;", (l_stem,))
+
+                if permanently_broken_ids:
+                    placeholders = ", ".join("?" for _ in permanently_broken_ids)
+                    conn.execute(
+                        f"DELETE FROM episodes WHERE is_transcribed = 0 AND id IN ({placeholders});",
+                        tuple(permanently_broken_ids),
+                    )
+                conn.execute(
+                    """
+                    DELETE FROM episodes
+                    WHERE is_transcribed = 0
+                      AND (media_url IS NULL OR media_url = '');
+                    """
+                )
+                conn.execute("DELETE FROM episode_teachers WHERE episode_id NOT IN (SELECT id FROM episodes);")
 
         return {
             "total_audio_files": total_files,
@@ -558,23 +979,26 @@ class TranscriptDatabase:
         }
 
     def has_episode(self, episode_id: str) -> bool:
+        resolved_uid = self.pipeline_db.resolve_episode_uid(episode_id) or episode_id
         with self._get_connection() as conn:
             cur = conn.execute(
-                "SELECT 1 FROM episodes WHERE (id = ? OR filepath LIKE ?) AND is_transcribed = 1 LIMIT 1;",
-                (episode_id, f"%{episode_id}%"),
+                "SELECT 1 FROM episodes WHERE id IN (?, ?) AND is_transcribed = 1 LIMIT 1;",
+                (episode_id, resolved_uid),
             )
             return cur.fetchone() is not None
 
     def get_episode(self, episode_id: str) -> Optional[Dict]:
+        resolved_uid = self.pipeline_db.resolve_episode_uid(episode_id) or episode_id
         with self._get_connection() as conn:
             ep = conn.execute(
-                "SELECT * FROM episodes WHERE id = ? OR filepath LIKE ? LIMIT 1;",
-                (episode_id, f"%{episode_id}%"),
+                "SELECT * FROM episodes WHERE id IN (?, ?) LIMIT 1;",
+                (episode_id, resolved_uid),
             ).fetchone()
             if not ep:
                 return None
             ep_dict = dict(ep)
             resolved_id = ep_dict["id"]
+            ep_dict["filepath"] = self.pipeline_db.get_filepath(resolved_id) or ""
             try:
                 ep_dict["speaker_shares"] = json.loads(ep_dict.get("speaker_shares") or "{}")
             except Exception:
@@ -766,59 +1190,20 @@ class TranscriptDatabase:
         title: Optional[str] = None,
     ) -> None:
         """
-        Records or updates the most recent error associated with an episode/archive file.
-        Inserts a tracking record if the episode is not yet cataloged.
+        Records or updates the most recent error associated with an episode/archive file
+        in the operational pipeline state database (`pipeline_state.db`).
         """
-        from datetime import datetime, timezone
-        now_iso = datetime.now(timezone.utc).isoformat()
-        clean_err = str(error_message).strip()
-
-        with self._get_connection() as conn:
-            with conn:
-                cur = conn.execute("SELECT id FROM episodes WHERE id = ?;", (episode_id,))
-                if cur.fetchone():
-                    conn.execute(
-                        """
-                        UPDATE episodes
-                        SET last_error = ?,
-                            last_error_at = ?,
-                            last_error_op = ?
-                        WHERE id = ?;
-                        """,
-                        (clean_err, now_iso, operation, episode_id),
-                    )
-                else:
-                    conn.execute(
-                        """
-                        INSERT INTO episodes (
-                            id, title, filepath, duration_sec, is_transcribed,
-                            last_error, last_error_at, last_error_op
-                        ) VALUES (?, ?, ?, 0.0, 0, ?, ?, ?);
-                        """,
-                        (
-                            episode_id,
-                            title or episode_id,
-                            filepath,
-                            clean_err,
-                            now_iso,
-                            operation,
-                        ),
-                    )
+        self.pipeline_db.record_error(
+            episode_id=episode_id,
+            error_message=error_message,
+            operation=operation,
+            filepath=filepath,
+            title=title,
+        )
 
     def get_error(self, episode_id: str) -> Optional[Dict[str, Any]]:
         """Returns error metadata for an episode if an active error is recorded, else None."""
-        with self._get_connection() as conn:
-            cur = conn.execute(
-                """
-                SELECT id, title, filepath, last_error, last_error_at, last_error_op
-                FROM episodes
-                WHERE id = ? AND last_error IS NOT NULL AND last_error != ''
-                LIMIT 1;
-                """,
-                (episode_id,),
-            )
-            row = cur.fetchone()
-            return dict(row) if row else None
+        return self.pipeline_db.get_error(episode_id)
 
     def check_preflight(
         self,
@@ -868,42 +1253,11 @@ class TranscriptDatabase:
 
     def clear_error(self, episode_id: str) -> None:
         """Clears the last_error tracking fields when an operation succeeds for an episode."""
-        with self._get_connection() as conn:
-            with conn:
-                conn.execute(
-                    """
-                    UPDATE episodes
-                    SET last_error = NULL,
-                        last_error_at = NULL,
-                        last_error_op = NULL
-                    WHERE id = ?;
-                    """,
-                    (episode_id,),
-                )
+        self.pipeline_db.clear_error(episode_id)
 
     def list_errors(self, operation: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Returns all episodes that currently have recorded errors."""
-        with self._get_connection() as conn:
-            if operation:
-                cur = conn.execute(
-                    """
-                    SELECT id, title, filepath, last_error, last_error_at, last_error_op
-                    FROM episodes
-                    WHERE last_error IS NOT NULL AND last_error != '' AND last_error_op = ?
-                    ORDER BY last_error_at DESC;
-                    """,
-                    (operation,),
-                )
-            else:
-                cur = conn.execute(
-                    """
-                    SELECT id, title, filepath, last_error, last_error_at, last_error_op
-                    FROM episodes
-                    WHERE last_error IS NOT NULL AND last_error != ''
-                    ORDER BY last_error_at DESC;
-                    """
-                )
-            return [dict(r) for r in cur.fetchall()]
+        """Returns all episodes that currently have recorded errors in pipeline_state.db."""
+        return self.pipeline_db.list_errors(operation=operation)
 
     def generate_markdown(self, episode_id: str) -> str:
         data = self.get_episode(episode_id)

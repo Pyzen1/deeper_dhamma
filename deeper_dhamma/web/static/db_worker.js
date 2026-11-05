@@ -215,7 +215,14 @@ function handleGetStats() {
   const years = queryAll(`
     SELECT DISTINCT year 
     FROM episodes 
-    WHERE is_transcribed = 1 AND year IS NOT NULL 
+    WHERE is_transcribed = 1 AND year IS NOT NULL AND year > 0
+    ORDER BY year DESC;
+  `).map((r) => r.year);
+
+  const allYears = queryAll(`
+    SELECT DISTINCT year 
+    FROM episodes 
+    WHERE year IS NOT NULL AND year > 0
     ORDER BY year DESC;
   `).map((r) => r.year);
 
@@ -227,6 +234,7 @@ function handleGetStats() {
     teachers: teachersList.filter((r) => r.default_role !== 'unregistered' && r.slug !== 'unknown_teacher').map((r) => r.display_name),
     teacher_map: teacherMap,
     years,
+    all_years: allYears,
     db_version: currentDbVersion,
   };
 }

@@ -90,10 +90,21 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         # Copy lexicon reference tables (explicitly targeting main database to avoid dropping from attached lex)
         conn.execute("DROP TABLE IF EXISTS main.source_documents;")
         conn.execute("CREATE TABLE main.source_documents AS SELECT * FROM lex.source_documents;")
+        conn.execute("UPDATE main.source_documents SET content_compressed = NULL;")
         conn.execute("DROP TABLE IF EXISTS main.terms;")
         conn.execute("CREATE TABLE main.terms AS SELECT * FROM lex.terms;")
         conn.execute("DROP TABLE IF EXISTS main.phrase_rules;")
         conn.execute("CREATE TABLE main.phrase_rules AS SELECT * FROM lex.phrase_rules;")
+
+        # Safety guard: ensure only playable or transcribed talks remain in the exported web DB
+        conn.execute(
+            """
+            DELETE FROM main.episodes
+            WHERE is_transcribed = 0
+              AND (media_url IS NULL OR media_url = '');
+            """
+        )
+        conn.execute("DELETE FROM main.episode_teachers WHERE episode_id NOT IN (SELECT id FROM main.episodes);")
 
         # Recreate lexical join view
         conn.execute("DROP VIEW IF EXISTS v_terms;")
@@ -205,6 +216,18 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
     """
     out_path = _resolve_repo_path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
+
+    # Remove stale / leftover test artifacts if present in output_dir
+    for stale_item in ["test_copy.db", "transcripts"]:
+        stale_p = out_path / stale_item
+        if stale_p.exists():
+            if stale_p.is_dir():
+                shutil.rmtree(stale_p, ignore_errors=True)
+            else:
+                try:
+                    stale_p.unlink()
+                except OSError:
+                    pass
 
     today = datetime.now()
     version_int = int(time.time())

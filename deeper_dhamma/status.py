@@ -92,12 +92,19 @@ def collect_status(
 
     if db_path.exists():
         try:
+            from deeper_dhamma.storage import TranscriptDatabase
+            tdb = TranscriptDatabase(db_path=db_path)
+            pipeline_db = tdb.pipeline_db
+            fp_map = pipeline_db.get_filepath_map()
+
             conn = sqlite3.connect(str(db_path))
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT id, title, year, date, primary_teacher, primary_display, duration_sec FROM episodes WHERE is_transcribed = 1 ORDER BY date ASC;"
             ).fetchall()
             db_episodes = [dict(r) for r in rows]
+            for ep in db_episodes:
+                ep["filepath"] = fp_map.get(ep["id"])
 
             res_rows = conn.execute(
                 "SELECT id, title, primary_display FROM episodes WHERE primary_teacher != 'unknown_teacher' AND primary_display IS NOT NULL;"
@@ -106,6 +113,11 @@ def collect_status(
                 disp = r["primary_display"]
                 db_resolved_teachers[r["id"]] = disp
                 db_resolved_teachers[clean_slug(r["id"])] = disp
+                fp = fp_map.get(r["id"])
+                if fp:
+                    fp_stem = Path(fp).stem
+                    db_resolved_teachers[fp_stem] = disp
+                    db_resolved_teachers[clean_slug(fp_stem)] = disp
                 if r["title"]:
                     db_resolved_teachers[clean_slug(r["title"])] = disp
 
@@ -114,13 +126,16 @@ def collect_status(
             if seg_row:
                 total_db_segments = seg_row[0]
 
-            err_cur = conn.execute(
-                "SELECT id, title, filepath, year, last_error, last_error_at, last_error_op FROM episodes WHERE last_error IS NOT NULL AND last_error != '' ORDER BY last_error_at DESC;"
-            )
+            ep_year_map = {
+                r["id"]: r["year"]
+                for r in conn.execute("SELECT id, year FROM episodes;").fetchall()
+            }
+            conn.close()
+
             error_years = Counter()
-            for r in err_cur.fetchall():
-                ed = dict(r)
-                ey = ed.get("year", 0)
+            for ed in pipeline_db.list_errors():
+                ey = ep_year_map.get(ed["id"], 0) or 0
+                ed["year"] = ey
                 if not ey and ed.get("filepath"):
                     for part in Path(ed["filepath"]).parts:
                         if part.isdigit() and len(part) == 4:
@@ -131,11 +146,16 @@ def collect_status(
                     db_errors.append(ed)
                     if ey:
                         error_years[ey] += 1
-            conn.close()
 
             for ep in db_episodes:
                 ep_id = ep["id"]
                 transcribed_stems.add(ep_id)
+                if ep.get("filepath"):
+                    transcribed_stems.add(Path(ep["filepath"]).stem)
+                if ep.get("title"):
+                    _, _, fn_stem = parse_episode_metadata(ep["title"], "")
+                    if fn_stem:
+                        transcribed_stems.add(fn_stem)
                 y = ep.get("year", 0)
                 if year_filter is None or y == year_filter:
                     total_db_duration += float(ep.get("duration_sec", 0.0))

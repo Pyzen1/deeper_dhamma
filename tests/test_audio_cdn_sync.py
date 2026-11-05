@@ -21,21 +21,26 @@ def test_transcribed_episodes_cdn_parity():
     Verifies that all transcribed episodes in the database have exact file size
     and ID3 tag length matching the remote Podbean CDN stream.
     """
+    from deeper_dhamma.storage import TranscriptDatabase
+
     db_path = Path("databases/dhamma_transcripts.db")
     if not db_path.exists():
         pytest.skip("Transcript database not found")
-        
+
+    tdb = TranscriptDatabase(db_path=db_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     rows = conn.cursor().execute(
-        "SELECT id, title, media_url, filepath FROM episodes WHERE is_transcribed = 1"
+        "SELECT id, title, media_url FROM episodes WHERE is_transcribed = 1"
     ).fetchall()
     conn.close()
-    
+
     assert len(rows) > 0, "No transcribed episodes found in database"
-    
+
     for r in rows:
-        local_p = Path(r["filepath"])
+        fp = tdb.pipeline_db.get_filepath(r["id"])
+        assert fp, f"No local filepath recorded in pipeline_state.db for {r['id']}"
+        local_p = Path(fp)
         media_url = r["media_url"]
         
         assert local_p.exists(), f"Local audio file missing for {r['id']}: {local_p}"
@@ -92,3 +97,33 @@ def test_remote_and_local_first_frame_sync():
     
     # First 300KB must match bit-for-bit
     assert loc_data == rem_data, "Local archive bytes diverge from remote CDN stream bytes!"
+
+
+def test_operational_state_separated_from_transcript_db():
+    """
+    Verifies that local operational columns (`filepath`, `last_error*`) live exclusively in
+    `databases/pipeline_state.db` (`episode_states`) and do not exist in `dhamma_transcripts.db`
+    or `dist/dhamma_web.db`.
+    """
+    from deeper_dhamma.storage import TranscriptDatabase
+
+    db_path = Path("databases/dhamma_transcripts.db")
+    if not db_path.exists():
+        pytest.skip("Transcript database not found")
+
+    tdb = TranscriptDatabase(db_path=db_path)
+    with tdb._get_connection() as conn:
+        ep_cols = {r[1] for r in conn.execute("PRAGMA table_info(episodes)").fetchall()}
+
+    forbidden_cols = {"filepath", "last_error", "last_error_at", "last_error_op"}
+    assert ep_cols.isdisjoint(forbidden_cols), (
+        f"dhamma_transcripts.db still contains operational columns: {ep_cols & forbidden_cols}"
+    )
+
+    with tdb.pipeline_db._get_connection() as pconn:
+        state_cols = {r[1] for r in pconn.execute("PRAGMA table_info(episode_states)").fetchall()}
+        pk_col = next(r[1] for r in pconn.execute("PRAGMA table_info(episode_states)").fetchall() if r[5] == 1)
+
+    assert pk_col == "id", "episode_states must use integer primary key `id`"
+    assert {"id", "episode_uid", "filepath", "last_error", "last_error_at", "last_error_op"}.issubset(state_cols)
+
