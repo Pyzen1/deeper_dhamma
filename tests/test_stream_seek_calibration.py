@@ -5,6 +5,7 @@ Unit tests for StreamSeekCalibrator and HTML5/Chromium seek timeline alignment.
 from pathlib import Path
 import pytest
 from deeper_dhamma.calibration import StreamSeekCalibrator
+from deeper_dhamma.config import PROJECT_ROOT
 
 
 def test_calibrator_cbr_identity():
@@ -23,7 +24,7 @@ def test_calibrator_vbr_xing_exact_inversion():
     packet offsets exactly matches the byte offset Chromium's mp3_seek requests.
     """
     cal = StreamSeekCalibrator()
-    sample_mp3 = Path(r"archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3")
+    sample_mp3 = PROJECT_ROOT / "archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
     
     if not sample_mp3.exists():
         pytest.skip("Archive sample not found on disk")
@@ -45,7 +46,7 @@ def test_calibrator_vbr_xing_exact_inversion():
 def test_calibrate_segments_in_place():
     """Tests calibrate_segments batch structure and word timestamp calibration."""
     cal = StreamSeekCalibrator()
-    sample_mp3 = Path(r"archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3")
+    sample_mp3 = PROJECT_ROOT / "archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
     
     if not sample_mp3.exists():
         pytest.skip("Archive sample not found on disk")
@@ -79,7 +80,7 @@ def test_lead_time_to_first_word_calculation():
     lands exactly 0.50s before the first spoken word and clamps to 0.0s.
     """
     cal = StreamSeekCalibrator()
-    sample_mp3 = Path(r"archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3")
+    sample_mp3 = PROJECT_ROOT / "archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
     
     if not sample_mp3.exists():
         pytest.skip("Archive sample not found on disk")
@@ -114,8 +115,9 @@ def test_vbr_trailer_and_firefox_chrome_linear_calibration():
     )
 
     cal = StreamSeekCalibrator()
-    sample_mp3 = Path(
-        r"archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
+    sample_mp3 = (
+        PROJECT_ROOT
+        / "archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
     )
     if not sample_mp3.exists():
         pytest.skip("Archive sample not found on disk")

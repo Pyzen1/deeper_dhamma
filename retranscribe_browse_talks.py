@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import deeper_dhamma.config
+from deeper_dhamma.storage import TranscriptDatabase
 from deeper_dhamma.pipeline import TranscriptionPipeline
 from deeper_dhamma.export_web import export_static_site
 
@@ -25,18 +26,20 @@ def main():
     print("=" * 80)
 
     db_path = PROJECT_ROOT / "databases" / "dhamma_transcripts.db"
-    conn = sqlite3.connect(db_path)
-    c = conn.cursor()
-    rows = c.execute("""
-        SELECT DISTINCT filepath
-        FROM episodes
-        WHERE is_transcribed = 1 AND filepath IS NOT NULL
-        ORDER BY filepath ASC
-    """).fetchall()
-    conn.close()
+    tdb = TranscriptDatabase(db_path=db_path)
+    fp_map = tdb.pipeline_db.get_filepath_map()
 
-    target_files = [Path(r[0]) for r in rows if os.path.exists(r[0])]
-    print(f"[*] Found {len(target_files)} unique audio talks to re-transcribe (covering 18 browse talk entries).")
+    with tdb._get_connection() as conn:
+        ep_ids = [r[0] for r in conn.execute("SELECT id FROM episodes WHERE is_transcribed = 1").fetchall()]
+
+    unique_paths = set()
+    for ep_id in ep_ids:
+        fp = fp_map.get(ep_id)
+        if fp and os.path.exists(fp):
+            unique_paths.add(Path(fp))
+
+    target_files = sorted(list(unique_paths), key=lambda p: str(p))
+    print(f"[*] Found {len(target_files)} unique audio talks to re-transcribe.")
     for idx, f in enumerate(target_files, 1):
         sz = f.stat().st_size / (1024 * 1024)
         print(f"    {idx}. {f.name} ({sz:.1f} MB)")

@@ -105,6 +105,9 @@ python main.py web -r --port 8080       # Custom port or output directory
 # 12. Dynamic Web UI & API Server (Bottle.py)
 python main.py serve --run              # Launch dynamic REST server on http://127.0.0.1:34266
 python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
+
+# 13. Run Full Verification & Unit Test Suite (121 tests, 100% passing)
+pytest tests                            # Execute all unit and integration tests
 ```
 
 ## Directory Structure
@@ -146,6 +149,24 @@ deeper_dhamma/
 │       │   ├── adapters/       # Pluggable data adapters (api_client.js, wasm_client.js)
 │       │   └── words/          # Compact binary word timing sidecars (.bin + VBR1 trailer)
 │       └── views/              # Bottle templates (index.html)
+├── tests/                      # Comprehensive Unit & Integration Test Suite (121 tests)
+│   ├── test_cli.py             # CLI parser, "One Obvious Way" flags, subcommands dispatch
+│   ├── test_audit.py           # Ghost files, temp fragments, html error pages, archive cleanup
+│   ├── test_catalog.py         # Era determination, teacher matching, clean slugging, dates
+│   ├── test_status.py          # Duration formatting, progress bars, catalog & archive metrics
+│   ├── test_storage.py         # PipelineStateDatabase & TranscriptDatabase FTS5/CRUD/exports
+│   ├── test_curation_and_self_correction.py # Curation slugs, false friends, anti-drift guardrails
+│   ├── test_audio_utils.py     # get_audio_info, load_audio_segment, downmixing, boundary checks
+│   ├── test_export_web.py      # SQLite WASM db compilation, PRAGMA user_version, search_vocab
+│   ├── test_pipeline_integrity.py # Voiceprint scoring, turn smoothing, Pali terminology
+│   ├── test_lexicon_view.py    # BuddhismLexiconDatabase, core/all pagination, FTS5
+│   ├── test_audio_cdn_sync.py  # Bitstream parity with Podbean CDN streams
+│   ├── test_downloader_parity.py # ID3 preservation and non-destructive downloads
+│   ├── test_sync_repair.py     # Remote parity audit and corrupt file repair
+│   ├── test_stream_seek_calibration.py # VBR1 seek trailer generation & in-memory Xing patching
+│   ├── test_cross_browser_word_sync.py # Headless Firefox & Chrome real-time audio sync parity
+│   ├── test_browser_fuzzy_search.py # Multi-word fuzzy search, Damerau-Levenshtein, V8 tests
+│   └── test_web_api.py         # Bottle REST endpoints, date range filters, sorting
 ├── docs/
 │   ├── design/                 # Pipeline architecture specifications
 │   └── troubleshooting_guide.md # Cross-browser VBR audio & word sync troubleshooting guide

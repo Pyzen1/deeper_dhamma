@@ -5,9 +5,12 @@ Unit tests verifying byte-level parity between local archive audio files and Pod
 import os
 import sqlite3
 import struct
+import urllib.error
 import urllib.request
 from pathlib import Path
 import pytest
+
+from deeper_dhamma.config import PROJECT_ROOT, TRANSCRIPTS_DB_PATH
 
 
 def get_id3_size(header_bytes: bytes) -> int:
@@ -23,12 +26,11 @@ def test_transcribed_episodes_cdn_parity():
     """
     from deeper_dhamma.storage import TranscriptDatabase
 
-    db_path = Path("databases/dhamma_transcripts.db")
-    if not db_path.exists():
+    if not TRANSCRIPTS_DB_PATH.exists():
         pytest.skip("Transcript database not found")
 
-    tdb = TranscriptDatabase(db_path=db_path)
-    conn = sqlite3.connect(db_path)
+    tdb = TranscriptDatabase(db_path=TRANSCRIPTS_DB_PATH)
+    conn = sqlite3.connect(TRANSCRIPTS_DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.cursor().execute(
         "SELECT id, title, media_url FROM episodes WHERE is_transcribed = 1"
@@ -48,9 +50,12 @@ def test_transcribed_episodes_cdn_parity():
         assert local_size > 1024 * 1024, f"Local audio file too small: {local_size} bytes"
         
         # Verify remote Content-Length
-        req = urllib.request.Request(media_url, method="HEAD")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            remote_size = int(resp.headers.get("Content-Length", 0))
+        try:
+            req = urllib.request.Request(media_url, method="HEAD")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                remote_size = int(resp.headers.get("Content-Length", 0))
+        except urllib.error.URLError as e:
+            pytest.skip(f"CDN unreachable: {e}")
             
         assert local_size == remote_size, (
             f"Size mismatch on {r['id']}: local={local_size} bytes, remote={remote_size} bytes. "
@@ -62,9 +67,12 @@ def test_transcribed_episodes_cdn_parity():
             local_head = f.read(10)
         local_id3 = get_id3_size(local_head)
         
-        req_id3 = urllib.request.Request(media_url, headers={"Range": "bytes=0-9"})
-        with urllib.request.urlopen(req_id3, timeout=10) as resp:
-            remote_head = resp.read()
+        try:
+            req_id3 = urllib.request.Request(media_url, headers={"Range": "bytes=0-9"})
+            with urllib.request.urlopen(req_id3, timeout=10) as resp:
+                remote_head = resp.read()
+        except urllib.error.URLError as e:
+            pytest.skip(f"CDN unreachable: {e}")
         remote_id3 = get_id3_size(remote_head)
         
         assert local_id3 == remote_id3, (
@@ -77,7 +85,7 @@ def test_remote_and_local_first_frame_sync():
     Verifies that the first MP3 MPEG audio frame sync occurs at the exact same
     byte offset in both the local archive file and the remote stream.
     """
-    sample_mp3 = Path(r"archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3")
+    sample_mp3 = PROJECT_ROOT / "archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
     url = "https://mcdn.podbean.com/mf/web/a2vs36pe6kjbzbwe/7_Guided_Meditation_Q_A_-_8th6vwu3.mp3"
     
     if not sample_mp3.exists():
@@ -86,9 +94,12 @@ def test_remote_and_local_first_frame_sync():
     with open(sample_mp3, "rb") as f:
         loc_data = f.read(300000)
         
-    req = urllib.request.Request(url, headers={"Range": "bytes=0-299999"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        rem_data = resp.read()
+    try:
+        req = urllib.request.Request(url, headers={"Range": "bytes=0-299999"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            rem_data = resp.read()
+    except urllib.error.URLError as e:
+        pytest.skip(f"CDN unreachable: {e}")
         
     loc_id3 = get_id3_size(loc_data[:10])
     rem_id3 = get_id3_size(rem_data[:10])
@@ -107,11 +118,10 @@ def test_operational_state_separated_from_transcript_db():
     """
     from deeper_dhamma.storage import TranscriptDatabase
 
-    db_path = Path("databases/dhamma_transcripts.db")
-    if not db_path.exists():
+    if not TRANSCRIPTS_DB_PATH.exists():
         pytest.skip("Transcript database not found")
 
-    tdb = TranscriptDatabase(db_path=db_path)
+    tdb = TranscriptDatabase(db_path=TRANSCRIPTS_DB_PATH)
     with tdb._get_connection() as conn:
         ep_cols = {r[1] for r in conn.execute("PRAGMA table_info(episodes)").fetchall()}
 
