@@ -64,23 +64,23 @@ Furthermore, because Firefox's `VBRHeader::Offset()` is a non-interpolated step 
 - If a raw `'cdn'` fallback bucket search evaluates `Math.abs(landedPhys - clampedPhys)` without penalizing forward jumps past the target word (`215.80s`), Bucket `k=3` (`221.91s` physical, error `6.11s`) beats the end of Bucket `k=2` (`207.89s` physical, error `7.91s`), jumping forward `6.11s` to **`3:42` (`221.91s`, highlighting `"on"` in `"on how to proceed"`)** and skipping the first 9 words (`"Everyone, so just a little bit of instructions again"`). `WordSync.prepareSeek` therefore also guards raw `'cdn'` fallback mode with a `20x` penalty on `overJump > 0.35s` so it never skips forward into mid-sentence.
 
 #### Cause B: Pre-Warping Word Timestamps vs. the 1:1 44.1 kHz Playback Clock
-Previously, `StreamSeekCalibrator` pre-warped all segment and word timestamps in `databases/dhamma_transcripts.db` and `words/*.bin` using Chromium's `Xing` seek curve $S_{\text{xing}}(t_{\text{phys}})$.
+Previously, `StreamSeekCalibrator` previously pre-warped segment and word timestamps using Chromium's `Xing` seek curve $S_{\text{xing}}(t_{\text{phys}})$.
 - However, the `Xing` table is **only** consulted at the instant a seek is initiated.
 - Once `<audio>` lands at a byte offset corresponding to physical time $t_{\text{phys}}$ and begins sequential playback, the browser's MPEG-1 Layer III audio decoder outputs `1152` PCM samples per frame at `44,100 Hz`, advancing `audio.currentTime` at **exactly `1.000s` per `1.000s` of physical PCM audio**.
-- Because pre-warped `.bin` timestamps compressed `5.18s` of real speech (`216.30s .. 221.48s`) into `3.78s` of `Xing` seek time (`203.14s .. 206.92s`), word highlighting drifted out of sync with the speaker's voice during continuous playback even in Chromium.
+- Because pre-warped timestamps compressed `5.18s` of real speech (`216.30s .. 221.48s`) into `3.78s` of `Xing` seek time (`203.14s .. 206.92s`), word highlighting drifted out of sync with the speaker's voice during continuous playback even in Chromium.
 - Additionally, `ffprobe` previously used `-read_intervals %+3600`, truncating VBR calibration after 60 minutes on talks longer than 1 hour (`pb27802310` is 107 minutes).
 
 ---
 
 ## 3. Architectural Solution (100% Serverless Static Web Application)
 
-Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` hosted on GitHub Pages, Cloudflare Pages, or S3) streaming audio directly from Podbean CDN (`https://mcdn.podbean.com/...`) with **zero Python backend**, the entire VBR synchronization engine operates purely in client-side JavaScript (`word_sync.js`) powered by the binary `VBR1` trailer inside `words/<episode_id>.bin`:
+Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` hosted on GitHub Pages, Cloudflare Pages, or S3) streaming audio directly from Podbean CDN (`https://mcdn.podbean.com/...`) with **zero Python backend**, the entire VBR synchronization engine operates purely in client-side JavaScript (`word_sync.js`) powered by the binary `VBR1` trailer stored in the `episode_words` SQLite table in `dhamma_web.db`:
 
 ```text
 +-----------------------------------------------------------------------------+
-| 1. Offline Build Time (`calibration.py` -> `words/<episode_id>.bin`)        |
+| 1. Offline Build Time (`calibration.py` -> `dhamma_transcripts.db`)         |
 |    - Stores true physical 44.1 kHz PCM timestamps in `dhamma_transcripts.db`|
-|      (`speech_segments`) and `words/<episode_id>.bin` (`start_ms, dur_ms`). |
+|      (`speech_segments` and `episode_words` binary blob with `VBR1` trailer).|
 |    - Appends compact `VBR1` trailer (`pcm_ms`, `audio_byte_offset`, `toc`)  |
 |      for VBR episodes across 100% of talk duration (~25.8 KB).              |
 +-----------------------------------------------------------------------------+
@@ -88,7 +88,7 @@ Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` h
                                        v
 +-----------------------------------------------------------------------------+
 | 2. Client-Side Browser Engine (`WordSync` in `word_sync.js`)                |
-|    - Loads `./words/<episode_id>.bin` and parses `VBR1` trailer in < 5ms.   |
+|    - Queries `episode_words` from SQLite WASM and parses `VBR1` in < 5ms.   |
 |    - Chromium / Safari (`streamMode = 'cdn'`):                              |
 |      Streams `media_url` directly from Podbean CDN via HTTP Range requests  |
 |      and maps `targetPhys` -> `xingSeekTimes` (`215.80s -> 202.64s`).       |
@@ -112,8 +112,8 @@ Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` h
 +-----------------------------------------------------------------------------+
 ```
 
-### 3.1 Binary `VBR1` Trailer Specification (`words/<episode_id>.bin`)
-For CBR episodes (`6` of the `9` currently transcribed episodes), `.bin` files contain only the header and word array (`4 + 6 * N` bytes). For VBR episodes (`pb27802310`, `pb27940021`, `pb28867656`), a `VBR1` trailer is appended immediately at byte offset `4 + 6 * N`:
+### 3.1 Binary `VBR1` Trailer Specification (`episode_words.words_blob`)
+For CBR episodes (`6` of the `9` currently transcribed episodes), the binary blob contains only the header and word array (`4 + 6 * N` bytes). For VBR episodes (`pb27802310`, `pb27940021`, `pb28867656`), a `VBR1` trailer is appended immediately at byte offset `4 + 6 * N`:
 
 | Offset (rel) | Type | Field | Description |
 | :--- | :--- | :--- | :--- |
@@ -152,7 +152,7 @@ const rawSentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [trimm
 - Because `String.prototype.match(/.../g)` silently discards all substrings that fail to match the expression, the entire initial sentence up to `...15 and technically...` was discarded from the DOM.
 
 #### Cause B: Downstream 1-to-1 Word Mapping Offset
-- `WordSync.turnWordMap[turnIdx]` loaded all 212 physical word timings for the turn from `words/<episode_id>.bin` (starting at `72.56s` for *"here"*).
+- `WordSync.turnWordMap[turnIdx]` loaded all 212 physical word timings for the turn from `episode_words` (starting at `72.56s` for *"here"*).
 - Because 18 words were dropped from the DOM, only 194 word `<span>` elements were generated.
 - `WordSync` sequentially mapped timestamp 0 (`72.56s`, *"here"*) onto DOM token 0 (`"15"`), shifting all subsequent word highlights in the turn by 18 positions.
 
@@ -225,7 +225,7 @@ Profiling in headless Mozilla Firefox and Google Chrome revealed five compoundin
 2. **Synchronous 5,000-Row Vocabulary Scan at Startup**:
    - `initDatabase()` unconditionally called `initVocabCache()` (`SELECT word, count FROM search_vocab ORDER BY count DESC;`), mapping 5,000 rows into JS objects and a `Set` before resolving the ready event, blocking initial transcript requests.
 3. **Waterfall Blocking in `openTranscriptDrawer`**:
-   - `openTranscriptDrawer()` sequentially awaited `ensurePaliTermsLoaded()` (fetching all 2,447 terms across Web Worker `postMessage`), awaited `prepareEpisode()` (downloading and parsing the binary word sidecar), and then generated 230+ companion cards before displaying the transcript.
+   - `openTranscriptDrawer()` sequentially awaited `ensurePaliTermsLoaded()` (fetching all 2,447 terms across Web Worker `postMessage`), awaited `prepareEpisode()` (fetching binary word blob from SQLite WASM), and then generated 230+ companion cards before displaying the transcript.
 4. **Heavy Unicode `normalize('NFD')` in `word_sync.js`**:
    - For every word in a talk (up to 12,000 words in talks like `pb27802310`), `matchPhraseAt` evaluated 4-word slices and invoked `foldDiacritics`. Calling `str.normalize('NFD')` 30,000+ times over standard English ASCII words choked the main JS thread.
 5. **12,000 Listener Attachments per Render in `renderDrawerTurns`**:
@@ -272,13 +272,13 @@ pytest tests/
 
 Specifically:
 - `tests/test_cross_browser_word_sync.py`:
-  - Verifies that all VBR episodes in `databases/dhamma_transcripts.db` and `words/*.bin` store unwarped physical PCM timestamps and valid full-duration `VBR1` trailers.
+  - Verifies that all VBR episodes in `databases/dhamma_transcripts.db` store unwarped physical PCM timestamps in `episode_words` and valid full-duration `VBR1` trailers.
   - Launches headless **Mozilla Firefox** and headless **Google Chrome** against a pure static HTTP server (serving the raw unpatched VBR MP3 with `Access-Control-Allow-Origin: *` just like Podbean CDN) to verify that seeking to `"Everyone,"` (`216.30s`) and `"one"` (`231.34s`) via client-side `WordSync` lands at the exact physical audio position and highlights the exact spoken words in real time.
 - `tests/test_audio_cdn_sync.py`:
   - Verifies 1:1 bit-for-bit parity between local `archive/` MP3 files and Podbean CDN streams.
 
 ### 6.2 Rebuilding Static Web Assets & Resetting Browser Cache
-Whenever `dhamma_transcripts.db`, `words/*.bin`, `word_sync.js`, or `app.js` are updated, recompile the static `dist/` bundle:
+Whenever `dhamma_transcripts.db`, `word_sync.js`, or `app.js` are updated, recompile the static `dist/` bundle:
 
 ```powershell
 python main.py web --build

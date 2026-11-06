@@ -147,27 +147,33 @@ While `buddhism_lexicon.db`, `voiceprints.db`, `pipeline_state.db`, and `dhamma_
 * **Why Combine for Web?** The browser is 100% read-only (zero write lock contention) and does not perform acoustic inference or local filesystem operations (`voiceprints.db` and `pipeline_state.db` are excluded). Consolidating `dhamma_transcripts.db` and `buddhism_lexicon.db` into `dhamma_web.db` allows the browser to download and query a single vacuumed file with zero post-hoc scrubbing.
 * **Cache Validation**: The build script stamps `PRAGMA user_version = <YYYYMMDD>` at byte offset 60..63 of the file header. The client worker issues a 100-byte HTTP Range probe (`Range: bytes=0-99`) to validate local `IndexedDB` caching before fetching any updates.
 
-## Pluggable Web Architecture: Zero Code Duplication
+## Serverless Web Architecture: Pure SQLite WASM & Service Worker
 
-Both the live development server (`python main.py serve --run`) and the static site (`python main.py web --build`) share 100% of the UI code, CSS styling, audio player, and templates without duplication.
+The web application is 100% serverless and self-contained. Both the local preview server (`python main.py web --run` / `python main.py serve --run`) and static production deployments (`dist/` hosted on GitHub Pages, Cloudflare Pages, or S3) run entirely client-side using official SQLite WASM and an offline-resilient Service Worker.
 
-Data access is decoupled via a dependency-injected client adapter:
+Data access is executed directly in-browser without any REST API or backend server:
 
 ```text
 +---------------------------------------------------------------------------------+
-|                         Unified Frontend (100% Shared)                          |
+|                         Unified Frontend (100% Client-Side)                     |
 |  views/index.html + static/style.css + static/app.js (calls window.DeeperDhammaDB)
 +---------------------------------------------------------------------------------+
                                          |
                        loads <script src="db_client.js">
                                          |
-            +----------------------------+----------------------------+
-            |                                                         |
-            v (Local Dev: serve --run)                                v (Static Site: web --build)
-[ adapters/api_client.js ]                                  [ adapters/wasm_client.js ]
-  - Served dynamically at /static/db_client.js                - Copied as dist/db_client.js
-  - Queries Bottle /api/* endpoints                           - Queries dist/dhamma_web.db in-browser
-  - Instant live DB reflection during transcription           - Zero /api/ or backend fallback in dist/
+                                         v
+                         [ adapters/wasm_client.js ]
+                                         |
+                     Communicates via Web Worker postMessage
+                                         |
+                                         v
+                          [ Web Worker: db_worker.js ]
+                                         |
+             +---------------------------+---------------------------+
+             |                                                       |
+             v                                                       v
+   [ Official SQLite WASM ]                                [ IndexedDB Persistence ]
+   - Runs FTS5 full-text queries                           - Caches dhamma_web.db locally
+   - Queries episode_words table for word sync             - Fast cold starts & offline access
+   - Zero backend server or REST API required              - Validated via 100-byte Range probe
 ```
-
-

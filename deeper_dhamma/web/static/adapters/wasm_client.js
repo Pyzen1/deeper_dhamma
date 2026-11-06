@@ -95,6 +95,11 @@ class WasmDatabaseClient {
     return this.send('get_episode', { episodeId });
   }
 
+  async getEpisodeWords(episodeId) {
+    await this.init();
+    return this.send('get_episode_words', { episodeId });
+  }
+
   async getAllTerms() {
     await this.init();
     return this.send('get_all_terms');

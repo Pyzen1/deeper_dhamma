@@ -367,6 +367,15 @@ class TranscriptDatabase:
 
                 CREATE INDEX IF NOT EXISTS idx_segments_ep_turn ON speech_segments(episode_id, turn_index);
 
+                CREATE TABLE IF NOT EXISTS episode_words (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_id TEXT UNIQUE NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+                    words_blob BLOB NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_episode_words_episode_id ON episode_words(episode_id);
+
                 -- FTS5 External Content Virtual Table (zero data duplication)
                 CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
                     speaker_display,
@@ -1104,7 +1113,36 @@ class TranscriptDatabase:
                 (resolved_id,),
             ).fetchall()
             ep_dict["segments"] = [dict(s) for s in segs]
+            words_row = conn.execute(
+                "SELECT words_blob FROM episode_words WHERE episode_id = ?;",
+                (resolved_id,),
+            ).fetchone()
+            ep_dict["words_blob"] = bytes(words_row["words_blob"]) if words_row and words_row["words_blob"] else None
             return ep_dict
+
+    def save_episode_words(self, episode_id: str, words_blob: bytes) -> None:
+        """Saves compact word timing binary BLOB for an episode."""
+        with self._get_connection() as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO episode_words (episode_id, words_blob)
+                    VALUES (?, ?)
+                    ON CONFLICT(episode_id) DO UPDATE SET
+                        words_blob = excluded.words_blob,
+                        created_at = CURRENT_TIMESTAMP;
+                    """,
+                    (episode_id, sqlite3.Binary(words_blob)),
+                )
+
+    def get_episode_words(self, episode_id: str) -> Optional[bytes]:
+        """Retrieves compact word timing binary BLOB for an episode."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT words_blob FROM episode_words WHERE episode_id = ?;",
+                (episode_id,),
+            ).fetchone()
+            return bytes(row["words_blob"]) if row and row["words_blob"] else None
 
     def list_episodes(self, year: Optional[int] = None) -> List[Dict]:
         with self._get_connection() as conn:

@@ -22,8 +22,8 @@ from deeper_dhamma.calibration import (
     patch_xing_chunk_in_memory,
 )
 from deeper_dhamma.config import PROJECT_ROOT, TRANSCRIPTS_DB_PATH
+from deeper_dhamma.storage import TranscriptDatabase
 
-WORDS_STATIC_DIR = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "words"
 VBR_EPISODES = {"pb27802310", "pb27940021", "pb28867656"}
 CBR_EPISODES = {"pb28113880", "pb7020389", "pb28113897", "pb7017972", "pb10641521", "pb13152882"}
 
@@ -31,7 +31,7 @@ CBR_EPISODES = {"pb28113880", "pb7020389", "pb28113897", "pb7017972", "pb1064152
 def test_vbr_episodes_store_unwarped_physical_timestamps_and_vbr1_trailer():
     """
     Verifies that all VBR episodes store unwarped physical 44.1 kHz PCM timestamps
-    in SQLite and words/*.bin and include a full-duration VBR1 seek calibration trailer.
+    in SQLite episode_words and include a full-duration VBR1 seek calibration trailer.
     """
     if not TRANSCRIPTS_DB_PATH.exists():
         pytest.skip("Transcript database not found")
@@ -45,8 +45,10 @@ def test_vbr_episodes_store_unwarped_physical_timestamps_and_vbr1_trailer():
         assert abs(float(seg0[0]) - 216.30) <= 0.15, f"Expected Turn 0 at ~216.30s physical, got {seg0[0]}"
         assert seg0[2].startswith("Everyone,")
 
-    # Check pb27802310.bin word timestamps & VBR1 trailer (11,923 words after canonical multi-word mergers)
-    pb_bin = (WORDS_STATIC_DIR / "pb27802310.bin").read_bytes()
+    # Check pb27802310 words BLOB timestamps & VBR1 trailer from SQLite (11,923 words after canonical multi-word mergers)
+    db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
+    pb_bin = db.get_episode_words("pb27802310")
+    assert pb_bin is not None, "pb27802310 words BLOB missing from database"
     word_count = struct.unpack("<I", pb_bin[:4])[0]
     assert word_count in (11923, 11929)
 
@@ -59,12 +61,13 @@ def test_vbr_episodes_store_unwarped_physical_timestamps_and_vbr1_trailer():
     w29_st_ms, _ = struct.unpack("<IH", pb_bin[w29_off : w29_off + 6])
     assert abs(w29_st_ms / 1000.0 - 231.34) <= 0.20
 
-    # Verify VBR1 trailer on all 3 VBR episodes
+    # Verify VBR1 trailer on all 3 VBR episodes in database
     for ep_id in VBR_EPISODES:
-        raw = (WORDS_STATIC_DIR / f"{ep_id}.bin").read_bytes()
+        raw = db.get_episode_words(ep_id)
+        assert raw is not None, f"Missing words BLOB in database for {ep_id}"
         wc = struct.unpack("<I", raw[:4])[0]
         t_off = 4 + wc * 6
-        assert len(raw) > t_off + 120, f"Missing VBR1 trailer on {ep_id}.bin"
+        assert len(raw) > t_off + 120, f"Missing VBR1 trailer on {ep_id}"
         assert raw[t_off : t_off + 4] == VBR_TRAILER_MAGIC
         total_dur_ms, id3_len, bytes_len = struct.unpack("<III", raw[t_off + 4 : t_off + 16])
         sample_count = struct.unpack("<I", raw[t_off + 116 : t_off + 120])[0]
@@ -75,9 +78,8 @@ def test_vbr_episodes_store_unwarped_physical_timestamps_and_vbr1_trailer():
 
     # Verify CBR episodes do not have VBR1 trailer overhead
     for ep_id in CBR_EPISODES:
-        bin_path = WORDS_STATIC_DIR / f"{ep_id}.bin"
-        if bin_path.exists():
-            raw = bin_path.read_bytes()
+        raw = db.get_episode_words(ep_id)
+        if raw is not None:
             wc = struct.unpack("<I", raw[:4])[0]
             assert len(raw) == 4 + wc * 6
 
@@ -125,14 +127,14 @@ def test_headless_firefox_and_chrome_word_sync_parity():
     chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
     firefox_path = Path(r"C:\Program Files\Mozilla Firefox\firefox.exe")
     sample_mp3 = PROJECT_ROOT / "archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
-    bin_path = WORDS_STATIC_DIR / "pb27802310.bin"
+    db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
+    bin_bytes = db.get_episode_words("pb27802310")
     word_sync_js_path = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "word_sync.js"
 
-    if not (chrome_path.exists() and firefox_path.exists() and sample_mp3.exists() and bin_path.exists()):
+    if not (chrome_path.exists() and firefox_path.exists() and sample_mp3.exists() and bin_bytes):
         pytest.skip("Headless browsers or sample assets not present")
 
     file_size = sample_mp3.stat().st_size
-    bin_bytes = bin_path.read_bytes()
     word_sync_js = word_sync_js_path.read_bytes()
     reports = {}
 
@@ -161,7 +163,7 @@ def test_headless_firefox_and_chrome_word_sync_parity():
                 self.wfile.write(word_sync_js)
                 return
 
-            if self.path == "/words/pb27802310.bin":
+            if self.path in ("/words/pb27802310.bin", "/api/episodes/pb27802310/words"):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
                 self.send_header("Content-Length", str(len(bin_bytes)))
@@ -378,7 +380,6 @@ def test_static_dist_bundle_parity_staleness_and_no_local_audio_route():
     """
     import os
     from deeper_dhamma.export_web import _is_dist_stale, export_static_site
-    from deeper_dhamma.web.app import create_app
 
     dist_dir = PROJECT_ROOT / "dist"
     static_dir = PROJECT_ROOT / "deeper_dhamma" / "web" / "static"
@@ -391,10 +392,20 @@ def test_static_dist_bundle_parity_staleness_and_no_local_audio_route():
     # Byte-for-byte asset parity between source static/ and compiled dist/
     assert (dist_dir / "word_sync.js").read_bytes() == (static_dir / "word_sync.js").read_bytes()
     assert (dist_dir / "app.js").read_bytes() == (static_dir / "app.js").read_bytes()
-    for ep_id in VBR_EPISODES | CBR_EPISODES:
-        src_bin = static_dir / "words" / f"{ep_id}.bin"
-        if src_bin.exists():
-            assert (dist_dir / "words" / f"{ep_id}.bin").read_bytes() == src_bin.read_bytes()
+
+    # Verify episode_words table in dist/dhamma_web.db matches source database byte-for-byte
+    dist_db_path = dist_dir / "dhamma_web.db"
+    assert dist_db_path.exists()
+    src_db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
+    with sqlite3.connect(dist_db_path) as dist_conn:
+        dist_words_count = dist_conn.execute("SELECT COUNT(*) FROM episode_words;").fetchone()[0]
+        assert dist_words_count == 9
+        for ep_id in VBR_EPISODES | CBR_EPISODES:
+            src_bytes = src_db.get_episode_words(ep_id)
+            if src_bytes:
+                row = dist_conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = ?;", (ep_id,)).fetchone()
+                assert row is not None, f"Missing {ep_id} in dist/dhamma_web.db episode_words"
+                assert bytes(row[0]) == src_bytes, f"Byte mismatch for {ep_id} in dist/dhamma_web.db"
 
     # Verify _is_dist_stale detects missing directory or outdated index.html mtime
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -405,25 +416,8 @@ def test_static_dist_bundle_parity_staleness_and_no_local_audio_route():
         os.utime(idx, (1000.0, 1000.0))
         assert _is_dist_stale(tmp_path) is True
 
-    # Verify /audio/<episode_id> is NOT present on web app (returns 404)
-    app = create_app()
-    status_box = []
-    environ = {
-        "REQUEST_METHOD": "GET",
-        "PATH_INFO": "/audio/pb27802310.mp3",
-        "QUERY_STRING": "",
-        "SERVER_NAME": "localhost",
-        "SERVER_PORT": "80",
-        "wsgi.version": (1, 0),
-        "wsgi.url_scheme": "http",
-        "wsgi.input": io.BytesIO(),
-        "wsgi.errors": io.StringIO(),
-        "wsgi.multithread": False,
-        "wsgi.multiprocess": False,
-        "wsgi.run_once": False,
-    }
-    list(app(environ, lambda s, h, e=None: status_box.append(s)))
-    assert status_box[0].startswith("404"), f"Expected 404 on /audio/ route, got {status_box[0]}"
+    # Verify no local audio files are bundled into dist/, guaranteeing pure Podbean CDN streaming
+    assert not (dist_dir / "audio").exists()
 
 
 def test_firefox_raw_cdn_fallback_and_native_seek_regression():
@@ -436,13 +430,13 @@ def test_firefox_raw_cdn_fallback_and_native_seek_regression():
        in both `'patched_blob'` and `'cdn'` modes, plus failed progressive fetch fallback.
     """
     firefox_path = Path(r"C:\Program Files\Mozilla Firefox\firefox.exe")
-    bin_path = WORDS_STATIC_DIR / "pb27802310.bin"
+    db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
+    bin_bytes = db.get_episode_words("pb27802310")
     word_sync_js_path = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "word_sync.js"
 
-    if not (firefox_path.exists() and bin_path.exists()):
-        pytest.skip("Headless Firefox or pb27802310.bin not present")
+    if not (firefox_path.exists() and bin_bytes):
+        pytest.skip("Headless Firefox or pb27802310 words BLOB not present")
 
-    bin_bytes = bin_path.read_bytes()
     word_sync_js = word_sync_js_path.read_bytes()
     report = {}
 
@@ -469,7 +463,7 @@ def test_firefox_raw_cdn_fallback_and_native_seek_regression():
                 self.wfile.write(word_sync_js)
                 return
 
-            if self.path == "/words/pb27802310.bin":
+            if self.path in ("/words/pb27802310.bin", "/api/episodes/pb27802310/words"):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
                 self.send_header("Content-Length", str(len(bin_bytes)))
@@ -596,13 +590,13 @@ def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
     highlighting remains 100% synchronized for episode pb10641521 Turn 2.
     """
     chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
-    bin_path = WORDS_STATIC_DIR / "pb10641521.bin"
+    db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
+    bin_bytes = db.get_episode_words("pb10641521")
     word_sync_js_path = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "word_sync.js"
 
-    if not (chrome_path.exists() and bin_path.exists() and TRANSCRIPTS_DB_PATH.exists()):
+    if not (chrome_path.exists() and bin_bytes and TRANSCRIPTS_DB_PATH.exists()):
         pytest.skip("Chrome or pb10641521 assets not present")
 
-    bin_bytes = bin_path.read_bytes()
     word_sync_js = word_sync_js_path.read_bytes()
 
     with sqlite3.connect(TRANSCRIPTS_DB_PATH) as conn:
@@ -637,7 +631,7 @@ def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
                 self.wfile.write(word_sync_js)
                 return
 
-            if self.path == "/words/pb10641521.bin":
+            if self.path in ("/words/pb10641521.bin", "/api/episodes/pb10641521/words"):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/octet-stream")
                 self.send_header("Content-Length", str(len(bin_bytes)))

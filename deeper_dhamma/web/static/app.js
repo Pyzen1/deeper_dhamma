@@ -453,6 +453,10 @@
   if (!dbService) {
     console.error('[App] No DeeperDhammaDB database client found. Ensure db_client.js is loaded.');
   }
+  window.dbClient = dbService;
+  if (window.WordSync && dbService) {
+    window.WordSync.setDbClient(dbService);
+  }
 
   // ==========================================================================
   // Timestamp & URL Parsing Helpers
@@ -696,11 +700,30 @@
   // Initialization
   // ==========================================================================
 
+  function registerServiceWorker() {
+    if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./svc_worker.js')
+          .then((reg) => {
+            console.log('[ServiceWorker] Registered with scope:', reg.scope);
+            if (reg.update) reg.update().catch(() => {});
+          })
+          .catch((err) => {
+            console.warn('[ServiceWorker] Registration failed:', err);
+          });
+      });
+    }
+  }
+
   async function init() {
+    registerServiceWorker();
     setupEventListeners();
     setupAudioEngine();
     if (window.WordSync) {
       window.WordSync.init();
+      if (dbService) {
+        window.WordSync.setDbClient(dbService);
+      }
     }
     if (!dbService) return;
     try {
@@ -4566,6 +4589,18 @@
 
   window.resetDeeperDhammaCache = async function () {
     try {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const reg of registrations) {
+          await reg.unregister();
+        }
+      }
+      if ('caches' in window) {
+        const cacheKeys = await caches.keys();
+        for (const key of cacheKeys) {
+          await caches.delete(key);
+        }
+      }
       if (window.indexedDB && window.indexedDB.databases) {
         const dbs = await window.indexedDB.databases();
         for (const db of dbs) {

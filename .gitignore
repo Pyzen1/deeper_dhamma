@@ -33,7 +33,6 @@ Thumbs.db
 # AI and Model weights (in case any local caches occur)
 *.pt
 *.bin
-!deeper_dhamma/web/static/words/*.bin
 *.safetensors
 *.onnx
 *.npy

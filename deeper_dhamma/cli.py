@@ -860,7 +860,6 @@ def main(argv=None):
         default=DEFAULT_WEB_PORT,
         help=f"Port to listen on (default: {DEFAULT_WEB_PORT})",
     )
-    p_serve.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
     p_serve.set_defaults(func=cmd_serve, subparser=p_serve)
 
     # 13. Static Web Application & SQLite WASM Compiler

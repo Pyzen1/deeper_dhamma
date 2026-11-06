@@ -5,21 +5,20 @@ Compiles an immutable, serverless static web application into dist/:
 1. Consolidates dhamma_transcripts.db and buddhism_lexicon.db into a single dhamma_web.db.
 2. Stamps PRAGMA user_version = <YYYYMMDD> in the SQLite 100-byte file header.
 3. Bundles official SQLite WASM engine, FTS5 virtual tables, and Web Worker client.
-4. Pre-renders index.html using Bottle's SimpleTemplate.
+4. Pre-renders index.html with relative asset links and version stamps.
 """
 
+import http.server
 import logging
 import os
 import shutil
 import sqlite3
 import sys
-import urllib.request
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-
-from bottle import Bottle, SimpleTemplate, static_file
 
 from deeper_dhamma.config import (
     BUDDHISM_LEXICON_DB_PATH,
@@ -181,6 +180,18 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         conn.commit()
         conn.execute("DETACH DATABASE lex;")
 
+        # Ensure episode_words table exists and is indexed
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS episode_words (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                episode_id TEXT UNIQUE NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+                words_blob BLOB NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_episode_words_episode_id ON episode_words(episode_id);")
+        conn.commit()
+
         # 4. Clean and set header version outside transaction
         conn.isolation_level = None
         conn.execute("PRAGMA journal_mode = DELETE;")
@@ -191,6 +202,7 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         episodes_count = conn.execute("SELECT COUNT(*) FROM episodes;").fetchone()[0]
         segments_count = conn.execute("SELECT COUNT(*) FROM speech_segments;").fetchone()[0]
         terms_count = conn.execute("SELECT COUNT(*) FROM terms;").fetchone()[0]
+        words_count = conn.execute("SELECT COUNT(*) FROM episode_words;").fetchone()[0]
 
     final_size = output_db_path.stat().st_size
     return {
@@ -199,6 +211,7 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         "episodes": episodes_count,
         "segments": segments_count,
         "terms": terms_count,
+        "words": words_count,
     }
 
 
@@ -248,6 +261,7 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
     print(f"    - Episodes indexed:      {metrics['episodes']:,}")
     print(f"    - Speech segments:       {metrics['segments']:,}")
     print(f"    - Buddhist Pali terms:   {metrics['terms']:,}")
+    print(f"    - Word-synced talks:     {metrics.get('words', 0):,}")
 
     # 2. Ensure SQLite WASM engine assets exist
     ensure_wasm_assets(STATIC_SRC_DIR)
@@ -269,14 +283,6 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
         shutil.copytree(icons_src, icons_dst)
         copied_files += len(list(icons_src.glob("*.svg")))
 
-    # Copy words directory if present (compact binary BLOB word sidecars)
-    words_src = STATIC_SRC_DIR / "words"
-    if words_src.exists() and words_src.is_dir():
-        words_dst = out_path / "words"
-        if words_dst.exists():
-            shutil.rmtree(words_dst)
-        shutil.copytree(words_src, words_dst)
-        copied_files += len(list(words_src.glob("*.bin")))
 
     # Mirror pristine local document sources into dist/sources/ for user verification
     sources_src = PROJECT_ROOT / "databases" / "sources"
@@ -308,12 +314,12 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
     html_src = html_src.replace('href="/static/', 'href="./')
     html_src = html_src.replace('src="/static/', 'src="./')
 
-    # SimpleTemplate rendering
-    tpl = SimpleTemplate(html_src)
-    rendered_html = tpl.render(
-        build_date=date_str,
-        db_version=version_int,
-        total_episodes=metrics["episodes"],
+    # Standard template variable interpolation
+    rendered_html = (
+        html_src
+        .replace("{{db_version}}", str(version_int))
+        .replace("{{build_date}}", str(date_str))
+        .replace("{{total_episodes}}", str(metrics["episodes"]))
     )
 
     out_index = out_path / "index.html"
@@ -342,6 +348,7 @@ def _is_dist_stale(dist_path: Path) -> bool:
         STATIC_SRC_DIR / "word_sync.js",
         STATIC_SRC_DIR / "style.css",
         STATIC_SRC_DIR / "db_worker.js",
+        STATIC_SRC_DIR / "svc_worker.js",
         STATIC_SRC_DIR / "adapters" / "wasm_client.js",
         TRANSCRIPTS_DB_PATH,
         BUDDHISM_LEXICON_DB_PATH,
@@ -352,37 +359,105 @@ def _is_dist_stale(dist_path: Path) -> bool:
     return False
 
 
+class RangeFile:
+    """Wrapper that reads a slice of an underlying binary file for HTTP 206 Partial Content."""
+    def __init__(self, f, length: int):
+        self.f = f
+        self.length = length
+        self.read_so_far = 0
+
+    def read(self, size: int = -1) -> bytes:
+        if self.read_so_far >= self.length:
+            return b""
+        rem = self.length - self.read_so_far
+        to_read = min(size, rem) if size > 0 else rem
+        chunk = self.f.read(to_read)
+        self.read_so_far += len(chunk)
+        return chunk
+
+    def close(self):
+        self.f.close()
+
+
+class StaticPreviewHandler(http.server.SimpleHTTPRequestHandler):
+    """
+    Standard library static file request handler with native HTTP Range support,
+    CORS, service worker header propagation, and /static/ alias stripping.
+    """
+    def __init__(self, *args, directory: str = "", **kwargs):
+        super().__init__(*args, directory=directory, **kwargs)
+
+    def end_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        if self.path.endswith("svc_worker.js") or "/svc_worker.js" in self.path:
+            self.send_header("Service-Worker-Allowed", "/")
+        super().end_headers()
+
+    def translate_path(self, path: str) -> str:
+        clean_path = path
+        if clean_path.startswith("/static/"):
+            clean_path = "/" + clean_path[8:]
+        return super().translate_path(clean_path)
+
+    def send_head(self):
+        path = self.translate_path(self.path)
+        if os.path.isdir(path):
+            index = os.path.join(path, "index.html")
+            if os.path.exists(index):
+                path = index
+        ctype = self.guess_type(path)
+        try:
+            f = open(path, "rb")
+        except OSError:
+            self.send_error(404, "File not found")
+            return None
+        total_length = os.fstat(f.fileno()).st_size
+        range_header = self.headers.get("Range")
+        if range_header and range_header.startswith("bytes="):
+            try:
+                parts = range_header[6:].split("-")
+                start = int(parts[0]) if parts[0] else 0
+                end = int(parts[1]) if parts[1] else total_length - 1
+                end = min(end, total_length - 1)
+                length = end - start + 1
+                f.seek(start)
+                self.send_response(206)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{total_length}")
+                self.send_header("Content-Length", str(length))
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+                return RangeFile(f, length)
+            except Exception:
+                f.seek(0)
+
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(total_length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.end_headers()
+        return f
+
+    def log_message(self, format, *args):
+        # Concise quiet logging
+        sys.stderr.write("%s - - [%s] %s\n" % (self.address_string(), self.log_date_time_string(), format % args))
+
+
 def run_web_preview(host: str = DEFAULT_WEB_HOST, port: str | int = DEFAULT_WEB_PORT, dist_dir: Path | str = DIST_DIR) -> None:
     """
-    Serves the static distribution folder using Bottle with native HTTP Range request support.
+    Serves the static distribution folder using pure Python standard library HTTP server
+    with native HTTP Range request support for SQLite WASM.
     """
     dist_path = _resolve_repo_path(dist_dir)
     if _is_dist_stale(dist_path):
         print(f"[*] Rebuilding static bundle in '{dist_path}' to ensure latest assets...")
         export_static_site(dist_path)
 
-    app = Bottle()
-
-    @app.route("/")
-    def serve_index():
-        res = static_file("index.html", root=str(dist_path))
-        res.set_header("Access-Control-Allow-Origin", "*")
-        res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        res.set_header("Pragma", "no-cache")
-        res.set_header("Expires", "0")
-        return res
-
-    @app.route("/<filepath:path>")
-    def serve_static(filepath: str):
-        res = static_file(filepath, root=str(dist_path))
-        res.set_header("Access-Control-Allow-Origin", "*")
-        res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        res.set_header("Pragma", "no-cache")
-        res.set_header("Expires", "0")
-        return res
-
     print("\n" + "=" * 80)
-    print("BSWA Deeper Dhamma: Static Web Preview Server")
+    print("BSWA Deeper Dhamma: Static Web Preview Server (Serverless PWA)")
     print("=" * 80)
     print(f"[*] Serving static bundle:  {dist_path}")
     print(f"[*] Local URL:              http://{host}:{port}/")
@@ -390,26 +465,13 @@ def run_web_preview(host: str = DEFAULT_WEB_HOST, port: str | int = DEFAULT_WEB_
     print("=" * 80)
     print("Press Ctrl+C to stop.\n")
 
-    from socketserver import ThreadingMixIn
-    from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
-    from bottle import ServerAdapter
-
-    class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
-        daemon_threads = True
-
-    class QuietWSGIRequestHandler(WSGIRequestHandler):
-        def address_string(self):
-            return self.client_address[0]
-
-    class ThreadedWSGIRefServer(ServerAdapter):
-        def run(self, handler):
-            srv = make_server(
-                self.host,
-                self.port,
-                handler,
-                server_class=ThreadingWSGIServer,
-                handler_class=QuietWSGIRequestHandler,
-            )
-            srv.serve_forever()
-
-    app.run(host=host, port=port, server=ThreadedWSGIRefServer)
+    server = http.server.ThreadingHTTPServer(
+        (host, int(port)),
+        lambda *args, **kwargs: StaticPreviewHandler(*args, directory=str(dist_path), **kwargs),
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopping preview server...")
+    finally:
+        server.server_close()

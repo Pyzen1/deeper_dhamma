@@ -104,11 +104,11 @@ python main.py web --run                # Preview static site with native HTTP R
 python main.py web --build --run        # Compile and immediately preview
 python main.py web -r --port 8080       # Custom port or output directory
 
-# 12. Dynamic Web UI & API Server (Bottle.py)
-python main.py serve --run              # Launch dynamic REST server on http://127.0.0.1:34266
+# 12. Local Static Preview Server (Stdlib HTTP with RFC 7233 Range Support)
+python main.py serve --run              # Serve static bundle on http://127.0.0.1:34266
 python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
 
-# 13. Run Full Verification & Unit Test Suite (137 tests, 100% passing)
+# 13. Run Full Verification & Unit Test Suite (130 tests, 100% passing)
 pytest tests                            # Execute all unit and integration tests
 ```
 
@@ -148,10 +148,9 @@ deeper_dhamma/
 │   ├── export_web.py           # Static site & SQLite WASM bundle compiler
 │   └── web/                    # Frontend assets, views & Web Worker
 │       ├── static/             # CSS, app.js, word_sync.js, db_worker.js, sqlite3.wasm
-│       │   ├── adapters/       # Pluggable data adapters (api_client.js, wasm_client.js)
-│       │   └── words/          # Compact binary word timing sidecars (.bin + VBR1 trailer)
-│       └── views/              # Bottle templates (index.html)
-├── tests/                      # Comprehensive Unit & Integration Test Suite (137 tests)
+│       │   └── adapters/       # In-browser SQLite WASM adapter (wasm_client.js)
+│       └── views/              # Static HTML template (index.html)
+├── tests/                      # Comprehensive Unit & Integration Test Suite (130 tests)
 │   ├── test_cli.py             # CLI parser, "One Obvious Way" flags, subcommands dispatch
 │   ├── test_audit.py           # Ghost files, temp fragments, html error pages, archive cleanup
 │   ├── test_catalog.py         # Era determination, teacher matching, clean slugging, dates
@@ -167,8 +166,7 @@ deeper_dhamma/
 │   ├── test_sync_repair.py     # Remote parity audit and corrupt file repair
 │   ├── test_stream_seek_calibration.py # VBR1 seek trailer generation & in-memory Xing patching
 │   ├── test_cross_browser_word_sync.py # Headless Firefox & Chrome real-time audio sync parity
-│   ├── test_browser_fuzzy_search.py # Multi-word fuzzy search, Damerau-Levenshtein, V8 tests
-│   └── test_web_api.py         # Bottle REST endpoints, date range filters, sorting
+│   └── test_browser_fuzzy_search.py # Multi-word fuzzy search, Damerau-Levenshtein, V8 tests
 ├── docs/
 │   ├── design/                 # Pipeline architecture specifications
 │   └── troubleshooting_guide.md # Cross-browser VBR audio & word sync troubleshooting guide

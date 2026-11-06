@@ -51,3 +51,75 @@ def test_compile_static_database_header_version_and_vocab_table(tmp_path: Path):
         fts_sample = conn.execute("SELECT * FROM fts_terms WHERE fts_terms MATCH 'jhana' LIMIT 1;").fetchone()
         assert fts_sample is not None
 
+        # 4. episode_words table compliance & byte integrity
+        words_info = conn.execute("PRAGMA table_info(episode_words);").fetchall()
+        assert len(words_info) >= 3
+        pk_words = next(r[1] for r in words_info if r[5] == 1)
+        assert pk_words == "id", "episode_words table must use integer primary key 'id'"
+        assert metrics.get("words", 0) == 9
+
+        w_row = conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = 'pb28113880';").fetchone()
+        assert w_row is not None
+        assert len(w_row[0]) == 41326
+
+
+def test_offline_service_worker_bundling_and_routes():
+    """
+    Verifies that:
+    1. svc_worker.js exists in static/ and dist/ (and svc-worker.js is removed).
+    2. svc_worker.js implements cache-first navigation and server probe exceptions.
+    3. StaticPreviewHandler exposes /svc_worker.js with Service-Worker-Allowed: / and handles HTTP Range.
+    """
+    from deeper_dhamma.config import DIST_DIR, PROJECT_ROOT
+
+    static_dir = PROJECT_ROOT / "deeper_dhamma" / "web" / "static"
+    sw_file = static_dir / "svc_worker.js"
+
+    assert sw_file.exists(), "svc_worker.js must exist in web/static/"
+    assert not (static_dir / "svc-worker.js").exists(), "svc-worker.js must be cleaned up from web/static/"
+
+    sw_code = sw_file.read_text(encoding="utf-8")
+    assert "CACHE_NAME" in sw_code
+    assert "Range" in sw_code and "bytes=0-99" in sw_code, "Must bypass version probe requests"
+    assert "navigate" in sw_code, "Must handle navigation requests with cache-first"
+
+    # Verify dist/ has the service worker file and no legacy svc-worker.js
+    assert (DIST_DIR / "svc_worker.js").exists(), "dist/svc_worker.js must be deployed"
+    assert not (DIST_DIR / "svc-worker.js").exists(), "dist/svc-worker.js must be cleaned up"
+
+    # Verify StaticPreviewHandler serves svc_worker.js and Range requests
+    import http.server
+    import threading
+    import urllib.request
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: StaticPreviewHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        # 1. svc_worker.js headers
+        req_sw = urllib.request.Request(f"http://127.0.0.1:{port}/svc_worker.js")
+        with urllib.request.urlopen(req_sw) as res:
+            assert res.status == 200
+            assert res.headers.get("Service-Worker-Allowed") == "/"
+            body = res.read()
+            assert len(body) > 100
+
+        # 2. Native Range request for SQLite WASM
+        req_range = urllib.request.Request(
+            f"http://127.0.0.1:{port}/sqlite3.wasm",
+            headers={"Range": "bytes=0-99"},
+        )
+        with urllib.request.urlopen(req_range) as res:
+            assert res.status == 206
+            assert res.headers.get("Content-Range", "").startswith("bytes 0-99/")
+            assert len(res.read()) == 100
+    finally:
+        server.shutdown()
+        server.server_close()
+
+

@@ -31,6 +31,7 @@
     enabled: localStorage.getItem(STORAGE_KEY_ENABLED) !== 'false', // Default to true
     currentEpisodeId: null,
     currentEpisode: null,
+    dbClient: null,
     words: [], // Sorted array of exact physical words: [{ s, e, turnIdx, wordIdx, id }]
     turnWordMap: {}, // Map of turnIdx -> [words]
     vbrData: null, // Parsed VBR1 seek table if episode is VBR
@@ -62,6 +63,13 @@
      */
     init: function () {
       this.updateUI();
+    },
+
+    /**
+     * Injects the database service adapter for self-referential in-browser SQLite WASM queries.
+     */
+    setDbClient: function (client) {
+      this.dbClient = client;
     },
 
     /**
@@ -370,7 +378,12 @@
       this.clearHighlights();
 
       const t0 = performance.now();
-      await this.loadWordsBlob(epId);
+      // 1. Direct memory extraction if episode already has words_blob attached from SQLite
+      if (episode.words_blob) {
+        this.parseWordsBuffer(episode.words_blob, epId);
+      } else {
+        await this.loadWordsBlob(epId);
+      }
       this.metrics.loadMs = Math.round(performance.now() - t0);
       this.metrics.wordCount = this.words.length;
 
@@ -401,16 +414,79 @@
     },
 
     /**
-     * Fetches and decodes compact binary word BLOB and optional `VBR1` trailer.
-     * Binary Format:
-     * - 4 bytes uint32: word_count (N)
-     * - N * 6 bytes: [uint32 start_ms, uint16 duration_ms]
-     * - Optional VBR1 Trailer:
-     *   - 4B: "VBR1"
-     *   - 12B: [uint32 total_dur_ms, uint32 id3_len, uint32 bytes_len]
-     *   - 100B: uint8[100] Xing TOC
-     *   - 4B: uint32 sample_count (M)
-     *   - M * 8B: [uint32 pcm_ms, uint32 audio_byte_offset]
+     * Parses a binary words BLOB (ArrayBuffer, Uint8Array, or ArrayBufferView)
+     * containing physical word timestamps and optional VBR1 trailer.
+     */
+    parseWordsBuffer: function (inputBuffer, episodeId) {
+      if (!inputBuffer) return false;
+      let buf = null;
+      let view = null;
+      if (inputBuffer instanceof ArrayBuffer) {
+        buf = inputBuffer;
+        view = new DataView(buf);
+      } else if (ArrayBuffer.isView(inputBuffer)) {
+        buf = inputBuffer.buffer.slice(
+          inputBuffer.byteOffset,
+          inputBuffer.byteOffset + inputBuffer.byteLength
+        );
+        view = new DataView(buf);
+      } else if (inputBuffer.buffer && typeof inputBuffer.byteLength === 'number') {
+        buf = inputBuffer.buffer;
+        view = new DataView(buf, inputBuffer.byteOffset || 0, inputBuffer.byteLength);
+      } else {
+        return false;
+      }
+
+      const byteLength = buf.byteLength;
+      this.metrics.bytesLoaded = byteLength;
+      if (byteLength < 4) return false;
+
+      const wordCount = view.getUint32(0, true);
+      const words = [];
+      let offset = 4;
+
+      for (let i = 0; i < wordCount; i++) {
+        if (offset + 6 > byteLength) break;
+        const stMs = view.getUint32(offset, true);
+        const durMs = view.getUint16(offset + 4, true);
+        words.push({
+          id: `tw-${i}`,
+          s: stMs / 1000,
+          e: (stMs + durMs) / 1000,
+          globalIdx: i,
+        });
+        offset += 6;
+      }
+
+      let vbrData = null;
+      if (offset + 120 <= byteLength) {
+        const m0 = view.getUint8(offset);
+        const m1 = view.getUint8(offset + 1);
+        const m2 = view.getUint8(offset + 2);
+        const m3 = view.getUint8(offset + 3);
+        // 'VBR1' = 0x56, 0x42, 0x52, 0x31
+        if (m0 === 0x56 && m1 === 0x42 && m2 === 0x52 && m3 === 0x31) {
+          vbrData = this._parseVbrTrailer(buf, view, offset);
+        }
+      }
+
+      this.words = words;
+      this.vbrData = vbrData;
+      if (episodeId) {
+        this.vbrCache[episodeId] = {
+          words: words,
+          vbrData: vbrData,
+          bytesLoaded: byteLength,
+        };
+      }
+      this.metrics.format = 'option_c_bin';
+      return true;
+    },
+
+    /**
+     * Loads compact binary word BLOB and optional `VBR1` trailer.
+     * First queries in-browser SQLite WASM database directly (100% self-referential / offline).
+     * Falls back to network candidate URLs if running in standalone test harnesses.
      */
     loadWordsBlob: async function (episodeId) {
       if (this.vbrCache[episodeId]) {
@@ -422,10 +498,24 @@
         return;
       }
 
+      // 1. Direct from in-browser SQLite WASM database (100% self-referential / offline)
+      const db = this.dbClient || window.dbClient || (window.__deeperDhammaDbClient || null);
+      if (db && typeof db.getEpisodeWords === 'function') {
+        try {
+          const blob = await db.getEpisodeWords(episodeId);
+          if (blob && (blob.byteLength || (blob.length && blob.buffer))) {
+            const parsed = this.parseWordsBuffer(blob, episodeId);
+            if (parsed) return;
+          }
+        } catch (dbErr) {
+          console.warn('[WordSync] Database query notice for words:', dbErr);
+        }
+      }
+
+      // 2. Fallback to API endpoint if dynamic backend or running external test harness
       const candidateUrls = [
-        `./words/${encodeURIComponent(episodeId)}.bin`,
-        `/static/words/${encodeURIComponent(episodeId)}.bin`,
-        `/api/episodes/${encodeURIComponent(episodeId)}/words?format=bin`,
+        `/api/episodes/${encodeURIComponent(episodeId)}/words`,
+        `./api/episodes/${encodeURIComponent(episodeId)}/words`,
       ];
 
       for (const url of candidateUrls) {
@@ -433,48 +523,7 @@
           const res = await fetch(url);
           if (res.ok) {
             const buf = await res.arrayBuffer();
-            this.metrics.bytesLoaded = buf.byteLength;
-            if (buf.byteLength >= 4) {
-              const view = new DataView(buf);
-              const wordCount = view.getUint32(0, true);
-              const words = [];
-              let offset = 4;
-
-              for (let i = 0; i < wordCount; i++) {
-                if (offset + 6 > buf.byteLength) break;
-                const stMs = view.getUint32(offset, true);
-                const durMs = view.getUint16(offset + 4, true);
-                words.push({
-                  id: `tw-${i}`,
-                  s: stMs / 1000,
-                  e: (stMs + durMs) / 1000,
-                  globalIdx: i,
-                });
-                offset += 6;
-              }
-
-              let vbrData = null;
-              if (offset + 120 <= buf.byteLength) {
-                const m0 = view.getUint8(offset);
-                const m1 = view.getUint8(offset + 1);
-                const m2 = view.getUint8(offset + 2);
-                const m3 = view.getUint8(offset + 3);
-                // 'VBR1' = 0x56, 0x42, 0x52, 0x31
-                if (m0 === 0x56 && m1 === 0x42 && m2 === 0x52 && m3 === 0x31) {
-                  vbrData = this._parseVbrTrailer(buf, view, offset);
-                }
-              }
-
-              this.words = words;
-              this.vbrData = vbrData;
-              this.vbrCache[episodeId] = {
-                words: words,
-                vbrData: vbrData,
-                bytesLoaded: buf.byteLength,
-              };
-              this.metrics.format = 'option_c_bin';
-              return;
-            }
+            if (this.parseWordsBuffer(buf, episodeId)) return;
           }
         } catch (_) {}
       }

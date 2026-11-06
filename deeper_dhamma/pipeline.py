@@ -302,7 +302,7 @@ class TranscriptionPipeline:
         filename_stem: str,
         audio_path: Optional[Path] = None,
     ) -> None:
-        """Serializes physical word timestamps and optional VBR1 seek trailer into compact binary BLOB (.bin)."""
+        """Serializes physical word timestamps and optional VBR1 seek trailer into compact binary BLOB."""
         import struct
         words_sorted = sorted(words, key=lambda w: float(w["start"]))
         buf = bytearray()
@@ -318,11 +318,8 @@ class TranscriptionPipeline:
             if vbr_trailer:
                 buf.extend(vbr_trailer)
 
-        target_dirs = [
-            PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "words",
-            PROJECT_ROOT / "dist" / "words",
-        ]
-        for d in target_dirs:
-            d.mkdir(parents=True, exist_ok=True)
-            (d / f"{ep_id}.bin").write_bytes(buf)
-        logger.info(f"    [✓] Exported {len(words_sorted):,} word timings ({len(buf)/1024:.1f} KB binary BLOB) for {ep_id}")
+        blob_bytes = bytes(buf)
+
+        # Commit directly into SQLite database (100% self-referential)
+        self.db.save_episode_words(ep_id, blob_bytes)
+        logger.info(f"    [✓] Saved {len(words_sorted):,} word timings ({len(blob_bytes)/1024:.1f} KB BLOB) to database for {ep_id}")

@@ -17,44 +17,11 @@ import json
 import math
 import pytest
 from deeper_dhamma.lexicon import BuddhismLexiconDatabase
-from deeper_dhamma.web.app import create_app
 
 
 @pytest.fixture(scope="module")
 def lexicon_db():
     return BuddhismLexiconDatabase()
-
-
-@pytest.fixture(scope="module")
-def wsgi_client():
-    app = create_app()
-
-    def _get(path: str, qs: str = ""):
-        status_box, headers_box = [], []
-
-        def start_response(s, h, exc_info=None):
-            status_box.append(s)
-            headers_box.extend(h)
-
-        environ = {
-            "REQUEST_METHOD": "GET",
-            "PATH_INFO": path,
-            "QUERY_STRING": qs,
-            "SERVER_NAME": "localhost",
-            "SERVER_PORT": "80",
-            "wsgi.version": (1, 0),
-            "wsgi.url_scheme": "http",
-            "wsgi.input": io.BytesIO(),
-            "wsgi.errors": io.StringIO(),
-            "wsgi.multithread": False,
-            "wsgi.multiprocess": False,
-            "wsgi.run_once": False,
-        }
-        body = b"".join(app(environ, start_response))
-        data = json.loads(body.decode("utf-8")) if body else {}
-        return status_box[0], dict(headers_box), data
-
-    return _get
 
 
 # ==============================================================================
@@ -155,41 +122,34 @@ def test_lexicon_sort_orders(lexicon_db):
 
 
 # ==============================================================================
-# 4. Web API Route Tests
+# 4. Lexicon Query & Paged Term Method Tests
 # ==============================================================================
 
-def test_api_lexicon_page_core_mode(wsgi_client):
-    """GET /api/lexicon/page with mode=core returns 200 and standard core terms."""
-    status, headers, data = wsgi_client("/api/lexicon/page", "mode=core&limit=25")
-    assert status.startswith("200")
-    assert "application/json" in headers.get("Content-Type", "")
+def test_lexicon_page_core_mode(lexicon_db):
+    """Core mode returns standard core terms with pagination metadata."""
+    data = lexicon_db.get_paged_terms(mode="core", limit=25)
     assert "items" in data
     assert "total" in data
     assert data["page"] == 1
     assert len(data["items"]) <= 25
 
-    _, _, jhana_page = wsgi_client("/api/lexicon/page", "mode=core&letter=j&limit=25")
+    jhana_page = lexicon_db.get_paged_terms(mode="core", letter="j", limit=25)
     pali_plains = [item["pali_plain"] for item in jhana_page["items"]]
     assert "jhana" in pali_plains
 
 
-def test_api_lexicon_page_all_mode_pagination(wsgi_client):
-    """GET /api/lexicon/page with mode=all respects page and limit query parameters."""
-    status, _, data = wsgi_client("/api/lexicon/page", "mode=all&page=3&limit=10")
-    assert status.startswith("200")
+def test_lexicon_page_all_mode_pagination(lexicon_db):
+    """All mode respects page and limit query parameters."""
+    data = lexicon_db.get_paged_terms(mode="all", page=3, limit=10)
     assert data["page"] == 3
     assert data["limit"] == 10
     assert len(data["items"]) == 10
     assert data["total"] >= 1000
 
 
-def test_api_lexicon_page_filter_and_sort(wsgi_client):
-    """GET /api/lexicon/page respects letter, category, and sort parameters."""
-    status, _, data = wsgi_client(
-        "/api/lexicon/page",
-        "mode=all&letter=s&sort=pali_asc&limit=15"
-    )
-    assert status.startswith("200")
+def test_lexicon_page_filter_and_sort(lexicon_db):
+    """Respects letter, category, and sort parameters."""
+    data = lexicon_db.get_paged_terms(mode="all", letter="s", sort="pali_asc", limit=15)
     for item in data["items"]:
         assert item["pali_plain"].startswith("s")
 
@@ -202,16 +162,7 @@ def test_lexicon_db_get_all_terms(lexicon_db):
     sample = next((t for t in terms if t["pali_plain"] == "samadhi"), None)
     assert sample is not None
     assert "translation_bodhi" in sample or "translation_brahm" in sample
-
-
-def test_api_lexicon_all_terms_endpoint(wsgi_client):
-    """GET /api/lexicon/all_terms returns all indexed terms for live companion."""
-    status, headers, data = wsgi_client("/api/lexicon/all_terms")
-    assert status.startswith("200")
-    assert "application/json" in headers.get("Content-Type", "")
-    assert isinstance(data, list)
-    assert len(data) >= 1000
-    pali_plains = {t["pali_plain"] for t in data}
+    pali_plains = {t["pali_plain"] for t in terms}
     assert "samadhi" in pali_plains
     assert "sati" in pali_plains
     assert "anicca" in pali_plains
@@ -262,7 +213,7 @@ def test_lexicon_source_documents_and_urls(lexicon_db):
     assert "sabbāsava sutta" in doc_canon["content"].lower()
 
 
-def test_canonical_multiword_phrases_and_local_source_mirrors(lexicon_db, wsgi_client):
+def test_canonical_multiword_phrases_and_local_source_mirrors(lexicon_db):
     """
     Verifies that canonical multi-word phrases (Majjhima Nikāya, Dīgha Nikāya,
     Sabbāsava Sutta, Yoniso Manasikāra) are present in the lexicon with authentic

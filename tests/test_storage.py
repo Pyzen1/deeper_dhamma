@@ -155,3 +155,63 @@ def test_transcript_database_lifecycle_and_fts5_search(tmp_path: Path):
 
     assert tdb.get_episode("pb99999") is None
     assert len(tdb.search_fts("samadhi")) == 0
+
+
+def test_episode_words_storage_lifecycle_and_cascade(tmp_path: Path):
+    """Verifies binary word timings storage, retrieval, update, and cascading delete in SQLite."""
+    db_path = tmp_path / "test_words_storage.db"
+    tdb = TranscriptDatabase(db_path=db_path)
+
+    # 1. Primary key compliance for episode_words
+    with tdb._get_connection() as conn:
+        pk_info = conn.execute("PRAGMA table_info(episode_words)").fetchall()
+        pk_col = next(r[1] for r in pk_info if r[5] == 1)
+        assert pk_col == "id", "episode_words must use integer primary key 'id'"
+
+    # 2. Insert parent episode
+    meta = {
+        "id": "pb12345",
+        "title": "Ajahn Brahmali Sutta Study",
+        "date": "2026-04-01",
+        "primary_teacher": "ajahn_brahmali",
+        "primary_display": "Ajahn Brahmali",
+        "media_url": "https://mcdn.podbean.com/test12345.mp3",
+    }
+    tdb.save_episode(
+        episode_metadata=meta,
+        attributed_segments=[],
+        duration_sec=100.0,
+        year="2026",
+        filename_stem="2026-04-01_ajahn_brahmali_sutta_study",
+    )
+
+    # 3. Initially no words BLOB
+    assert tdb.get_episode_words("pb12345") is None
+    assert tdb.get_episode_words("nonexistent_id") is None
+    ep = tdb.get_episode("pb12345")
+    assert ep["words_blob"] is None
+
+    # 4. Save words binary BLOB
+    sample_blob = b"\x01\x00\x00\x00\x20\x00\x00\x00\x50\x00"  # 1 word, 32ms start, 80ms duration
+    tdb.save_episode_words("pb12345", sample_blob)
+
+    retrieved = tdb.get_episode_words("pb12345")
+    assert retrieved == sample_blob, "Stored and retrieved words BLOB must be identical"
+
+    ep_with_words = tdb.get_episode("pb12345")
+    assert ep_with_words["words_blob"] == sample_blob
+
+    # 5. Upsert / update existing episode words
+    updated_blob = b"\x02\x00\x00\x00\x20\x00\x00\x00\x50\x00\x70\x00\x00\x00\x30\x00"
+    tdb.save_episode_words("pb12345", updated_blob)
+    assert tdb.get_episode_words("pb12345") == updated_blob
+
+    # 6. Cascading delete on parent episode deletion
+    with tdb._get_connection() as conn:
+        with conn:
+            conn.execute("DELETE FROM episodes WHERE id = ?;", ("pb12345",))
+
+    assert tdb.get_episode_words("pb12345") is None
+    with tdb._get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM episode_words WHERE episode_id = ?;", ("pb12345",)).fetchone()[0]
+        assert count == 0, "Deleting episode must cascade delete associated episode_words row"

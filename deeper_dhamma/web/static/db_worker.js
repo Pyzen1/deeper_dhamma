@@ -70,11 +70,15 @@ async function setCachedDatabase(key, version, buffer) {
 async function fetchRemoteVersion(dbUrl) {
   try {
     const url = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 350) : null;
     const res = await fetch(url, {
       method: 'GET',
       headers: { Range: 'bytes=0-99' },
       cache: 'no-store',
+      signal: controller ? controller.signal : undefined,
     });
+    if (timeoutId) clearTimeout(timeoutId);
     if (res.status === 206 || res.status === 200) {
       const headerBuf = await res.arrayBuffer();
       if (headerBuf.byteLength >= 64) {
@@ -84,7 +88,7 @@ async function fetchRemoteVersion(dbUrl) {
       }
     }
   } catch (err) {
-    console.warn('[DB Worker] Header Range probe failed:', err);
+    // Expected when offline or local server stopped
   }
   return { version: 0, fullBuffer: null };
 }
@@ -353,10 +357,28 @@ function handleGetEpisode(episodeId) {
     ORDER BY turn_index ASC;
   `, [episodeId]);
 
+  let wordsBlob = null;
+  try {
+    const wRow = queryOne('SELECT words_blob FROM episode_words WHERE episode_id = ?;', [episodeId]);
+    if (wRow && wRow.words_blob) {
+      wordsBlob = wRow.words_blob;
+    }
+  } catch (_) {}
+
   return {
     ...ep,
     segments,
+    words_blob: wordsBlob,
   };
+}
+
+function handleGetEpisodeWords(episodeId) {
+  try {
+    const row = queryOne('SELECT words_blob FROM episode_words WHERE episode_id = ?;', [episodeId]);
+    return row && row.words_blob ? row.words_blob : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 // ============================================================================
@@ -905,6 +927,11 @@ self.onmessage = async (e) => {
       case 'get_episode': {
         const ep = handleGetEpisode(payload && payload.episodeId);
         self.postMessage({ id, success: true, data: ep });
+        break;
+      }
+      case 'get_episode_words': {
+        const wordsBlob = handleGetEpisodeWords(payload && payload.episodeId);
+        self.postMessage({ id, success: true, data: wordsBlob });
         break;
       }
       case 'search': {
