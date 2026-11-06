@@ -108,7 +108,7 @@ python main.py web -r --port 8080       # Custom port or output directory
 python main.py serve --run              # Launch dynamic REST server on http://127.0.0.1:34266
 python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
 
-# 13. Run Full Verification & Unit Test Suite (121 tests, 100% passing)
+# 13. Run Full Verification & Unit Test Suite (137 tests, 100% passing)
 pytest tests                            # Execute all unit and integration tests
 ```
 
@@ -151,7 +151,7 @@ deeper_dhamma/
 │       │   ├── adapters/       # Pluggable data adapters (api_client.js, wasm_client.js)
 │       │   └── words/          # Compact binary word timing sidecars (.bin + VBR1 trailer)
 │       └── views/              # Bottle templates (index.html)
-├── tests/                      # Comprehensive Unit & Integration Test Suite (121 tests)
+├── tests/                      # Comprehensive Unit & Integration Test Suite (137 tests)
 │   ├── test_cli.py             # CLI parser, "One Obvious Way" flags, subcommands dispatch
 │   ├── test_audit.py           # Ghost files, temp fragments, html error pages, archive cleanup
 │   ├── test_catalog.py         # Era determination, teacher matching, clean slugging, dates

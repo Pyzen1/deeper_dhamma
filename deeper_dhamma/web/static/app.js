@@ -1589,6 +1589,91 @@
       };
     }
 
+    // Delegated click listener for transcript turns drawer:
+    // Handles timestamp seek buttons, quote share buttons, word-level seek & Pali terms, and un-timed Pali terms
+    if (els.drawerTurns) {
+      els.drawerTurns.addEventListener('click', (e) => {
+        const ep = state.currentEpisode;
+        if (!ep) return;
+
+        // 1. Click on word in drawer seeks audio to that exact second!
+        const wSpan = e.target.closest('.transcript-word');
+        if (wSpan) {
+          e.stopPropagation();
+          const start = parseFloat(wSpan.dataset.start);
+          playAudioSegment({
+            episode_id: ep.id,
+            media_url: ep.media_url,
+            title: ep.title,
+            teacher: ep.primary_display,
+            start_sec: start,
+          });
+          if (wSpan.classList.contains('pali-term') && wSpan.dataset.pali) {
+            handleSpokenPaliTerm(wSpan.dataset.pali, null, { userClicked: true, startSec: start, wordId: wSpan.id });
+          }
+          return;
+        }
+
+        // 2. Click on un-timed Pali term in sentence fallback mode
+        const pSpan = e.target.closest('.pali-term');
+        if (pSpan) {
+          e.stopPropagation();
+          if (pSpan.dataset.pali) {
+            handleSpokenPaliTerm(pSpan.dataset.pali, null, { userClicked: true });
+          }
+          return;
+        }
+
+        // 3. Click on timestamp button seeks audio to turn start
+        const timeBtn = e.target.closest('.turn-time-btn');
+        if (timeBtn) {
+          e.stopPropagation();
+          const start = parseFloat(timeBtn.dataset.start);
+          playAudioSegment({
+            episode_id: ep.id,
+            media_url: ep.media_url,
+            title: ep.title,
+            teacher: ep.primary_display,
+            start_sec: start,
+          });
+          return;
+        }
+
+        // 4. Click on share moment icon copies link to this moment
+        const shareBtn = e.target.closest('.turn-share-btn');
+        if (shareBtn) {
+          e.stopPropagation();
+          const startSec = Math.floor(parseFloat(shareBtn.dataset.start) || 0);
+          const shareUrl = `${window.location.origin}/#talk/${ep.id}?t=${startSec}`;
+          copyTextToClipboard(shareUrl, `Moment link at ${formatSeconds(startSec)} copied to clipboard!`);
+          return;
+        }
+      });
+    }
+
+    // Delegated click listener for live companion lexicon cards
+    if (els.lexiconStack) {
+      els.lexiconStack.addEventListener('click', (e) => {
+        const lBtn = e.target.closest('.lex-card-link-btn');
+        if (lBtn) {
+          e.stopPropagation();
+          const term = lBtn.dataset.term;
+          if (term) {
+            openFullLexiconEntry(term);
+          }
+          return;
+        }
+
+        const card = e.target.closest('.lex-stack-card');
+        if (card && card.dataset.idx !== undefined) {
+          const idx = parseInt(card.dataset.idx, 10);
+          if (!isNaN(idx)) {
+            jumpToCompanionTerm(idx);
+          }
+        }
+      });
+    }
+
 
 
     // Lexicon Search & Controls
@@ -3408,7 +3493,7 @@
     const paliTitle = escapeHtml(term.pali_diacritic || term.pali_plain || '');
     const startSec = typeof term.startSec === 'number' ? term.startSec : 0;
     card.title = `Seek audio to ${formatSeconds(startSec)}`;
-    const detailsBtn = `<button type="button" class="lex-card-link-btn" title="View full lexicon entry for ${paliTitle}">Lexicon ↗</button>`;
+    const detailsBtn = `<button type="button" class="lex-card-link-btn" data-term="${escapeHtml(term.pali_plain || term.pali_diacritic || '')}" title="View full lexicon entry for ${paliTitle}">Lexicon ↗</button>`;
 
     const bestDef = getBestDefinition(term);
     const sourceNote = bestDef.source
@@ -3429,20 +3514,6 @@
       </div>
       ${sourceNote}
     `;
-
-    // Clicking Lexicon link opens full entry in Lexicon view
-    const lBtn = card.querySelector('.lex-card-link-btn');
-    if (lBtn) {
-      lBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openFullLexiconEntry(term.pali_plain || term.pali_diacritic);
-      });
-    }
-
-    // Clicking anywhere else on card seeks audio and scrolls transcript to word
-    card.addEventListener('click', () => {
-      jumpToCompanionTerm(idx);
-    });
 
     return card;
   }
@@ -3787,86 +3858,22 @@
         });
 
         els.drawerTurns.innerHTML = html;
-
-        // Click on any timestamp in drawer seeks audio!
-        els.drawerTurns.querySelectorAll('.turn-time-btn').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const start = parseFloat(btn.dataset.start);
-            playAudioSegment({
-              episode_id: ep.id,
-              media_url: ep.media_url,
-              title: ep.title,
-              teacher: ep.primary_display,
-              start_sec: start,
-            });
-          });
-        });
-
-        // Click on share moment icon copies link to this exact quote / second!
-        els.drawerTurns.querySelectorAll('.turn-share-btn').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const startSec = Math.floor(parseFloat(btn.dataset.start) || 0);
-            const shareUrl = `${window.location.origin}/#talk/${ep.id}?t=${startSec}`;
-            copyTextToClipboard(shareUrl, `Moment link at ${formatSeconds(startSec)} copied to clipboard!`);
-          });
-        });
-
-        // Click on any word in drawer seeks audio to that exact second!
-        els.drawerTurns.querySelectorAll('.transcript-word').forEach(wSpan => {
-          wSpan.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const start = parseFloat(wSpan.dataset.start);
-            playAudioSegment({
-              episode_id: ep.id,
-              media_url: ep.media_url,
-              title: ep.title,
-              teacher: ep.primary_display,
-              start_sec: start,
-            });
-            if (wSpan.classList.contains('pali-term') && wSpan.dataset.pali) {
-              handleSpokenPaliTerm(wSpan.dataset.pali, null, { userClicked: true, startSec: start, wordId: wSpan.id });
-            }
-          });
-        });
-
-        // Click on any un-timed Pali term in sentence fallback mode
-        els.drawerTurns.querySelectorAll('.pali-term:not(.transcript-word)').forEach(pSpan => {
-          pSpan.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (pSpan.dataset.pali) {
-              handleSpokenPaliTerm(pSpan.dataset.pali, null, { userClicked: true });
-            }
-          });
-        });
       }
 
       window.renderActiveTranscript = renderDrawerTurns;
 
-      await ensurePaliTermsLoaded();
-
-      if (window.WordSync) {
-        await window.WordSync.prepareEpisode(ep);
-      }
-
-      renderDrawerTurns();
-      buildCompanionTermsList();
-      if (els.nativeAudio && els.nativeAudio.currentTime > 0) {
-        const rawCur = els.nativeAudio.currentTime;
-        const physCur = window.WordSync ? window.WordSync.getPhysicalTime(rawCur) : rawCur;
-        updateActiveCompanionTerm(physCur);
-      }
-
-      // If opened from a sentence context match or timestamp (e.g. from shared link ?t=120)
-      if (targetOpts && (typeof targetOpts.turnIndex === 'number' || typeof targetOpts.fallbackSec === 'number')) {
-        let tIdx = typeof targetOpts.turnIndex === 'number' ? targetOpts.turnIndex : 0;
-        const sIdx = typeof targetOpts.sentIdxInTurn === 'number' ? targetOpts.sentIdxInTurn : 0;
-        const wOffset = typeof targetOpts.wordOffsetInTurn === 'number' ? targetOpts.wordOffsetInTurn : 0;
-        let exactWordSec = typeof targetOpts.fallbackSec === 'number' ? targetOpts.fallbackSec : 0;
+      function applyTargetOpts(opts, isEnriched = false) {
+        if (!opts || (typeof opts.turnIndex !== 'number' && typeof opts.fallbackSec !== 'number')) {
+          return;
+        }
+        let tIdx = typeof opts.turnIndex === 'number' ? opts.turnIndex : 0;
+        const sIdx = typeof opts.sentIdxInTurn === 'number' ? opts.sentIdxInTurn : 0;
+        const wOffset = typeof opts.wordOffsetInTurn === 'number' ? opts.wordOffsetInTurn : 0;
+        let exactWordSec = typeof opts.fallbackSec === 'number' ? opts.fallbackSec : 0;
 
         // If turnIndex was not explicitly given, find the turn matching fallbackSec
-        if (typeof targetOpts.turnIndex !== 'number' && typeof targetOpts.fallbackSec === 'number' && ep.segments && ep.segments.length > 0) {
-          const sec = targetOpts.fallbackSec;
+        if (typeof opts.turnIndex !== 'number' && typeof opts.fallbackSec === 'number' && ep.segments && ep.segments.length > 0) {
+          const sec = opts.fallbackSec;
           for (let i = 0; i < ep.segments.length; i++) {
             const s = ep.segments[i];
             const nextStart = ep.segments[i + 1] ? ep.segments[i + 1].start_sec : Infinity;
@@ -3894,9 +3901,9 @@
         // 2. Locate target sentence element and turn element for smooth scrolling & highlight
         const sentEl = document.getElementById(`turn-${tIdx}-sent-${sIdx}`);
         const turnEl = document.getElementById(`turn-${tIdx}`);
-        const scrollTarget = sentEl || targetWordEl || turnEl;
+        const scrollTarget = isEnriched && targetWordEl ? targetWordEl : (sentEl || targetWordEl || turnEl);
 
-        if (scrollTarget) {
+        if (scrollTarget && (!isEnriched || targetWordEl)) {
           requestAnimationFrame(() => {
             scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
           });
@@ -3920,7 +3927,7 @@
           }
         }
 
-        if (targetOpts.autoPlay !== false && ep.media_url) {
+        if (!isEnriched && opts.autoPlay !== false && ep.media_url) {
           playAudioSegment({
             episode_id: ep.id,
             media_url: ep.media_url,
@@ -3930,6 +3937,35 @@
           });
         }
       }
+
+      // 1. Instant progressive render: talk turns appear immediately
+      renderDrawerTurns();
+      if (targetOpts) {
+        applyTargetOpts(targetOpts, false);
+      }
+
+      // 2. Concurrently load Pali lexicon terms, binary word sidecar, and companion cards
+      const epLoadToken = ep.id;
+      const enrichmentTasks = [ensurePaliTermsLoaded()];
+      if (window.WordSync) {
+        enrichmentTasks.push(window.WordSync.prepareEpisode(ep));
+      }
+
+      Promise.all(enrichmentTasks).then(() => {
+        if (!state.currentEpisode || state.currentEpisode.id !== epLoadToken) return;
+        renderDrawerTurns();
+        buildCompanionTermsList();
+        if (targetOpts) {
+          applyTargetOpts(targetOpts, true);
+        }
+        if (els.nativeAudio && els.nativeAudio.currentTime > 0) {
+          const rawCur = els.nativeAudio.currentTime;
+          const physCur = window.WordSync ? window.WordSync.getPhysicalTime(rawCur) : rawCur;
+          updateActiveCompanionTerm(physCur);
+        }
+      }).catch(enrichErr => {
+        console.warn('[Transcript] Progressive enrichment notice:', enrichErr);
+      });
     } catch (err) {
       els.drawerTurns.innerHTML = '<div class="empty-state"><p>Failed to load transcript.</p></div>';
       console.error(err);

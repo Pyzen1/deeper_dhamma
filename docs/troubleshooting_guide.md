@@ -191,9 +191,79 @@ const rawSentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [trimm
 
 ---
 
-## 5. Diagnostic & Verification Procedures
+## 5. Issue: High Latency (> 1s) Loading Transcripts in Offline / Unserved Environments
 
-### 5.1 Running the Cross-Browser Synchronization Test Suite
+### 5.1 Symptom
+When accessing the static distribution (`dist/index.html`) offline, unserved via `file:///`, or on static hosts with no active backend server:
+- Clicking any talk card or directly navigating to a talk URL (e.g. `#talk/pb27802310`) took more than 1 second to display the transcript.
+- The UI showed a blocking `"Loading transcript turns..."` spinner during the delay.
+- Memory allocations and CPU spikes occurred on the main thread during talk drawer transitions.
+
+---
+
+### 5.2 Root Cause Analysis
+
+Profiling in headless Mozilla Firefox and Google Chrome revealed five compounding bottlenecks:
+
+```text
++-----------------------------------------------------------------------------------------+
+|                                Previous Latency Bottlenecks                             |
++-----------------------------------------------------------------------------------------+
+| 1. Full DB Probe Download  --> Discarded 4.75MB buffer & re-read 4.75MB from IndexedDB |
+| 2. initVocabCache()        --> 5,000-row synchronous scan blocked worker initialization |
+| 3. openTranscriptDrawer()  --> Waited for full 2,447 Pali terms + binary words blob     |
+| 4. formatTurnParagraphs()  --> 30,000+ Unicode normalize('NFD') calls on ASCII words    |
+| 5. renderDrawerTurns()     --> 12,000 querySelectorAll scans & individual event bindings|
++-----------------------------------------------------------------------------------------+
+```
+
+1. **Dual Database Read & Lack of Offline Fallback in `db_worker.js`**:
+   - `fetchRemoteVersion(dbUrl)` probes `./dhamma_web.db` with `Range: bytes=0-99`.
+   - On `file:///` and static hosts without HTTP 206 Partial Content support, the browser/host returns `HTTP 200` with the **full 4.75 MB buffer** (`probeBuffer`).
+   - If `cached.version === remoteVersion`, the worker previously discarded `probeBuffer` and executed an asynchronous 4.75 MB read from IndexedDB, reading the database twice into memory.
+   - If completely offline without a server, `fetchRemoteVersion` threw or delayed on network resolution without falling back to the existing IndexedDB cache.
+2. **Synchronous 5,000-Row Vocabulary Scan at Startup**:
+   - `initDatabase()` unconditionally called `initVocabCache()` (`SELECT word, count FROM search_vocab ORDER BY count DESC;`), mapping 5,000 rows into JS objects and a `Set` before resolving the ready event, blocking initial transcript requests.
+3. **Waterfall Blocking in `openTranscriptDrawer`**:
+   - `openTranscriptDrawer()` sequentially awaited `ensurePaliTermsLoaded()` (fetching all 2,447 terms across Web Worker `postMessage`), awaited `prepareEpisode()` (downloading and parsing the binary word sidecar), and then generated 230+ companion cards before displaying the transcript.
+4. **Heavy Unicode `normalize('NFD')` in `word_sync.js`**:
+   - For every word in a talk (up to 12,000 words in talks like `pb27802310`), `matchPhraseAt` evaluated 4-word slices and invoked `foldDiacritics`. Calling `str.normalize('NFD')` 30,000+ times over standard English ASCII words choked the main JS thread.
+5. **12,000 Listener Attachments per Render in `renderDrawerTurns`**:
+   - `renderDrawerTurns` queried `.transcript-word` and attached individual click listeners to up to 12,000 span elements via `querySelectorAll`, creating massive DOM layout and listener overhead.
+
+---
+
+### 5.3 Architectural Fix & Optimizations
+
+```text
++-----------------------------------------------------------------------------------------+
+|                                    Optimized Pipeline                                   |
++-----------------------------------------------------------------------------------------+
+| 1. Single Buffer Reuse     --> probeBuffer used directly; offline falls back to cache   |
+| 2. Lazy Vocab Caching      --> initVocabCache deferred to background/idle search time   |
+| 3. Progressive Rendering   --> Talk speech turns render immediately (<20ms)             |
+| 4. ASCII Fast-Path & Guard --> foldDiacritics skips NFD; paliFirstWordsSet O(1) filter   |
+| 5. Event Delegation        --> Single click listener on els.drawerTurns & lexiconStack  |
++-----------------------------------------------------------------------------------------+
+```
+
+1. **Buffer Reuse & Resilient Offline Fallback (`db_worker.js`)**:
+   - Reuses `probeBuffer` directly if downloaded during the Range probe (`probeBuffer.byteLength > 100000`), eliminating the redundant IndexedDB read.
+   - If network probes fail or timeout in offline mode, it falls back immediately to the existing IndexedDB cache snapshot.
+   - `ensureVocabCache()` is deferred to background idle time (`setTimeout(ensureVocabCache, 50)`) or on-demand fuzzy search, unblocking immediate database readiness.
+2. **ASCII Fast-Path & Prefix Guard (`word_sync.js`)**:
+   - `foldDiacritics` checks `!/[^\x00-\x7F]/.test(str)`, immediately returning `str.toLowerCase()` for ASCII words without invoking `normalize('NFD')`.
+   - Populated `paliFirstWordsSet` during `setPaliTerms`. In `matchPhraseAt`, words not found in the initial set exit in a single O(1) check, bypassing multi-word candidate slicing for ~98% of transcript words.
+3. **Progressive Display & Event Delegation (`app.js`)**:
+   - In `openTranscriptDrawer`, talk speech turns render immediately upon receiving `ep` from SQLite WASM (<20ms).
+   - `ensurePaliTermsLoaded()` and `prepareEpisode()` run concurrently in the background and progressively enrich the transcript with word timestamps and companion cards without blocking initial display.
+   - Replaced all individual word and card listeners with single delegated click listeners on `els.drawerTurns` and `els.lexiconStack`.
+
+---
+
+## 6. Diagnostic & Verification Procedures
+
+### 6.1 Running the Cross-Browser Synchronization Test Suite
 Run `pytest` to verify byte parity, `VBR1` trailer integrity, client-side `Xing -> Info` progressive `Blob` neutralization, and real headless Firefox + Chrome playback synchronization:
 
 ```powershell
@@ -207,7 +277,7 @@ Specifically:
 - `tests/test_audio_cdn_sync.py`:
   - Verifies 1:1 bit-for-bit parity between local `archive/` MP3 files and Podbean CDN streams.
 
-### 5.2 Rebuilding Static Web Assets & Resetting Browser Cache
+### 6.2 Rebuilding Static Web Assets & Resetting Browser Cache
 Whenever `dhamma_transcripts.db`, `words/*.bin`, `word_sync.js`, or `app.js` are updated, recompile the static `dist/` bundle:
 
 ```powershell

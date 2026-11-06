@@ -105,11 +105,25 @@ async function initDatabase(dbUrl = 'dhamma_web.db') {
   let dbBuffer = null;
   let isFromCache = false;
 
-  if (cached && cached.version && remoteVersion && cached.version === remoteVersion && cached.buffer) {
+  if (probeBuffer && probeBuffer.byteLength > 100000) {
+    // The Range probe fetched the full database in one go (e.g. file:/// or static server returning HTTP 200)
+    console.log(`[DB Worker] Using full buffer directly from probe (${probeBuffer.byteLength} bytes).`);
+    dbBuffer = probeBuffer;
+    currentDbVersion = remoteVersion;
+    if (!cached || cached.version !== remoteVersion) {
+      await setCachedDatabase('dhamma_web', currentDbVersion, dbBuffer);
+    }
+  } else if (cached && cached.version && remoteVersion && cached.version === remoteVersion && cached.buffer) {
     // Cache is strictly up-to-date!
     console.log(`[DB Worker] Using cached database (v${cached.version}) from IndexedDB.`);
     dbBuffer = cached.buffer;
     currentDbVersion = cached.version;
+    isFromCache = true;
+  } else if (cached && cached.buffer && (!remoteVersion || remoteVersion === 0)) {
+    // Offline fallback: probe failed or offline mode, but IndexedDB snapshot exists
+    console.log(`[DB Worker] Offline fallback: Using cached database (v${cached.version}) from IndexedDB.`);
+    dbBuffer = cached.buffer;
+    currentDbVersion = cached.version || 0;
     isFromCache = true;
   } else {
     // Need full download
@@ -118,23 +132,44 @@ async function initDatabase(dbUrl = 'dhamma_web.db') {
       dbBuffer = probeBuffer;
     } else {
       const fetchUrl = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
-      const res = await fetch(fetchUrl, { cache: 'no-store' });
-      if (!res.ok) {
-        throw new Error(`Failed to fetch database from ${dbUrl} (status ${res.status})`);
+      try {
+        const res = await fetch(fetchUrl, { cache: 'no-store' });
+        if (!res.ok) {
+          if (cached && cached.buffer) {
+            console.warn(`[DB Worker] Fetch failed (${res.status}), falling back to cached snapshot.`);
+            dbBuffer = cached.buffer;
+            currentDbVersion = cached.version || 0;
+            isFromCache = true;
+          } else {
+            throw new Error(`Failed to fetch database from ${dbUrl} (status ${res.status})`);
+          }
+        } else {
+          dbBuffer = await res.arrayBuffer();
+        }
+      } catch (fetchErr) {
+        if (cached && cached.buffer) {
+          console.warn(`[DB Worker] Network error (${fetchErr.message}), falling back to cached snapshot.`);
+          dbBuffer = cached.buffer;
+          currentDbVersion = cached.version || 0;
+          isFromCache = true;
+        } else {
+          throw fetchErr;
+        }
       }
-      dbBuffer = await res.arrayBuffer();
     }
 
-    // Extract version if remote header probe was 0
-    if (!remoteVersion && dbBuffer.byteLength >= 64) {
-      const view = new DataView(dbBuffer);
-      currentDbVersion = view.getUint32(60, false);
-    } else {
-      currentDbVersion = remoteVersion;
-    }
+    if (!isFromCache) {
+      // Extract version if remote header probe was 0
+      if (!remoteVersion && dbBuffer.byteLength >= 64) {
+        const view = new DataView(dbBuffer);
+        currentDbVersion = view.getUint32(60, false);
+      } else {
+        currentDbVersion = remoteVersion;
+      }
 
-    // Save to IndexedDB
-    await setCachedDatabase('dhamma_web', currentDbVersion, dbBuffer);
+      // Save to IndexedDB
+      await setCachedDatabase('dhamma_web', currentDbVersion, dbBuffer);
+    }
   }
 
   // 3. Deserialize buffer into in-memory SQLite connection
@@ -159,8 +194,8 @@ async function initDatabase(dbUrl = 'dhamma_web.db') {
     throw new Error(`sqlite3_deserialize failed with code ${rc}`);
   }
 
-  // Initialize in-memory vocabulary cache for instant typo correction
-  initVocabCache();
+  // Warm vocabulary cache asynchronously in background so ready event is instant
+  setTimeout(ensureVocabCache, 50);
 
   console.log(`[DB Worker] Database ready: v${currentDbVersion}, ${uint8Array.byteLength} bytes.`);
   return { version: currentDbVersion, cached: isFromCache, size: uint8Array.byteLength };
@@ -356,6 +391,15 @@ function foldDiacritics(str) {
     .toLowerCase();
 }
 
+let vocabCacheInitialized = false;
+
+function ensureVocabCache() {
+  if (vocabCacheInitialized) return;
+  if (!db) return;
+  vocabCacheInitialized = true;
+  initVocabCache();
+}
+
 function initVocabCache() {
   vocabList = [];
   vocabSet = new Set();
@@ -440,6 +484,7 @@ function damerauLevenshtein(a, b, maxDist = 2) {
 }
 
 function correctFuzzyWord(w) {
+  ensureVocabCache();
   if (!w || w.length <= 4) return w;
   if (vocabSet.has(w)) return w;
 
