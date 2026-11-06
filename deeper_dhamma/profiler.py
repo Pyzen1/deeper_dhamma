@@ -126,17 +126,21 @@ class SpeakerProfiler:
         ranked_speakers.sort(key=lambda x: (x["share"], x.get("confidence", 0.0)), reverse=True)
 
         # Distinct teachers qualifying as co-speakers:
-        # Detected with confident match (>= 0.45) or noticeable presence (>= 3% share).
+        # Must have meaningful presence (>= 5% share with >= 0.42 confidence, or >= 2 slices with >= 0.50 confidence)
         distinct_teachers = [
             slug for slug, sh in shares.items()
             if not slug.startswith("unregistered") and (
-                sh >= 0.05 or any(r["slug"] == slug and r.get("confidence", 0.0) >= 0.45 for r in ranked_speakers)
+                (sh >= 0.05 and any(r["slug"] == slug and r.get("confidence", 0.0) >= 0.42 for r in ranked_speakers))
+                or (sh * total_samples >= 2 and any(r["slug"] == slug and r.get("confidence", 0.0) >= 0.50 for r in ranked_speakers))
             )
         ]
-        unreg_share = sum(sh for slug, sh in shares.items() if slug.startswith("unregistered") and sh >= 0.03)
+        unreg_share = sum(
+            sh for slug, sh in shares.items()
+            if slug.startswith("unregistered") and sh >= 0.04 and sh * total_samples >= 3
+        )
 
-        # Multi-speaker if more than one distinct teacher is detected or guest/QA participants are present
-        is_multi_speaker = len(distinct_teachers) > 1 or unreg_share >= 0.03
+        # Multi-speaker if more than one distinct teacher is detected or substantial guest/QA presence (>= 6%)
+        is_multi_speaker = len(distinct_teachers) > 1 or unreg_share >= 0.06
 
         elapsed = time.time() - t0
         return {

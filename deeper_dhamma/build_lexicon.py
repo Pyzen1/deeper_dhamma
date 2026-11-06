@@ -768,28 +768,28 @@ def get_standard_phrase_rules() -> List[Dict]:
     """Phonetic substitution rules for ASR post-processing disambiguation."""
     return [
         {
-            "pattern": r"\b(?:vains|veins|reins|rayns|vanes)\s+(retreats?)\b",
+            "pattern": r"\b(?:vains|veins|reins|rayns|vanes)(?=\s+retreats?\b)",
             "canonical_pali": "vassa",
             "category": "vinaya",
             "explanation": "Acoustic misrecognition of Rains Retreat (Vassa)",
             "context_requirement": "retreat|monastery|monks|winter|vassa|serpentine",
         },
         {
-            "pattern": r"\b(?:ghana|gana|jana)\s+(factors?|states?|attainments?|experiences?)\b",
+            "pattern": r"\b(?:ghana|gana|jana)(?=\s+(?:factors?|states?|attainments?|experiences?)\b)",
             "canonical_pali": "jhana",
             "category": "meditation",
             "explanation": "Jhana absorption factors acoustic slip",
             "context_requirement": "meditation|absorption|stillness|samadhi|breath",
         },
         {
-            "pattern": r"\b(first|second|third|fourth|1st|2nd|3rd|4th|deep)\s+(?:ghana|gana|jana)\b",
+            "pattern": r"\b(?:ghana|gana|jana)\b",
             "canonical_pali": "jhana",
             "category": "meditation",
-            "explanation": "Ordinal jhana absorption stage",
-            "context_requirement": "meditation|absorption|bliss|stillness|samadhi",
+            "explanation": "Ordinal or contextual jhana absorption stage",
+            "context_requirement": "first|second|third|fourth|1st|2nd|3rd|4th|deep|meditation|absorption|bliss|stillness|samadhi",
         },
         {
-            "pattern": r"\b(?:the\s+)?nimiter\b",
+            "pattern": r"\bnimiter\b",
             "canonical_pali": "nimitta",
             "category": "meditation",
             "explanation": "Nimitta meditation light / mental sign",
@@ -815,6 +815,41 @@ def get_standard_phrase_rules() -> List[Dict]:
             "category": "meditation",
             "explanation": "Anapanasati mindfulness of breathing",
             "context_requirement": None,
+        },
+        {
+            "pattern": r"\b(?:yonis\s+om\s+man[ia]sikara|yonis\s+oman[ie]s\s+ikara|yonis\s+oman[ie]sikara|yoniso\s+man[ie]sikara)\b",
+            "canonical_pali": "yoniso manasikara",
+            "category": "sutta_canon",
+            "explanation": "Yoniso manasikara (wise / proper attention)",
+            "context_requirement": "attention|wise|mind|comprehension|quality|qualities|sutta|dhamma|meditation",
+        },
+        {
+            "pattern": r"\b(?:ayonis\s+om\s+man[ia]sikara|ayonis\s+oman[ie]s\s+ikara|ayonis\s+oman[ie]sikara|ayoniso\s+man[ie]sikara)\b",
+            "canonical_pali": "ayoniso manasikara",
+            "category": "sutta_canon",
+            "explanation": "Ayoniso manasikara (unwise / improper attention)",
+            "context_requirement": "attention|unwise|mind|comprehension|quality|qualities|sutta|dhamma|meditation",
+        },
+        {
+            "pattern": r"\b(?:sampajanaya|sampajjanya|samparjanya)\b",
+            "canonical_pali": "sampajanna",
+            "category": "meditation",
+            "explanation": "Sampajanna (clear comprehension / full awareness)",
+            "context_requirement": "comprehension|awareness|mindfulness|attention|sati|meditation",
+        },
+        {
+            "pattern": r"\bnoble,?\s+aidful\s+path\b",
+            "canonical_pali": "noble eightfold path",
+            "category": "sutta_canon",
+            "explanation": "Noble Eightfold Path (ariya atthangika magga) acoustic misrecognition",
+            "context_requirement": "path|noble|visuddhimagga|magga|buddha|dhamma|purification",
+        },
+        {
+            "pattern": r"\baidful\s+path\b",
+            "canonical_pali": "eightfold path",
+            "category": "sutta_canon",
+            "explanation": "Eightfold Path (atthangika magga) acoustic misrecognition",
+            "context_requirement": "path|noble|visuddhimagga|magga|buddha|dhamma|purification",
         },
     ]
 

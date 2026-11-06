@@ -67,30 +67,32 @@ class SpeakerAligner:
 
                 dur_l = left_en - left_st
                 dur_r = right_en - right_st
-                if dur_l < 0.35 and gap < 0.80:
+                if dur_l < 1.5 or dur_r < 1.5:
                     continue
 
                 try:
-                    w_l = get_slice(left_st, min(left_en, left_st + 5.0))
+                    w_l = get_slice(left_st, min(left_en, left_st + 6.0))
                     w_r = get_slice(right_st, right_en)
 
                     emb_l = self.encoder.encode_waveform(w_l)
                     emb_r = self.encoder.encode_waveform(w_r)
 
-                    id_l = self.db.identify_speaker(emb_l, era=era, threshold=0.40)
-                    id_r = self.db.identify_speaker(emb_r, era=era, threshold=0.40)
+                    id_l = self.db.identify_speaker(emb_l, era=era, threshold=0.42)
+                    id_r = self.db.identify_speaker(emb_r, era=era, threshold=0.42)
 
                     sim = float(np.dot(emb_l / np.linalg.norm(emb_l), emb_r / np.linalg.norm(emb_r)))
                     delta = 1.0 - sim
 
-                    is_left_indep = (dur_l >= 1.2) or (id_l["confidence"] >= 0.45)
-                    is_right_indep = (dur_r >= 1.2) or (id_r["confidence"] >= 0.45)
+                    both_known_different = (
+                        id_l["identified"]
+                        and id_r["identified"]
+                        and id_l["teacher_slug"] != id_r["teacher_slug"]
+                        and id_l["confidence"] >= 0.44
+                        and id_r["confidence"] >= 0.44
+                    )
+                    strong_acoustic_break = (dur_l >= 2.0 and dur_r >= 2.0 and delta >= 0.60)
 
-                    is_change = False
-                    if id_l["teacher_slug"] != id_r["teacher_slug"] and is_left_indep and is_right_indep:
-                        is_change = True
-                    elif delta >= 0.55 and is_left_indep and is_right_indep:
-                        is_change = True
+                    is_change = both_known_different or strong_acoustic_break
 
                     if is_change:
                         sub_text = " ".join(w["word"].strip() for w in left_words)
@@ -151,20 +153,36 @@ class SpeakerAligner:
         # 2. Turn-level acoustic evaluation & identity attribution
         assigned_segments = []
         candidate_roster = profile.get("ranked_speakers", []) if profile else []
-        active_candidate_slugs = {c["slug"] for c in candidate_roster if not c["slug"].startswith("unregistered")}
+        active_candidate_slugs = {
+            c["slug"]
+            for c in candidate_roster
+            if not c["slug"].startswith("unregistered") and (c.get("share", 0) >= 0.05 or c.get("confidence", 0) >= 0.46)
+        }
         if candidate_monastics:
             active_candidate_slugs.update(candidate_monastics)
+        if primary_slug and primary_slug != "unknown_teacher":
+            active_candidate_slugs.add(primary_slug)
+
+        # Map candidate slugs to display names
+        slug_to_display = {primary_slug: primary_teacher_display}
+        for c in candidate_roster:
+            if c.get("slug") and c.get("display_name"):
+                slug_to_display[c["slug"]] = c["display_name"]
+
+        is_multi_speaker = bool(profile.get("is_multi_speaker", False)) if profile else (len(active_candidate_slugs) > 1)
+        lower_fname = str(audio_file).lower()
+        has_qa_indicator = any(k in lower_fname for k in ("_q_a", "q&a", "_qa_", "question"))
 
         current_speaker = primary_slug
         current_display = primary_teacher_display
 
         for seg in asr_segments:
             dur = seg["end"] - seg["start"]
-            # Utterances under 0.35s (isolated non-speech or breath clicks) inherit active speaker
-            if dur < 0.35:
+            # Utterances under 1.2s lack sufficient phonetic span for reliable ECAPA speaker switches
+            if dur < 1.20:
                 seg["speaker"] = current_speaker
                 seg["speaker_display"] = current_display
-                seg["role"] = "monastic_primary"
+                seg["role"] = "guest_or_qa" if current_speaker.startswith("unregistered") else "monastic_primary"
                 seg["confidence"] = 0.85
                 assigned_segments.append(seg)
                 continue
@@ -172,14 +190,14 @@ class SpeakerAligner:
             try:
                 if waveform_16k is not None:
                     start_frame = int(seg["start"] * sample_rate)
-                    end_sec = min(seg["end"], seg["start"] + 6.0)
+                    end_sec = min(seg["end"], seg["start"] + 8.0)
                     end_frame = min(waveform_16k.shape[-1], int(end_sec * sample_rate))
                     waveform = waveform_16k[:, start_frame:end_frame]
                 else:
                     waveform, _ = load_audio_segment(
                         audio_file,
                         start_sec=seg["start"],
-                        end_sec=min(seg["end"], seg["start"] + 6.0),
+                        end_sec=min(seg["end"], seg["start"] + 8.0),
                     )
                 emb = self.encoder.encode_waveform(waveform)
 
@@ -188,36 +206,88 @@ class SpeakerAligner:
                 new_display = id_result["display_name"]
                 new_conf = id_result["confidence"]
 
-                # If candidate monastics were established in pre-profiling,
-                # reject un-profiled third-party monastics unless voiceprint match is strongly discriminative (>= 0.48)
-                if active_candidate_slugs and new_slug not in active_candidate_slugs and not new_slug.startswith("unregistered"):
-                    if new_conf < 0.48:
-                        new_slug = current_speaker
-                        new_display = current_display
+                # Measure direct acoustic agreement with the active and primary speakers
+                active_sim = (
+                    self.db.score_speaker(emb, current_speaker, era=era)
+                    if not current_speaker.startswith("unregistered")
+                    else 0.0
+                )
+                primary_sim = (
+                    self.db.score_speaker(emb, primary_slug, era=era)
+                    if primary_slug and primary_slug != "unknown_teacher"
+                    else 0.0
+                )
+                best_candidate_sim = max([active_sim, primary_sim] + [
+                    self.db.score_speaker(emb, c_slug, era=era) for c_slug in active_candidate_slugs
+                ])
 
-                # Hysteresis: switch speaker based on role-appropriate confidence
+                # Reject un-profiled third-party monastics unless match is strongly discriminative (>= 0.52)
+                if active_candidate_slugs and new_slug not in active_candidate_slugs and not new_slug.startswith("unregistered"):
+                    if new_conf < 0.52 or dur < 3.0 or (new_conf - best_candidate_sim) < 0.12:
+                        if best_candidate_sim >= 0.28 or (not is_multi_speaker and not has_qa_indicator):
+                            # Assign to best matching candidate monastic
+                            best_cand = max(
+                                active_candidate_slugs,
+                                key=lambda s: self.db.score_speaker(emb, s, era=era),
+                            )
+                            new_slug = best_cand
+                            new_display = slug_to_display.get(best_cand, best_cand.replace("_", " ").title())
+                            new_conf = self.db.score_speaker(emb, best_cand, era=era)
+                        else:
+                            new_slug = "unregistered_speaker"
+                            new_display = "Unregistered Speaker"
+
+                # Recover candidate monastic when returning from an unregistered segment with moderate similarity
+                if new_slug.startswith("unregistered") and active_candidate_slugs:
+                    recovery_thresh = 0.22 if (not is_multi_speaker and not has_qa_indicator and len(active_candidate_slugs) <= 1) else 0.33
+                    if best_candidate_sim >= recovery_thresh and current_speaker.startswith("unregistered"):
+                        best_cand = max(
+                            active_candidate_slugs,
+                            key=lambda s: self.db.score_speaker(emb, s, era=era),
+                        )
+                        new_slug = best_cand
+                        new_display = slug_to_display.get(best_cand, best_cand.replace("_", " ").title())
+                        new_conf = best_candidate_sim
+
+                # Hysteresis & role-appropriate speaker transition rules
                 if new_slug != current_speaker:
                     if new_slug.startswith("unregistered"):
-                        # Unregistered questioner switch allowed if acoustic match to active monastic is low (< 0.40)
-                        if new_conf < 0.40:
-                            current_speaker = new_slug
-                            current_display = new_display
+                        if not is_multi_speaker and not has_qa_indicator and len(active_candidate_slugs) <= 1:
+                            # Solo talk: only switch to unregistered_speaker on sustained non-teacher segments
+                            # (e.g. a 45s tape narrator intro) where similarity to the primary speaker is very low
+                            if dur >= 6.0 and best_candidate_sim < 0.20:
+                                current_speaker = new_slug
+                                current_display = new_display
+                            else:
+                                new_slug = current_speaker
+                                new_display = current_display
                         else:
-                            new_slug = current_speaker
-                            new_display = current_display
+                            # Multi-speaker or Q&A talk: switch to unregistered questioner when similarity to
+                            # known candidate monastics drops clearly below conversational baseline
+                            if (dur >= 1.8 and best_candidate_sim < 0.30) or (dur >= 1.2 and best_candidate_sim < 0.22):
+                                current_speaker = new_slug
+                                current_display = new_display
+                            else:
+                                new_slug = current_speaker
+                                new_display = current_display
                     else:
-                        # Candidate monastics require >= 0.42, third-party monastics require >= 0.48
-                        monastic_thresh = 0.42 if (active_candidate_slugs and new_slug in active_candidate_slugs) else 0.48
-                        if new_conf >= monastic_thresh:
+                        # Candidate monastics require >= 0.40 (or >= 0.22/0.33 when returning from unregistered_speaker)
+                        monastic_thresh = (
+                            (0.22 if (not is_multi_speaker and not has_qa_indicator and len(active_candidate_slugs) <= 1) else 0.33)
+                            if current_speaker.startswith("unregistered") and new_slug in active_candidate_slugs
+                            else (0.40 if new_slug in active_candidate_slugs else 0.52)
+                        )
+                        if new_conf >= monastic_thresh and (new_conf >= active_sim + 0.02 or current_speaker.startswith("unregistered")):
                             current_speaker = new_slug
                             current_display = new_display
+                            slug_to_display[new_slug] = new_display
                         else:
                             new_slug = current_speaker
                             new_display = current_display
 
                 seg["speaker"] = new_slug
                 seg["speaker_display"] = new_display
-                seg["role"] = id_result["role"]
+                seg["role"] = "guest_or_qa" if new_slug.startswith("unregistered") else id_result["role"]
                 seg["confidence"] = new_conf
             except Exception:
                 seg["speaker"] = current_speaker
@@ -227,7 +297,34 @@ class SpeakerAligner:
 
             assigned_segments.append(seg)
 
-        return self._merge_consecutive_turns(assigned_segments, merge_gap_sec)
+        smoothed = self._smooth_isolated_turns(assigned_segments, max_island_dur=4.0)
+        return self._merge_consecutive_turns(smoothed, merge_gap_sec)
+
+    @staticmethod
+    def _smooth_isolated_turns(segments: List[Dict], max_island_dur: float = 4.0) -> List[Dict]:
+        """
+        Absorbs isolated single-turn `unregistered_speaker` islands shorter than
+        `max_island_dur` when immediately flanked by the same monastic speaker.
+        """
+        if len(segments) < 3:
+            return segments
+
+        out = [dict(s) for s in segments]
+        for i in range(1, len(out) - 1):
+            cur = out[i]
+            prev_s = out[i - 1]
+            next_s = out[i + 1]
+            dur = cur["end"] - cur["start"]
+            if (
+                cur["speaker"].startswith("unregistered")
+                and dur <= max_island_dur
+                and prev_s["speaker"] == next_s["speaker"]
+                and not prev_s["speaker"].startswith("unregistered")
+            ):
+                cur["speaker"] = prev_s["speaker"]
+                cur["speaker_display"] = prev_s["speaker_display"]
+                cur["role"] = prev_s.get("role", "monastic_primary")
+        return out
 
     def _merge_consecutive_turns(self, segments: List[Dict], max_gap: float) -> List[Dict]:
         """Merges consecutive segments by the same speaker."""

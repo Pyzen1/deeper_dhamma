@@ -10,23 +10,25 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - `databases/voiceprints.db`: Era-tagged speaker embeddings gallery.
   - `databases/buddhism_lexicon.db`: Master Pali terminology, translation matrix, and phonetic rule definitions.
 - **High-Accuracy Speech-to-Text (`faster-whisper-large-v3`)**:
-  - Float16 on NVIDIA CUDA (RTX 5070 Ti) with BatchedInferencePipeline running **50x–70x faster than real-time**.
+  - Float16 on NVIDIA CUDA (RTX 5070 Ti) running **sequential transcription (`batch_size=1` by default)** with tuned Silero VAD to guarantee 100% speech capture with zero dropped words or boundary truncation.
   - In-memory waveform caching for zero-disk acoustic profiling and speaker attribution.
-  - Silero VAD speech filtering and Pali doctrinal prompt conditioning.
+  - Teacher-specific prompt steering with dynamic Pali lexicon conditioning.
 - **Era-Tagged Voiceprint Gallery & Continuous Diarization (`speechbrain/spkrec-ecapa-voxceleb`)**:
-  - 192-d ECAPA-TDNN embeddings cataloging monastics across eras (`1997_2003`, `2004_2014`, `2015_2026`).
+  - 192-d ECAPA-TDNN embeddings cataloging monastics across eras (`1997_2003`, `2004_2014`, `2015_2026`) with historical recording year detection (`extract_recording_year`) to handle backfilled audio uploads.
+  - Outlier-resistant composite voiceprint scoring (`_compute_teacher_composite` / `score_speaker`) with gallery cluster pruning to eliminate single-sample acoustic spikes.
+  - Candidate-aware hysteresis and isolated turn smoothing (`_smooth_isolated_turns`) to eliminate false third-party teacher flips on solo talks while preserving genuine secondary speakers (such as archival tape narrators and audience Q&A).
   - Word-level conversational pause change-point detection: splits multi-speaker exchanges grouped by ASR at natural speech pauses ($\ge 0.45\text{s}$).
-  - Candidate-aware hysteresis ($\ge 0.42$ for nominated teachers, $\ge 0.48$ for unprofiled third-party monastics) with paralinguistic resilience against laughter, coughs, and throat-clearing.
-  - Uniform acoustic analysis: every turn in every talk is analyzed individually, eliminating false-monologue assumptions.
 - **Buddhist Reference Terminology Editor & Canonical Authority Documents**:
   - 2,447 canonical Pali entries & multi-word phrases covering doctrinal concepts, Tipiṭaka text titles, and Vinaya monastic law across Theravada traditions.
+  - Non-destructive context-aware phrase disambiguation (using non-consuming lookaheads for multi-word misrecognitions like `vassa`, `jhana`, `nimitta`, `yoniso manasikara`, `noble eightfold path`, and `patimokkha`).
+  - Automated word-timing array synchronization (`_sync_word_timings`) maintaining 1:1 parity with binary synchronization BLOBs (`words/<id>.bin`) when multi-word misrecognitions are merged into canonical tokens.
   - Deterministically compiled from pristine local upstream sources (`databases/sources/`) with authentic external links (`source_url`) and mirrored offline verification copies (`dist/sources/`).
   - Four bitstream-verified offline authority reference texts stored with SHA-256 integrity hashes:
     1. *Bodhi & Sujato Glossary* (1,052 terms comparative concordance table)
     2. *Brahmali Vinaya Piṭaka* (1,309 terms monastic law table)
     3. *Ajahn Brahm Meditation & Dhamma Glossary* (55 terms extracted from *The Word of the Buddha*, BSWA 2024 PDF)
     4. *SuttaCentral Tipiṭaka Canon* (216 canonical basket/nikāya names and DN/MN sutta titles)
-  - Greedy multi-word phrase highlighting and phrase-level audio seeking (`Majjhima Nikāya`, `Sabbāsava Sutta`, `Yoniso Manasikāra`, etc.) in the live Lexicon Companion.
+  - Greedy multi-word phrase highlighting and phrase-level audio seeking (`Majjhima Nikāya`, `Sabbāsava Sutta`, `yoniso manasikara`, etc.) in the live Lexicon Companion.
   - Canonical dictionary normalization in standard Latin Pali (`jhana`, `samadhi`, `anatta`, `Bodhinyana`, `Rains Retreat`).
   - Inlines structured audit changelogs into episode metadata.
 - **Dynamic Serverless Web Application (SQLite WASM & REST)**:

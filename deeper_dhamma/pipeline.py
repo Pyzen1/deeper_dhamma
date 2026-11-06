@@ -17,6 +17,7 @@ from deeper_dhamma.config import (
 )
 from deeper_dhamma.catalog import (
     determine_era,
+    extract_recording_year,
     identify_all_teachers,
     identify_primary_teacher,
     parse_episode_metadata,
@@ -79,6 +80,7 @@ class TranscriptionPipeline:
         catalog_entry: Optional[Dict] = None,
         max_duration_sec: Optional[float] = None,
         retry_errors: bool = False,
+        export_words_blob: bool = True,
     ) -> Dict:
         audio_path = Path(audio_path)
         t0 = time.time()
@@ -92,7 +94,8 @@ class TranscriptionPipeline:
         if not year_val:
             year_val = 2010
 
-        era = determine_era(year_val)
+        recording_year = extract_recording_year(audio_path.name, fallback_year=year_val)
+        era = determine_era(recording_year)
         meta_teacher_slug, meta_teacher_display = identify_primary_teacher(audio_path.name)
         primary_slug = meta_teacher_slug
         primary_display = meta_teacher_display
@@ -243,7 +246,7 @@ class TranscriptionPipeline:
 
             # 8. Export Compact Word Synchronization Binary BLOB (.bin) with VBR1 seek trailer
             words = [w for seg in attributed for w in seg.get("words", [])]
-            if words:
+            if words and export_words_blob:
                 self._save_words_blob(
                     words,
                     ep_id=meta["id"],

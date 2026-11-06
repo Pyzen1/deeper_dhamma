@@ -24,13 +24,11 @@ def format_timestamp_hhmmss(seconds: float) -> str:
 
 
 def format_timestamp_vtt(seconds: float) -> str:
-    """Formats seconds into WebVTT timestamp: HH:MM:SS.mmm."""
-    hrs = int(seconds // 3600)
-    mins = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    ms = int(round((seconds - int(seconds)) * 1000))
-    if ms >= 1000:
-        ms = 999
+    """Formats seconds into WebVTT timestamp: HH:MM:SS.mmm with exact carry-over."""
+    total_ms = max(0, int(round(float(seconds) * 1000)))
+    hrs, rem_ms = divmod(total_ms, 3_600_000)
+    mins, rem_ms = divmod(rem_ms, 60_000)
+    secs, ms = divmod(rem_ms, 1000)
     return f"{hrs:02d}:{mins:02d}:{secs:02d}.{ms:03d}"
 
 
@@ -1310,8 +1308,15 @@ class TranscriptDatabase:
         for seg in data["segments"]:
             start_str = format_timestamp_vtt(seg["start_sec"])
             end_str = format_timestamp_vtt(seg["end_sec"])
+            safe_speaker = str(seg.get("speaker_display") or data["primary_display"]).replace(">", "").strip()
+            safe_text = (
+                str(seg.get("text") or "")
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
             vtt_lines.append(f"{start_str} --> {end_str}")
-            vtt_lines.append(f"<v {seg['speaker_display']}>{seg['text']}")
+            vtt_lines.append(f"<v {safe_speaker}>{safe_text}")
             vtt_lines.append("")
 
         return "\n".join(vtt_lines)

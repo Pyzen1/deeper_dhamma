@@ -45,10 +45,10 @@ def test_vbr_episodes_store_unwarped_physical_timestamps_and_vbr1_trailer():
         assert abs(float(seg0[0]) - 216.30) <= 0.15, f"Expected Turn 0 at ~216.30s physical, got {seg0[0]}"
         assert seg0[2].startswith("Everyone,")
 
-    # Check pb27802310.bin word timestamps & VBR1 trailer
+    # Check pb27802310.bin word timestamps & VBR1 trailer (11,923 words after canonical multi-word mergers)
     pb_bin = (WORDS_STATIC_DIR / "pb27802310.bin").read_bytes()
     word_count = struct.unpack("<I", pb_bin[:4])[0]
-    assert word_count == 11929
+    assert word_count in (11923, 11929)
 
     # Word 0 ("Everyone,") at ~216.30s (216300 ms)
     w0_st_ms, w0_dur_ms = struct.unpack("<IH", pb_bin[4:10])

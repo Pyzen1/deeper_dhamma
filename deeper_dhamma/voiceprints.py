@@ -12,11 +12,20 @@ import numpy as np
 import torch
 
 from deeper_dhamma.config import ARCHIVE_DIR, VOICEPRINTS_DB_PATH
-from deeper_dhamma.catalog import KNOWN_TEACHERS, determine_era, identify_primary_teacher
+from deeper_dhamma.catalog import (
+    KNOWN_TEACHERS,
+    determine_era,
+    extract_recording_year,
+    identify_primary_teacher,
+)
 from deeper_dhamma.audio import load_audio_segment, get_audio_info
 from deeper_dhamma.encoder import SpeakerEncoder
 
 logger = logging.getLogger("voiceprints")
+
+LEGACY_SLUG_MAP: Dict[str, Tuple[str, str]] = {
+    "ajahn_sujato": ("bhante_sujato", "Bhante Sujato"),
+}
 
 
 class VoiceprintDatabase:
@@ -83,16 +92,68 @@ class VoiceprintDatabase:
         gallery = []
         for r in rows:
             vec = np.frombuffer(r["embedding"], dtype=np.float32)
+            slug = r["teacher_slug"]
+            display = r["display_name"]
+            if slug in LEGACY_SLUG_MAP:
+                slug, display = LEGACY_SLUG_MAP[slug]
             gallery.append({
                 "id": r["id"],
-                "teacher_slug": r["teacher_slug"],
-                "display_name": r["display_name"],
+                "teacher_slug": slug,
+                "display_name": display,
                 "era": r["era"],
                 "role": r["role"],
                 "source_file": r["source_file"],
                 "embedding": vec,
             })
         return gallery
+
+    @staticmethod
+    def _compute_teacher_composite(sims: List[float], top_k: int = 3) -> Tuple[float, float]:
+        """
+        Computes an outlier-resistant composite similarity score for a teacher's
+        reference voiceprints. Dampens isolated single-sample spikes when n >= 3.
+        """
+        s_list = sorted(sims, reverse=True)
+        max_s = s_list[0]
+        eff_max = max_s
+        if len(s_list) >= 3 and (s_list[0] - s_list[1]) > 0.20:
+            eff_max = 0.50 * s_list[0] + 0.50 * s_list[1]
+        k_eff = min(len(s_list), top_k)
+        avg_top_k = float(np.mean(s_list[:k_eff]))
+        composite = 0.55 * eff_max + 0.45 * avg_top_k
+        return composite, max_s
+
+    def score_speaker(
+        self,
+        query_embedding: np.ndarray,
+        teacher_slug: str,
+        era: Optional[str] = None,
+        top_k: int = 3,
+    ) -> float:
+        """
+        Returns the composite cosine similarity of `query_embedding` against a
+        specific `teacher_slug` (falling back across eras if not present in `era`).
+        """
+        if teacher_slug in LEGACY_SLUG_MAP:
+            teacher_slug = LEGACY_SLUG_MAP[teacher_slug][0]
+
+        gallery = [g for g in self.load_gallery(era=era) if g["teacher_slug"] == teacher_slug]
+        if not gallery:
+            gallery = [g for g in self.load_gallery(era=None) if g["teacher_slug"] == teacher_slug]
+        if not gallery:
+            return 0.0
+
+        q_norm = np.linalg.norm(query_embedding)
+        q_vec = query_embedding / q_norm if q_norm > 0 else query_embedding
+        sims = []
+        for entry in gallery:
+            vec = entry["embedding"]
+            v_norm = np.linalg.norm(vec)
+            v_normed = vec / v_norm if v_norm > 0 else vec
+            sims.append(float(np.dot(q_vec, v_normed)))
+
+        comp, _ = self._compute_teacher_composite(sims, top_k=top_k)
+        return round(comp, 4)
 
     def identify_speaker(
         self,
@@ -135,14 +196,10 @@ class VoiceprintDatabase:
                 }
             teacher_sims[slug]["sims"].append(sim)
 
-        # Score teachers by composite: 0.70 * max_sim + 0.30 * top_k_avg
+        # Score teachers by outlier-resistant composite similarity
         ranked = []
         for slug, tinfo in teacher_sims.items():
-            s_list = sorted(tinfo["sims"], reverse=True)
-            max_s = s_list[0]
-            k_eff = min(len(s_list), top_k)
-            avg_top_k = float(np.mean(s_list[:k_eff]))
-            composite_score = 0.70 * max_s + 0.30 * avg_top_k
+            composite_score, max_s = self._compute_teacher_composite(tinfo["sims"], top_k=top_k)
             ranked.append((composite_score, max_s, tinfo))
 
         ranked.sort(key=lambda x: x[0], reverse=True)
@@ -219,7 +276,12 @@ def bootstrap_voiceprints(
     logger.info(f"Scanning {len(all_files)} audio files across archive ({len(teacher_files)} known teachers represented)...")
 
     for tslug, files in teacher_files.items():
-        for audio_f, display_name in files:
+        # Prioritize standalone / non-Q&A monologue talks over Q&A sessions
+        files_sorted = sorted(
+            files,
+            key=lambda item: (1 if re.search(r"(?:^|_)(?:q_a|qa)(?:_|\.|$)", item[0].name.lower()) else 0, item[0].name),
+        )
+        for audio_f, display_name in files_sorted:
             year_val = None
             for part in audio_f.parts:
                 if part.isdigit() and len(part) == 4:
@@ -228,7 +290,8 @@ def bootstrap_voiceprints(
             if not year_val:
                 year_val = 2010
 
-            era = determine_era(year_val)
+            rec_year = extract_recording_year(audio_f.name, fallback_year=year_val)
+            era = determine_era(rec_year)
             cluster_key = (tslug, era)
             current_count = counts.get(cluster_key, 0)
             if current_count >= samples_per_teacher_era:
@@ -240,11 +303,11 @@ def bootstrap_voiceprints(
                 if dur < 30.0:
                     continue
 
-                # Candidate time offsets across the talk to find active voiced speech
-                candidate_times = [60.0, 120.0, 180.0, 240.0, 300.0, 420.0, 600.0]
+                # Candidate time offsets deeper into the talk to avoid opening introductions/bells
+                candidate_times = [180.0, 240.0, 300.0, 420.0, 600.0, 120.0, 60.0]
                 best_waveform = None
                 best_energy = -1.0
-                best_start_t = 60.0
+                best_start_t = 180.0
 
                 for cand_t in candidate_times:
                     if cand_t + sample_duration_sec > dur - 5.0:
@@ -258,7 +321,7 @@ def bootstrap_voiceprints(
                     max_energy = float(torch.max(torch.abs(seg_wave)).item())
 
                     # If this segment has strong speech energy, accept immediately
-                    if mean_energy >= 0.010 and max_energy >= 0.06:
+                    if mean_energy >= 0.012 and max_energy >= 0.06:
                         best_waveform = seg_wave
                         best_start_t = cand_t
                         best_energy = mean_energy
@@ -292,8 +355,96 @@ def bootstrap_voiceprints(
             except Exception as e:
                 logger.debug(f"Error processing {audio_f.name}: {e}")
 
-    logger.info(f"[✓] Voiceprint bootstrap complete: {total_added} embeddings added to database.")
-    return total_added
+    pruned = sanitize_and_prune_voiceprints(db_path=db_path)
+    logger.info(f"[✓] Voiceprint bootstrap complete: {total_added} added, {pruned} outliers/duplicates pruned.")
+    return total_added - pruned
+
+
+def sanitize_and_prune_voiceprints(
+    db_path: Path | str = VOICEPRINTS_DB_PATH,
+    min_peer_similarity: float = 0.32,
+) -> int:
+    """
+    Sanitizes `voiceprints.db` in place:
+    1. Normalizes legacy teacher slugs (e.g. `ajahn_sujato` -> `bhante_sujato`).
+    2. Corrects `era` tags on backfilled recordings using `extract_recording_year(source_file)`.
+    3. Removes exact duplicate `(teacher_slug, source_file, start_sec)` rows.
+    4. Removes contaminated/outlier voiceprints in clusters (n >= 3) whose mean cosine
+       similarity to their teacher peers falls below `min_peer_similarity` while the
+       cluster medoid is well-formed (>= 0.45).
+    Returns the number of pruned/deduplicated rows.
+    """
+    db_p = Path(db_path)
+    if not db_p.exists():
+        return 0
+
+    removed_ids = set()
+    with sqlite3.connect(str(db_p)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM voiceprints ORDER BY id ASC;").fetchall()
+
+        # 1. Normalize slugs, fix eras from source_file recording year, and find exact duplicates
+        seen_keys = set()
+        for r in rows:
+            rid = r["id"]
+            slug = r["teacher_slug"]
+            display = r["display_name"]
+            if slug in LEGACY_SLUG_MAP:
+                slug, display = LEGACY_SLUG_MAP[slug]
+                conn.execute(
+                    "UPDATE voiceprints SET teacher_slug = ?, display_name = ? WHERE id = ?;",
+                    (slug, display, rid),
+                )
+
+            src = r["source_file"]
+            rec_year = extract_recording_year(src, fallback_year=0)
+            if rec_year >= 1990:
+                true_era = determine_era(rec_year)
+                if true_era != r["era"]:
+                    conn.execute("UPDATE voiceprints SET era = ? WHERE id = ?;", (true_era, rid))
+
+            dedup_key = (slug, src, round(float(r["start_sec"]), 1))
+            if dedup_key in seen_keys:
+                removed_ids.add(rid)
+            else:
+                seen_keys.add(dedup_key)
+
+        if removed_ids:
+            conn.executemany("DELETE FROM voiceprints WHERE id = ?;", [(i,) for i in removed_ids])
+
+        # 2. Intra-teacher medoid outlier pruning
+        rows = conn.execute("SELECT * FROM voiceprints ORDER BY id ASC;").fetchall()
+        by_teacher: Dict[str, List[Tuple[int, np.ndarray]]] = {}
+        for r in rows:
+            vec = np.frombuffer(r["embedding"], dtype=np.float32)
+            norm = np.linalg.norm(vec)
+            v_normed = vec / norm if norm > 0 else vec
+            by_teacher.setdefault(r["teacher_slug"], []).append((r["id"], v_normed))
+
+        outlier_ids = []
+        for slug, items in by_teacher.items():
+            if len(items) < 3:
+                continue
+            vecs = np.array([x[1] for x in items])
+            sim_mat = vecs @ vecs.T
+            n = len(items)
+            peer_means = [
+                float(np.mean([sim_mat[i, j] for j in range(n) if i != j]))
+                for i in range(n)
+            ]
+            max_peer_mean = max(peer_means)
+            # Only prune if the teacher has a coherent core (best sample >= 0.35 peer sim)
+            if max_peer_mean < 0.30:
+                continue
+            for i, (rid, _) in enumerate(items):
+                if peer_means[i] < min_peer_similarity and (max_peer_mean - peer_means[i]) >= 0.14:
+                    outlier_ids.append(rid)
+
+        if outlier_ids:
+            conn.executemany("DELETE FROM voiceprints WHERE id = ?;", [(i,) for i in outlier_ids])
+        conn.commit()
+
+    return len(removed_ids) + len(outlier_ids)
 
 
 def inspect_unknown_audio(

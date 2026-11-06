@@ -291,6 +291,36 @@ def determine_era(year: int) -> str:
         return ERA_HIGH_DEF
 
 
+def extract_recording_year(text: str, fallback_year: int = 2010) -> int:
+    """
+    Extracts the true recording year from an episode title or filename for
+    acoustic era determination, handling backfilled talks whose upload date
+    prefix differs from the trailing recording date (e.g. `_14_12_2003.mp3`).
+    """
+    # 1. Trailing numeric date DD_MM_YYYY or DD-MM-YYYY (e.g. _14_12_2003, _28_03_2004)
+    m_num = re.search(r"(?:^|[_\-\s])(0?[1-9]|[12]\d|3[01])[_\-](0?[1-9]|1[0-2])[_\-](19\d\d|20\d\d)(?:$|[_\-\s\.])", text)
+    if m_num:
+        return int(m_num.group(3))
+
+    # 2. Spelled-out month + year (e.g. 15_august_2001, november_2011, 10_nov_2024)
+    for m_word in re.finditer(r"(?:^|[_\-\s])([A-Za-z]+)[_\-\s]+(19\d\d|20\d\d)(?:$|[_\-\s\.])", text):
+        if m_word.group(1).lower() in MONTH_MAP:
+            return int(m_word.group(2))
+
+    # 3. Retreat / series year inside filename after leading YYYY-MM-DD_ upload prefix
+    stripped = re.sub(r"^(19\d\d|20\d\d)[_\-]\d{2}[_\-]\d{2}[_\-]+", "", text)
+    m_inner_yr = re.search(r"(?:^|[_\-\s])(199\d|20[012]\d)(?:$|[_\-\s\.])", stripped)
+    if m_inner_yr:
+        return int(m_inner_yr.group(1))
+
+    # 4. Leading year prefix
+    m_lead = re.match(r"^(199\d|20[012]\d)(?:$|[_\-\s\.])", text)
+    if m_lead:
+        return int(m_lead.group(1))
+
+    return fallback_year
+
+
 def identify_all_teachers(text: str) -> List[Tuple[str, str]]:
     """Identifies all matching teachers from text metadata like episode title or filename."""
     lower_text = text.lower().replace("_", " ")
