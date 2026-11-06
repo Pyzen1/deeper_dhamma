@@ -22,6 +22,25 @@ class SpeakerAligner:
         self.db = voiceprint_db
         self.encoder = encoder
 
+    @staticmethod
+    def _reconstruct_text_from_words(words: List[Dict]) -> str:
+        """
+        Reconstructs text from word tokens preserving leading spaces and punctuation adhesion
+        without injecting spurious spaces before periods, hyphens, or commas.
+        """
+        parts = []
+        for w in words:
+            raw = w.get("word", "")
+            if not parts:
+                parts.append(raw.lstrip())
+            elif raw.startswith(" ") or raw.startswith((".", ",", "!", "?", ":", ";", "-", "’", "'")):
+                parts.append(raw)
+            elif parts[-1].endswith(" "):
+                parts.append(raw)
+            else:
+                parts.append(" " + raw)
+        return "".join(parts).strip()
+
     def refine_turns_by_word_boundaries(
         self,
         audio_file: Path | str,
@@ -95,7 +114,7 @@ class SpeakerAligner:
                     is_change = both_known_different or strong_acoustic_break
 
                     if is_change:
-                        sub_text = " ".join(w["word"].strip() for w in left_words)
+                        sub_text = self._reconstruct_text_from_words(left_words)
                         refined_segments.append({
                             "start": left_st,
                             "end": left_en,
@@ -108,17 +127,21 @@ class SpeakerAligner:
                 except Exception as e:
                     logger.debug(f"Bilateral pause refinement skip at t={left_en}: {e}")
 
-            rem_words = words[turn_start_idx:]
-            if rem_words:
-                sub_text = " ".join(w["word"].strip() for w in rem_words)
-                refined_segments.append({
-                    "start": rem_words[0]["start"],
-                    "end": rem_words[-1]["end"],
-                    "text": sub_text,
-                    "words": rem_words,
-                    "avg_logprob": seg.get("avg_logprob", 0.0),
-                    "no_speech_prob": seg.get("no_speech_prob", 0.0),
-                })
+            if turn_start_idx == 0:
+                # Segment was never split: preserve pristine original text from Whisper
+                refined_segments.append(seg)
+            else:
+                rem_words = words[turn_start_idx:]
+                if rem_words:
+                    sub_text = self._reconstruct_text_from_words(rem_words)
+                    refined_segments.append({
+                        "start": rem_words[0]["start"],
+                        "end": rem_words[-1]["end"],
+                        "text": sub_text,
+                        "words": rem_words,
+                        "avg_logprob": seg.get("avg_logprob", 0.0),
+                        "no_speech_prob": seg.get("no_speech_prob", 0.0),
+                    })
 
         return refined_segments
 

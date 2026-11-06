@@ -293,6 +293,71 @@
     return name.slice(0, 2).toUpperCase();
   }
 
+  /**
+   * Splits a text string into sentences without dropping any characters or words.
+   * Mirrors WordSync.splitSentences to prevent regex backtracking and text loss.
+   */
+  function splitSentences(text) {
+    if (!text) return [];
+    if (window.WordSync && typeof window.WordSync.splitSentences === 'function') {
+      return window.WordSync.splitSentences(text);
+    }
+    const trimmed = text.trim();
+    if (!trimmed) return [];
+
+    const sents = [];
+    let start = 0;
+    let i = 0;
+    const n = trimmed.length;
+
+    while (i < n) {
+      const ch = trimmed[i];
+
+      // Check for sentence-ending punctuation marks
+      if (ch === '.' || ch === '!' || ch === '?') {
+        let j = i + 1;
+
+        // Consume attached closing quotes and brackets (e.g. '"Let it go."' or '(notes).')
+        while (
+          j < n &&
+          (trimmed[j] === '"' ||
+            trimmed[j] === "'" ||
+            trimmed[j] === '”' ||
+            trimmed[j] === '’' ||
+            trimmed[j] === ')' ||
+            trimmed[j] === ']')
+        ) {
+          j++;
+        }
+
+        // True sentence boundaries occur at EOF or when immediately followed by whitespace.
+        // Internal decimals (e.g. '6.15', '5.30', '3.14', '6 .15') are preserved without splitting.
+        if (j >= n || /\s/.test(trimmed[j])) {
+          const sent = trimmed.slice(start, j).trim();
+          if (sent) {
+            sents.push(sent);
+          }
+
+          // Advance past trailing inter-sentence whitespace
+          while (j < n && /\s/.test(trimmed[j])) {
+            j++;
+          }
+          start = j;
+          i = j - 1;
+        }
+      }
+      i++;
+    }
+
+    // Capture any remaining tail segment
+    const rem = trimmed.slice(start).trim();
+    if (rem) {
+      sents.push(rem);
+    }
+
+    return sents.length > 0 ? sents : [trimmed];
+  }
+
   function extractTeachers(item) {
     if (!item) return [{ name: 'BSWA Monastic', color: '#f59e0b', slug: 'bswa_monastic' }];
 
@@ -2096,7 +2161,7 @@
         .map(p => p.trim())
         .filter(p => p.length > 0);
     } else {
-      const rawSentences = rawText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [rawText];
+      const rawSentences = splitSentences(rawText);
       let currentChunk = [];
       let wordCount = 0;
 
@@ -2124,7 +2189,7 @@
     let sentCursor = 0;
 
     paragraphs.forEach(pText => {
-      const sents = pText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [pText];
+      const sents = splitSentences(pText);
       sents.forEach(sText => {
         const tokens = sText.split(/(\s+)/);
         const nonWsTokens = [];
@@ -4421,7 +4486,7 @@
     }
 
     // Split on sentence boundaries (period/question/exclamation followed by space or end)
-    const rawSentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [trimmed];
+    const rawSentences = splitSentences(trimmed);
     const paragraphs = [];
     let currentChunk = [];
     let wordCount = 0;

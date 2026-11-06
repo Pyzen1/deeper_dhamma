@@ -588,3 +588,152 @@ def test_firefox_raw_cdn_fallback_and_native_seek_regression():
     assert data["clearedIdx"] == -1
     assert 6438.0 <= data["totalDurSec"] <= 6440.0
 
+
+def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
+    """
+    Verifies that WordSync.splitSentences and formatTurnParagraphs do not drop leading
+    turn text containing numbers/decimals (e.g. '6.15', '5.30', or '6 .15') and that word
+    highlighting remains 100% synchronized for episode pb10641521 Turn 2.
+    """
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    bin_path = WORDS_STATIC_DIR / "pb10641521.bin"
+    word_sync_js_path = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "word_sync.js"
+
+    if not (chrome_path.exists() and bin_path.exists() and TRANSCRIPTS_DB_PATH.exists()):
+        pytest.skip("Chrome or pb10641521 assets not present")
+
+    bin_bytes = bin_path.read_bytes()
+    word_sync_js = word_sync_js_path.read_bytes()
+
+    with sqlite3.connect(TRANSCRIPTS_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM speech_segments WHERE episode_id = 'pb10641521' ORDER BY turn_index"
+        ).fetchall()
+        segments = [dict(r) for r in rows]
+
+    report = {}
+
+    class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
+        daemon_threads = True
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            report["data"] = json.loads(body.decode("utf-8"))
+            self.send_response(200)
+            self.end_headers()
+
+        def do_GET(self):
+            if self.path == "/word_sync.js":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+                self.send_header("Content-Length", str(len(word_sync_js)))
+                self.end_headers()
+                self.wfile.write(word_sync_js)
+                return
+
+            if self.path == "/words/pb10641521.bin":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(bin_bytes)))
+                self.end_headers()
+                self.wfile.write(bin_bytes)
+                return
+
+            html = f"""<!DOCTYPE html><html><body>
+            <div id="container"></div>
+            <script src="/word_sync.js"></script>
+            <script>
+            (async () => {{
+                const segs = {json.dumps(segments)};
+                await WordSync.ensureEpisodeLoaded('pb10641521');
+                WordSync.indexWordsByTurn(segs);
+
+                // Test 1: splitSentences preserves decimals and quotes
+                const testText = 'Here from 6.15 onwards and 5.30 to 6.15. "Let it go." That is peace.';
+                const testSents = WordSync.splitSentences(testText);
+
+                // Test 2: Turn 2 formatTurnParagraphs preserves all 212 words
+                const turn2Seg = segs.find(s => Number(s.turn_index) === 2);
+                const html = WordSync.formatTurnParagraphs(turn2Seg.text, 2);
+                const container = document.getElementById('container');
+                container.innerHTML = html;
+
+                const wordSpans = Array.from(container.querySelectorAll('.transcript-word'));
+                const firstSpan = wordSpans[0];
+                const technicallySpan = wordSpans.find(sp => sp.textContent.trim().toLowerCase() === 'technically');
+
+                // Test 3: Live highlight synchronization
+                WordSync.update(72.7); // At 72.7s ("here")
+                const activeAt72_7 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+
+                WordSync.update(79.8); // At 79.8s ("technically")
+                const activeAt79_8 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+
+                await fetch('/report', {{
+                    method: 'POST',
+                    body: JSON.stringify({{
+                        testSents,
+                        totalWordSpans: wordSpans.length,
+                        firstWordText: firstSpan ? firstSpan.textContent.trim() : null,
+                        firstWordStart: firstSpan ? firstSpan.dataset.start : null,
+                        technicallyStart: technicallySpan ? technicallySpan.dataset.start : null,
+                        activeAt72_7,
+                        activeAt79_8,
+                    }})
+                }});
+            }})();
+            </script></body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+
+    server = ThreadedHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            proc = subprocess.Popen([
+                str(chrome_path),
+                "--headless=new",
+                f"--user-data-dir={tmp}",
+                f"http://127.0.0.1:{port}/",
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            t0 = time.time()
+            while time.time() - t0 < 15:
+                if "data" in report:
+                    break
+                time.sleep(0.2)
+            proc.kill()
+    finally:
+        server.shutdown()
+
+    assert "data" in report, "Headless Chrome regression runner did not report back"
+    data = report["data"]
+
+    # Verify splitSentences preserves decimals and quotes
+    assert data["testSents"] == [
+        "Here from 6.15 onwards and 5.30 to 6.15.",
+        '"Let it go."',
+        "That is peace.",
+    ]
+
+    # Verify pb10641521 Turn 2 retains all 212 word spans, starting with "here"
+    assert data["totalWordSpans"] == 212
+    assert data["firstWordText"].lower() == "here"
+    assert float(data["firstWordStart"]) == pytest.approx(72.56, abs=0.05)
+    assert float(data["technicallyStart"]) == pytest.approx(79.60, abs=0.1)
+
+    # Verify highlight accuracy
+    assert data["activeAt72_7"].lower() == "here"
+    assert data["activeAt79_8"].lower() == "technically"
+
+

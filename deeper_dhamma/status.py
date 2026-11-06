@@ -606,7 +606,8 @@ def print_completed_episodes(data: Dict[str, Any], limit: int = 25) -> None:
     if len(episodes) > limit:
         print(f"\n  ... and {len(episodes) - limit} more transcribed episodes.")
 
-    print(f"\n  -> Export any episode: python main.py export --id <episode_id> --format md")
+    print(f"\n  -> Export any episode:       python main.py export --id <episode_id> --format md")
+    print(f"  -> Retranscribe an episode:  python main.py transcribe --id <episode_id>")
     print("=" * 80)
 
 
@@ -643,5 +644,6 @@ def print_errors(data: Dict[str, Any], limit: int = 25) -> None:
 
     print("\n  -> To retry failed operations: python main.py sync --retry-errors")
     print("  -> Or for transcription:      python main.py transcribe --all --retry-errors")
+    print("  -> Retranscribe by Podbean ID: python main.py transcribe --id pbXXXX")
     print("=" * 80)
 

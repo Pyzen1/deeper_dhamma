@@ -13,11 +13,12 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - Float16 on NVIDIA CUDA (RTX 5070 Ti) running **sequential transcription (`batch_size=1` by default)** with tuned Silero VAD to guarantee 100% speech capture with zero dropped words or boundary truncation.
   - In-memory waveform caching for zero-disk acoustic profiling and speaker attribution.
   - Teacher-specific prompt steering with dynamic Pali lexicon conditioning.
+  - Live interactive CLI progress bar (`TranscriptionProgressBar`) reporting real-time factor (RTF), percentage, elapsed/total audio time, ETA, turn count, and recognized speech snippets.
 - **Era-Tagged Voiceprint Gallery & Continuous Diarization (`speechbrain/spkrec-ecapa-voxceleb`)**:
   - 192-d ECAPA-TDNN embeddings cataloging monastics across eras (`1997_2003`, `2004_2014`, `2015_2026`) with historical recording year detection (`extract_recording_year`) to handle backfilled audio uploads.
   - Outlier-resistant composite voiceprint scoring (`_compute_teacher_composite` / `score_speaker`) with gallery cluster pruning to eliminate single-sample acoustic spikes.
   - Candidate-aware hysteresis and isolated turn smoothing (`_smooth_isolated_turns`) to eliminate false third-party teacher flips on solo talks while preserving genuine secondary speakers (such as archival tape narrators and audience Q&A).
-  - Word-level conversational pause change-point detection: splits multi-speaker exchanges grouped by ASR at natural speech pauses ($\ge 0.45\text{s}$).
+  - Word-level conversational pause change-point detection: splits multi-speaker exchanges grouped by ASR at natural speech pauses ($\ge 0.45\text{s}$) while preserving pristine Whisper text on un-split turns and adhering word punctuation tokens.
 - **Buddhist Reference Terminology Editor & Canonical Authority Documents**:
   - 2,447 canonical Pali entries & multi-word phrases covering doctrinal concepts, Tipiṭaka text titles, and Vinaya monastic law across Theravada traditions.
   - Non-destructive context-aware phrase disambiguation (using non-consuming lookaheads for multi-word misrecognitions like `vassa`, `jhana`, `nimitta`, `yoniso manasikara`, `noble eightfold path`, and `patimokkha`).
@@ -39,6 +40,7 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - Full browser Back and Forward history support (`popstate` SPA history routing) without interrupting audio streaming.
   - Universal shareable URLs for text messages and email: supports hashes (`/#talk/pb28113880`), query parameters (`/?talk=pb28113880`), and clean server paths (`/talk/pb28113880`).
   - Precision timestamp links (`?t=125` or `?t=2m05s` or `?t=02:05`): automatically scrolls to the turn, highlights the speech segment, and starts playback at that exact second.
+  - Deterministic zero-loss sentence scanner (`splitSentences`) in WordSync: preserves internal decimals (`6.15`, `5.30`, `3.14`), spaced dots (`6 .15`), quotes, and abbreviations without regex backtracking or dropping DOM tokens, guaranteeing 100% word-highlight synchronization.
   - 1-click "Share Talk" and "Share Moment" (🔗) copy-to-clipboard buttons with toast feedback.
 - **Lossless On-Demand Format Generation**:
   - Generates Markdown (`.md`), WebVTT (`.vtt`), or JSON (`.json`) on the fly directly from SQLite.

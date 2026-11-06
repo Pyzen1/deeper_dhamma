@@ -138,3 +138,158 @@ def test_cli_status_live_summary_execution():
         output = mock_out.getvalue()
         assert "Deeper Dhamma" in output or "Catalog" in output or "Archive" in output
 
+
+def test_cli_transcribe_subcommand_parsing_single_id():
+    """Verifies transcribe subcommand argument routing with --id."""
+    with patch("deeper_dhamma.cli.cmd_transcribe") as mock_cmd:
+        main(["transcribe", "--id", "pb27940021", "--max-duration", "60", "--batch-size", "1"])
+        mock_cmd.assert_called_once()
+        args = mock_cmd.call_args[0][0]
+        assert args.id == ["pb27940021"]
+        assert args.max_duration == 60.0
+        assert args.batch_size == 1
+
+
+def test_cli_transcribe_subcommand_parsing_short_flag():
+    """Verifies transcribe subcommand argument routing with short flag -i."""
+    with patch("deeper_dhamma.cli.cmd_transcribe") as mock_cmd:
+        main(["transcribe", "-i", "pb27940021"])
+        mock_cmd.assert_called_once()
+        args = mock_cmd.call_args[0][0]
+        assert args.id == ["pb27940021"]
+
+
+def test_cli_transcribe_subcommand_parsing_multiple_ids():
+    """Verifies transcribe subcommand parsing with multiple Podbean IDs."""
+    with patch("deeper_dhamma.cli.cmd_transcribe") as mock_cmd:
+        main(["transcribe", "--id", "pb27940021", "pb28113880"])
+        mock_cmd.assert_called_once()
+        args = mock_cmd.call_args[0][0]
+        assert args.id == ["pb27940021", "pb28113880"]
+
+
+def test_resolve_audio_path_valid_podbean_id():
+    """Verifies that resolve_audio_path resolves valid Podbean IDs with or without 'pb' prefix."""
+    from deeper_dhamma.storage import TranscriptDatabase
+    tdb = TranscriptDatabase()
+
+    path_pb, err1 = tdb.resolve_audio_path("pb27940021")
+    assert err1 is None
+    assert path_pb is not None
+    assert path_pb.exists()
+    assert path_pb.suffix == ".mp3"
+
+    path_num, err2 = tdb.resolve_audio_path("27940021")
+    assert err2 is None
+    assert path_num is not None
+    assert path_num == path_pb
+
+
+def test_resolve_audio_path_missing_and_undownloaded():
+    """Verifies helpful error reporting for undownloaded catalog talks and non-existent IDs."""
+    from deeper_dhamma.storage import TranscriptDatabase
+    tdb = TranscriptDatabase()
+
+    # Talk in catalog.json but not downloaded
+    path_undownloaded, err_undownloaded = tdb.resolve_audio_path("pb28002457")
+    assert path_undownloaded is None
+    assert "not found in local archive" in err_undownloaded
+    assert "sync" in err_undownloaded
+
+    # Completely non-existent ID
+    path_none, err_none = tdb.resolve_audio_path("pb99999999")
+    assert path_none is None
+    assert "not found in catalog or archive" in err_none
+
+
+def test_cmd_transcribe_execution_with_id_retranscribes():
+    """Verifies that cmd_transcribe processes and retranscribes a targeted Podbean ID."""
+    from unittest.mock import MagicMock
+    from deeper_dhamma.cli import cmd_transcribe
+
+    mock_args = MagicMock()
+    mock_args.id = ["pb27940021"]
+    mock_args.file = None
+    mock_args.year = None
+    mock_args.series = None
+    mock_args.all = False
+    mock_args.archive_dir = "archive"
+    mock_args.device = "cpu"
+    mock_args.model_size = "large-v3"
+    mock_args.batch_size = 1
+    mock_args.force = False
+    mock_args.limit = None
+    mock_args.max_duration = 30.0
+    mock_args.retry_errors = False
+
+    mock_pipeline = MagicMock()
+    mock_pipeline.process_file.return_value = {
+        "status": "success",
+        "episode_id": "pb27940021",
+        "elapsed_sec": 1.2,
+        "turns_count": 5,
+    }
+
+    with patch("deeper_dhamma.pipeline.TranscriptionPipeline", return_value=mock_pipeline), \
+         patch("deeper_dhamma.export_web.export_static_site"):
+        cmd_transcribe(mock_args)
+        mock_pipeline.process_file.assert_called_once()
+        call_args = mock_pipeline.process_file.call_args[1]
+        assert "2026-04-22_2026_april_9_day_retreat_02_19_ajahn_brahm.mp3" in str(call_args["audio_path"])
+
+
+def test_cmd_transcribe_invalid_id_exits_with_error():
+    """Verifies that cmd_transcribe prints error and exits with code 1 when given a non-existent ID."""
+    from unittest.mock import MagicMock
+    from deeper_dhamma.cli import cmd_transcribe
+
+    mock_args = MagicMock()
+    mock_args.id = ["pb99999999"]
+    mock_args.file = None
+    mock_args.year = None
+    mock_args.series = None
+    mock_args.all = False
+    mock_args.archive_dir = "archive"
+
+    with patch("sys.stdout", new_callable=StringIO) as mock_out:
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_transcribe(mock_args)
+        assert exc_info.value.code == 1
+        output = mock_out.getvalue()
+        assert "not found in catalog or archive" in output
+
+
+def test_cmd_transcribe_keyboard_interrupt_exits_130():
+    """Verifies that Ctrl+C (KeyboardInterrupt) exits cleanly with code 130 and helpful notice."""
+    from unittest.mock import MagicMock
+    from deeper_dhamma.cli import cmd_transcribe
+
+    mock_args = MagicMock()
+    mock_args.id = ["pb27940021"]
+    mock_args.file = None
+    mock_args.year = None
+    mock_args.series = None
+    mock_args.all = False
+    mock_args.archive_dir = "archive"
+    mock_args.device = "cpu"
+    mock_args.model_size = "large-v3"
+    mock_args.batch_size = 1
+    mock_args.force = False
+    mock_args.limit = None
+    mock_args.max_duration = None
+    mock_args.retry_errors = False
+    mock_args.no_progress = True
+
+    mock_pipeline = MagicMock()
+    mock_pipeline.process_file.side_effect = KeyboardInterrupt()
+
+    with patch("deeper_dhamma.pipeline.TranscriptionPipeline", return_value=mock_pipeline), \
+         patch("sys.stdout", new_callable=StringIO) as mock_out:
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_transcribe(mock_args)
+        assert exc_info.value.code == 130
+        output = mock_out.getvalue()
+        assert "Transcription cancelled by user (Ctrl+C)" in output
+        assert "No partial data was committed" in output
+
+

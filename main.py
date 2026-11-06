@@ -5,7 +5,7 @@ Main entry point for BSWA Deeper Dhamma Application.
 Usage:
   python main.py sync        # Syncs podcast feed & downloads audio talks
   python main.py voiceprints # Manages reference speaker voiceprint embeddings
-  python main.py transcribe  # Transcribes audio files & commits to SQLite
+  python main.py transcribe  # Transcribes or retranscribes audio talks (by --id, --year, --series, --all)
   python main.py search      # Instant full-text search across transcripts
   python main.py export      # Exports Markdown, WebVTT, or JSON on demand
   python main.py lexicon     # Queries Buddhism Lexicon DB (buddhism_lexicon.db)

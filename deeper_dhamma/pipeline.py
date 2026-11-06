@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Union
 
 from deeper_dhamma.config import (
     CATALOG_PATH,
@@ -68,6 +68,8 @@ class TranscriptionPipeline:
                 for ep in cat_list:
                     _, _, fname = parse_episode_metadata(ep.get("title", ""), ep.get("upload_date", ""))
                     self.catalog_map[fname] = ep
+                    if ep.get("id"):
+                        self.catalog_map[ep["id"]] = ep
                 logger.info(f"[+] Loaded {len(self.catalog_map)} catalog metadata entries for automated stream linking.")
             except Exception as e:
                 logger.warning(f"Could not parse catalog file: {e}")
@@ -81,6 +83,8 @@ class TranscriptionPipeline:
         max_duration_sec: Optional[float] = None,
         retry_errors: bool = False,
         export_words_blob: bool = True,
+        show_progress: bool = True,
+        progress_callback: Optional[Callable[[float, float, str], None]] = None,
     ) -> Dict:
         audio_path = Path(audio_path)
         t0 = time.time()
@@ -102,6 +106,10 @@ class TranscriptionPipeline:
 
         if not catalog_entry:
             catalog_entry = self.catalog_map.get(audio_path.stem)
+            if not catalog_entry:
+                resolved_uid = self.db.pipeline_db.resolve_episode_uid(audio_path.stem)
+                if resolved_uid:
+                    catalog_entry = self.catalog_map.get(resolved_uid)
 
         if catalog_entry:
             ep_title = html.unescape(catalog_entry.get("title", audio_path.stem))
@@ -206,7 +214,13 @@ class TranscriptionPipeline:
             talk_prompt = self.lexicon_db.get_prompt_steering_terms(teacher_slugs=active_slugs, limit=30)
             logger.info(f"    Transcribing with faster-whisper (sequential, float16, Silero VAD, {len(active_slugs)} teacher profile(s))...")
             t_asr0 = time.time()
-            asr_segments = self.transcriber.transcribe(audio_np, prompt=talk_prompt, hotwords=None)
+            asr_segments = self.transcriber.transcribe(
+                audio_np,
+                prompt=talk_prompt,
+                hotwords=None,
+                show_progress=show_progress,
+                progress_callback=progress_callback,
+            )
             logger.info(f"    ASR complete in {time.time() - t_asr0:.2f}s ({len(asr_segments)} segments).")
 
             # 4. Speaker Alignment & Identification (in-memory slice attribution)

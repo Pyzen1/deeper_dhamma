@@ -828,6 +828,86 @@
     },
 
     /**
+     * Splits a text string into sentences without dropping any characters or words.
+     *
+     * Why a linear scanner is used instead of regular expressions:
+     * Fragile regex patterns like `/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g` fail when encountering
+     * internal punctuation such as decimal numbers ('6.15', '5.30', '3.14'), spaced decimals ('6 .15'),
+     * sutta citations ('46 .23'), or abbreviations ('e.g.'). When a match fails mid-string, RegExp.match()
+     * skips and discards all leading characters until the next match, permanently dropping text from the DOM
+     * and causing severe downstream word-highlight desynchronization.
+     *
+     * This deterministic scanner guarantees zero dropped characters:
+     * 1. Scans character-by-character to locate terminal punctuation ('.', '!', '?').
+     * 2. Allows closing quotes and brackets to attach to the sentence boundary (e.g. `"Let it go."`).
+     * 3. Verifies that punctuation is followed by whitespace or EOF before treating it as a true boundary,
+     *    protecting internal decimal points and abbreviations from premature splitting.
+     * 4. Slices sentences cleanly from `start` to boundary `j`, consumes subsequent whitespace, and resets `start`.
+     * 5. Appends any remaining trailing characters as the final sentence.
+     */
+    splitSentences: function (text) {
+      if (!text) return [];
+      const trimmed = text.trim();
+      if (!trimmed) return [];
+
+      const sents = [];
+      let start = 0;
+      let i = 0;
+      const n = trimmed.length;
+
+      while (i < n) {
+        const ch = trimmed[i];
+
+        // Check for potential sentence-ending punctuation marks
+        if (ch === '.' || ch === '!' || ch === '?') {
+          let j = i + 1;
+
+          // Consume any immediately following closing quotes or brackets attached to the sentence
+          // (e.g., 'said: "Let it go."' or '(retreat notes).')
+          while (
+            j < n &&
+            (trimmed[j] === '"' ||
+              trimmed[j] === "'" ||
+              trimmed[j] === '”' ||
+              trimmed[j] === '’' ||
+              trimmed[j] === ')' ||
+              trimmed[j] === ']')
+          ) {
+            j++;
+          }
+
+          // A genuine sentence boundary occurs only at the end of the string or when immediately
+          // followed by whitespace. If followed by non-whitespace (e.g. '6.15', '6 .15', '46.23', 'pi=3.14'),
+          // it is an internal decimal or mid-token punctuation and must NOT trigger a sentence split.
+          if (j >= n || /\s/.test(trimmed[j])) {
+            const sent = trimmed.slice(start, j).trim();
+            if (sent) {
+              sents.push(sent);
+            }
+
+            // Advance past trailing inter-sentence whitespace to mark the start of the next sentence
+            while (j < n && /\s/.test(trimmed[j])) {
+              j++;
+            }
+            start = j;
+
+            // Synchronize the outer loop cursor with the scanned boundary
+            i = j - 1;
+          }
+        }
+        i++;
+      }
+
+      // Capture any remaining tail segment (e.g., final sentence without terminal punctuation)
+      const rem = trimmed.slice(start).trim();
+      if (rem) {
+        sents.push(rem);
+      }
+
+      return sents.length > 0 ? sents : [trimmed];
+    },
+
+    /**
      * Formats turn text into paragraphs preserving 100% of the original text structure,
      * wrapping non-whitespace tokens in inline word spans only when exact word timings are present.
      */
@@ -844,7 +924,7 @@
           .map(p => p.trim())
           .filter(p => p.length > 0);
       } else {
-        const rawSentences = trimmed.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [trimmed];
+        const rawSentences = this.splitSentences(trimmed);
         let currentChunk = [];
         let wordCount = 0;
 
@@ -876,7 +956,7 @@
       // If no exact word timings exist for this talk, render clean original paragraphs with sentence spans
       if (turnWords.length === 0) {
         return paragraphs.map(pText => {
-          const sents = pText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [pText];
+          const sents = this.splitSentences(pText);
           const wrappedSents = sents.map(sent => {
             const sIdx = sentCursorInTurn++;
             const tokens = sent.split(/(\s+)/);
@@ -909,7 +989,7 @@
       // If exact word timings ARE available, wrap words and multi-word canonical phrases inline
       let wordCursorInTurn = 0;
       return paragraphs.map(pText => {
-        const sents = pText.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [pText];
+        const sents = this.splitSentences(pText);
         const wrappedSents = sents.map(sent => {
           const sIdx = sentCursorInTurn++;
           const tokens = sent.split(/(\s+)/);

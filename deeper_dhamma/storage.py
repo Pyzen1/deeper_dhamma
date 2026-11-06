@@ -126,14 +126,22 @@ class PipelineStateDatabase:
                     )
 
     def get_filepath(self, identifier: str) -> Optional[str]:
+        raw = str(identifier).strip()
+        candidates = [raw]
+        if not raw.startswith("pb"):
+            candidates.append(f"pb{raw}")
+        elif raw.startswith("pb") and raw[2:].isdigit():
+            candidates.append(raw[2:])
+
+        placeholders = ", ".join(["?"] * len(candidates))
         with self._get_connection() as conn:
             row = conn.execute(
-                """
+                f"""
                 SELECT filepath FROM episode_states
-                WHERE episode_uid = ? OR filename_stem = ?
+                WHERE episode_uid IN ({placeholders}) OR filename_stem IN ({placeholders})
                 LIMIT 1;
                 """,
-                (identifier, identifier),
+                candidates + candidates,
             ).fetchone()
             return row["filepath"] if row and row["filepath"] else None
 
@@ -984,6 +992,91 @@ class TranscriptDatabase:
                 (episode_id, resolved_uid),
             )
             return cur.fetchone() is not None
+
+    def resolve_audio_path(
+        self,
+        identifier: str,
+        archive_dir: Optional[Union[Path, str]] = None,
+    ) -> Tuple[Optional[Path], Optional[str]]:
+        """
+        Resolves an episode identifier (Podbean ID like 'pbXXXX', filename stem, or raw path)
+        to a verified local audio Path in the archive.
+
+        Returns (path, None) on success, or (None, error_message) on failure.
+        """
+        from deeper_dhamma.catalog import parse_episode_metadata
+        from deeper_dhamma.config import CATALOG_PATH
+
+        raw = str(identifier).strip()
+        if not raw:
+            return None, "Episode identifier cannot be empty."
+
+        p_direct = Path(raw)
+        if p_direct.is_file() and p_direct.exists():
+            return p_direct, None
+
+        candidates = [raw]
+        if not raw.startswith("pb"):
+            candidates.append(f"pb{raw}")
+        elif raw.startswith("pb") and raw[2:].isdigit():
+            candidates.append(raw[2:])
+
+        arch_dir = Path(archive_dir) if archive_dir else ARCHIVE_DIR
+        expected_path: Optional[Path] = None
+
+        # 1. Check pipeline_db episode_states
+        for cid in candidates:
+            fp = self.pipeline_db.get_filepath(cid)
+            if fp:
+                p = Path(fp)
+                if p.is_file() and p.exists():
+                    return p, None
+                expected_path = p
+
+        # 2. Check catalog.json
+        cat_entry = None
+        if CATALOG_PATH and Path(CATALOG_PATH).exists():
+            try:
+                with open(CATALOG_PATH, "r", encoding="utf-8") as f:
+                    for entry in json.load(f):
+                        if entry.get("id") in candidates:
+                            cat_entry = entry
+                            break
+            except Exception as e:
+                logger.debug(f"Could not read catalog in resolve_audio_path: {e}")
+
+        if cat_entry:
+            ep_year, ep_series, filename = parse_episode_metadata(
+                cat_entry.get("title", ""), cat_entry.get("upload_date", "")
+            )
+            for ext in (".mp3", ".m4a"):
+                p1 = arch_dir / ep_year / ep_series / f"{filename}{ext}"
+                if p1.is_file() and p1.exists():
+                    return p1, None
+                p2 = arch_dir / ep_year / "standalone" / f"{filename}{ext}"
+                if p2.is_file() and p2.exists():
+                    return p2, None
+
+            # Check if anywhere in arch_dir matches filename
+            for ext in (".mp3", ".m4a", ".wav", ".aac"):
+                matches = list(arch_dir.rglob(f"{filename}{ext}"))
+                if matches and matches[0].is_file() and matches[0].exists():
+                    return matches[0], None
+
+            expected_file = arch_dir / ep_year / ep_series / f"{filename}.mp3"
+            return None, f"Audio file for episode '{raw}' not found in local archive ({expected_file}). Run 'python main.py sync' to download it."
+
+        # 3. Check archive for candidate substring
+        for cid in candidates:
+            matches = list(arch_dir.rglob(f"*{cid}*"))
+            for m in matches:
+                if m.is_file() and m.exists() and m.suffix.lower() in [".mp3", ".m4a", ".wav", ".aac"]:
+                    return m, None
+
+        if expected_path:
+            return None, f"Audio file for episode '{raw}' not found in local archive ({expected_path}). Run 'python main.py sync' to download it."
+
+        return None, f"Episode '{raw}' not found in catalog or archive."
 
     def get_episode(self, episode_id: str) -> Optional[Dict]:
         resolved_uid = self.pipeline_db.resolve_episode_uid(episode_id) or episode_id

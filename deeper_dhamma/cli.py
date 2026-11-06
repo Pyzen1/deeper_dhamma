@@ -142,17 +142,31 @@ def cmd_voiceprints(args):
 def cmd_transcribe(args):
     """Transcribes audio talks and indexes them into SQLite."""
     from deeper_dhamma.pipeline import TranscriptionPipeline
+    from deeper_dhamma.storage import TranscriptDatabase
 
     archive_dir = Path(args.archive_dir)
-    pipeline = TranscriptionPipeline(
-        device=args.device,
-        model_size=getattr(args, "model_size", "large-v3"),
-        batch_size=getattr(args, "batch_size", 1),
-    )
+    tdb = TranscriptDatabase()
+    target_id_flag = getattr(args, "id", None)
+    is_explicit_id = bool(target_id_flag)
+    force_run = getattr(args, "force", False) or is_explicit_id
 
     # Collect target files
     files = []
-    if args.file:
+    if is_explicit_id:
+        target_ids = []
+        raw_list = target_id_flag if isinstance(target_id_flag, list) else [target_id_flag]
+        for item in raw_list:
+            for piece in str(item).replace(",", " ").split():
+                if piece.strip():
+                    target_ids.append(piece.strip())
+
+        for tid in target_ids:
+            audio_path, err = tdb.resolve_audio_path(tid, archive_dir=archive_dir)
+            if err:
+                print(f"[-] {err}")
+                sys.exit(1)
+            files.append(audio_path)
+    elif args.file:
         p = Path(args.file)
         if not p.exists():
             print(f"[-] File not found: {args.file}")
@@ -176,10 +190,10 @@ def cmd_transcribe(args):
         print("[-] No audio files matched the filter.")
         return
 
-    # Filter already transcribed files unless --force
+    # Filter already transcribed files unless force_run
     to_process = []
     for f in files:
-        if pipeline.db.has_episode(f.stem) and not args.force:
+        if tdb.has_episode(f.stem) and not force_run:
             continue
         to_process.append(f)
 
@@ -190,7 +204,10 @@ def cmd_transcribe(args):
     print("BSWA Deeper Dhamma Transcription Pipeline")
     print("=" * 75)
     print(f"[*] Total files matched: {len(files)}")
-    print(f"[*] Pending processing: {len(to_process)} (skipping {len(files) - len(to_process)} existing)")
+    if is_explicit_id:
+        print(f"[*] Targeted episode mode: Re-transcribing {len(to_process)} specified episode(s)")
+    else:
+        print(f"[*] Pending processing: {len(to_process)} (skipping {len(files) - len(to_process)} existing)")
     if args.max_duration:
         print(f"[*] Testing mode active: duration capped at {args.max_duration:.1f}s per file.")
     print("-" * 75)
@@ -199,8 +216,15 @@ def cmd_transcribe(args):
         print("[✓] All target episodes have already been transcribed. Nothing to do.")
         return
 
+    pipeline = TranscriptionPipeline(
+        device=args.device,
+        model_size=getattr(args, "model_size", "large-v3"),
+        batch_size=getattr(args, "batch_size", 1),
+    )
+
     completed = 0
     failed = 0
+    show_progress = not getattr(args, "no_progress", False)
 
     for idx, f in enumerate(to_process, 1):
         print(f"\n[{idx}/{len(to_process)}] Processing: {f.name}")
@@ -209,12 +233,17 @@ def cmd_transcribe(args):
                 audio_path=f,
                 max_duration_sec=args.max_duration,
                 retry_errors=getattr(args, "retry_errors", False),
+                show_progress=show_progress,
             )
             if result.get("status") == "skipped":
                 print(f"    [-] Skipped by pre-flight check: {result.get('reason')}")
             else:
                 completed += 1
                 print(f"    [✓] Finished in {result['elapsed_sec']}s: {result['episode_id']} ({result['turns_count']} turns)")
+        except KeyboardInterrupt:
+            print("\n\n[!] Transcription cancelled by user (Ctrl+C). Pipeline stopped safely.")
+            print("[i] No partial data was committed. Re-running will cleanly resume or re-transcribe.")
+            sys.exit(130)
         except Exception as e:
             failed += 1
             logger.error(f"    [!] Error transcribing {f.name}: {e}")
@@ -222,6 +251,15 @@ def cmd_transcribe(args):
     print("\n" + "=" * 75)
     print(f"[✓] Batch transcription complete: {completed} successful, {failed} failed.")
     print("=" * 75)
+
+    if completed > 0:
+        try:
+            from deeper_dhamma.export_web import export_static_site
+            print("\n[*] Updating static distribution and dhamma_web.db...")
+            export_static_site(DIST_DIR)
+            print("[✓] Static web distribution updated.")
+        except Exception as e:
+            logger.debug(f"Could not auto-update static distribution: {e}")
 
 
 def cmd_search(args):
@@ -693,6 +731,7 @@ def main(argv=None):
     # 3. Transcribe
     p_trans = subparsers.add_parser("transcribe", help="Transcribe audio talks and index in SQLite")
     g_target = p_trans.add_mutually_exclusive_group(required=True)
+    g_target.add_argument("--id", "-i", nargs="+", help="Podbean episode ID(s) to transcribe (e.g. pbXXXX)")
     g_target.add_argument("--file", "-f", type=str, help="Single MP3 file to transcribe")
     g_target.add_argument("--year", "-y", type=int, help="Transcribe all talks for a given year")
     g_target.add_argument("--series", "-s", type=str, help="Transcribe all talks in a series")
@@ -706,6 +745,7 @@ def main(argv=None):
     p_trans.add_argument("--archive-dir", default=ARCHIVE_DIR, help="Audio archive directory")
     p_trans.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
     p_trans.add_argument("--retry-errors", action="store_true", help="Retry transcribing episodes with previous recorded errors")
+    p_trans.add_argument("--no-progress", action="store_true", help="Disable the live updating transcription progress bar")
     p_trans.set_defaults(func=cmd_transcribe, subparser=p_trans)
 
     # 4. Search
@@ -866,11 +906,15 @@ def main(argv=None):
         subparsers.choices[argv[0]].print_help()
         sys.exit(0)
 
-    args = parser.parse_args(argv)
-    if hasattr(args, "func"):
-        args.func(args)
-    else:
-        parser.print_help()
+    try:
+        args = parser.parse_args(argv)
+        if hasattr(args, "func"):
+            args.func(args)
+        else:
+            parser.print_help()
+    except KeyboardInterrupt:
+        print("\n\n[!] Operation cancelled by user (Ctrl+C).")
+        sys.exit(130)
 
 
 if __name__ == "__main__":
