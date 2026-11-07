@@ -118,8 +118,9 @@ python main.py web -r --port 8080       # Custom port or output directory
 python main.py serve --run              # Serve static bundle on http://127.0.0.1:34266
 python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
 
-# 13. Run Full Verification & Unit Test Suite (132 tests, 100% passing)
+# 13. Run Full Verification & Unit Test Suite (151 tests, 100% passing, 0 warnings)
 pytest tests                            # Execute all unit and integration tests
+pytest --cov=deeper_dhamma              # Generate full code coverage report
 ```
 
 ## Directory Structure
@@ -160,19 +161,22 @@ deeper_dhamma/
 │       ├── static/             # CSS, app.js, word_sync.js, db_worker.js, sqlite3.wasm
 │       │   └── adapters/       # In-browser SQLite WASM adapter (wasm_client.js)
 │       └── views/              # Static HTML template (index.html)
-├── tests/                      # Comprehensive Unit & Integration Test Suite (132 tests)
+├── tests/                      # Comprehensive Unit & Integration Test Suite (151 tests)
 │   ├── test_cli.py             # CLI parser, "One Obvious Way" flags, subcommands dispatch
 │   ├── test_audit.py           # Ghost files, temp fragments, html error pages, archive cleanup
+│   ├── test_benchmark.py       # Precision, recall, F1, and sequence-aligned WER evaluation
 │   ├── test_catalog.py         # Era determination, teacher matching, clean slugging, dates
 │   ├── test_status.py          # Duration formatting, progress bars, catalog & archive metrics
 │   ├── test_storage.py         # PipelineStateDatabase & TranscriptDatabase FTS5/CRUD/exports
+│   ├── test_profiler.py        # Fast acoustic pre-analysis, single & multi-speaker clustering
+│   ├── test_main_and_cli.py    # main.py entry point and CLI subcommand integration
 │   ├── test_curation_and_self_correction.py # Curation slugs, false friends, anti-drift guardrails
 │   ├── test_audio_utils.py     # get_audio_info, load_audio_segment, downmixing, boundary checks
 │   ├── test_export_web.py      # SQLite WASM db compilation, PRAGMA user_version, search_vocab
 │   ├── test_pipeline_integrity.py # Voiceprint scoring, turn smoothing, Pali terminology
 │   ├── test_lexicon_view.py    # BuddhismLexiconDatabase, core/all pagination, FTS5
 │   ├── test_audio_cdn_sync.py  # Bitstream parity with Podbean CDN streams
-│   ├── test_downloader_parity.py # ID3 preservation and non-destructive downloads
+│   ├── test_downloader_parity.py # ID3 preservation, parity audit, and archive log management
 │   ├── test_sync_repair.py     # Remote parity audit and corrupt file repair
 │   ├── test_stream_seek_calibration.py # VBR1 seek trailer generation & in-memory Xing patching
 │   ├── test_cross_browser_word_sync.py # Headless Firefox & Chrome real-time audio sync parity
