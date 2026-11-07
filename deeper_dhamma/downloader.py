@@ -36,6 +36,7 @@ from deeper_dhamma.catalog import (
     is_english_talk,
     clean_slug,
 )
+from deeper_dhamma.audio import get_id3_tag_size, get_id3v2_tag_size
 
 logger = logging.getLogger("downloader")
 
@@ -468,13 +469,6 @@ def safe_embed_cover_art(audio_path: Path, thumbnail_path: Path, log: Optional[l
         if log:
             log.debug(f"Cover art embed skipped for {audio_path.name}: {e}")
         return False
-
-
-def get_id3v2_tag_size(header_bytes: bytes) -> int:
-    """Calculates ID3v2 total tag length including 10-byte header from synchsafe integers."""
-    if len(header_bytes) >= 10 and header_bytes[:3] == b"ID3":
-        return ((header_bytes[6] << 21) | (header_bytes[7] << 14) | (header_bytes[8] << 7) | header_bytes[9]) + 10
-    return 0
 
 
 def remove_from_archive_log(archive_path: Path, identifiers: Set[str]) -> int:

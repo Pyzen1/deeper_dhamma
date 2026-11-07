@@ -2,6 +2,7 @@
 faster-whisper Large-v3 Speech-to-Text Transcriber with Pali Conditioning.
 """
 
+import deeper_dhamma.config  # Enforces HF_HOME and DLL paths under C:\ai-models
 import logging
 import shutil
 import sys
@@ -9,8 +10,6 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 from faster_whisper import WhisperModel
-
-import deeper_dhamma.config  # Enforces HF_HOME and DLL paths
 
 logger = logging.getLogger("transcription")
 

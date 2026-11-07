@@ -2,6 +2,7 @@
 Voiceprint Database & Reference Gallery Bootstrapper.
 """
 
+import deeper_dhamma.config  # Enforces HF_HOME and TORCH_HOME under C:\ai-models
 from contextlib import contextmanager
 import json
 import logging

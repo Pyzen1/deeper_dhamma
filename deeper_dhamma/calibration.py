@@ -42,6 +42,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from deeper_dhamma.audio import get_id3_tag_size
+
 logger = logging.getLogger("seek_calibrator")
 
 VBR_TRAILER_MAGIC = b"VBR1"
@@ -55,14 +57,7 @@ def detect_xing_patch_offset(header_bytes: bytes) -> Optional[int]:
     """
     if len(header_bytes) < 10:
         return None
-    id3_len = 0
-    if header_bytes[:3] == b"ID3":
-        id3_len = (
-            (header_bytes[6] << 21)
-            | (header_bytes[7] << 14)
-            | (header_bytes[8] << 7)
-            | header_bytes[9]
-        ) + 10
+    id3_len = get_id3_tag_size(header_bytes)
     if len(header_bytes) <= id3_len + 40:
         return None
     search_window = header_bytes[id3_len : min(len(header_bytes), id3_len + 4096)]
@@ -125,14 +120,7 @@ class StreamSeekCalibrator:
         try:
             with open(audio_path, "rb") as f:
                 header_peek = f.read(10)
-                id3_len = 0
-                if len(header_peek) >= 10 and header_peek[:3] == b"ID3":
-                    id3_len = (
-                        (header_peek[6] << 21)
-                        | (header_peek[7] << 14)
-                        | (header_peek[8] << 7)
-                        | header_peek[9]
-                    ) + 10
+                id3_len = get_id3_tag_size(header_peek)
 
                 f.seek(id3_len)
                 head = f.read(20000)

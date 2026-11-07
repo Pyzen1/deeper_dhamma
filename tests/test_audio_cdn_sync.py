@@ -11,12 +11,7 @@ from pathlib import Path
 import pytest
 
 from deeper_dhamma.config import PROJECT_ROOT, TRANSCRIPTS_DB_PATH
-
-
-def get_id3_size(header_bytes: bytes) -> int:
-    if len(header_bytes) >= 10 and header_bytes[:3] == b"ID3":
-        return ((header_bytes[6] << 21) | (header_bytes[7] << 14) | (header_bytes[8] << 7) | header_bytes[9]) + 10
-    return 0
+from deeper_dhamma.audio import get_id3_tag_size as get_id3_size
 
 
 def test_transcribed_episodes_cdn_parity():

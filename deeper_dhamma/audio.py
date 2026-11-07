@@ -6,8 +6,25 @@ from pathlib import Path
 from typing import Dict, Tuple
 import numpy as np
 import soundfile as sf
+
+import deeper_dhamma.config  # Enforces HF_HOME and TORCH_HOME under C:\ai-models
 import torch
 import torchaudio
+
+
+def get_id3_tag_size(header_bytes: bytes) -> int:
+    """Calculates ID3v2 total tag length including 10-byte header from synchsafe integers."""
+    if len(header_bytes) >= 10 and header_bytes[:3] == b"ID3":
+        return (
+            (header_bytes[6] << 21)
+            | (header_bytes[7] << 14)
+            | (header_bytes[8] << 7)
+            | header_bytes[9]
+        ) + 10
+    return 0
+
+
+get_id3v2_tag_size = get_id3_tag_size
 
 
 def get_audio_info(file_path: Path | str) -> Dict:

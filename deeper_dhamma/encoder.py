@@ -2,14 +2,13 @@
 SpeechBrain ECAPA-TDNN Speaker Embedding Extractor.
 """
 
+import deeper_dhamma.config  # Enforces HF_HOME and TORCH_HOME under C:\ai-models
 import logging
 from pathlib import Path
 from typing import Union
 import numpy as np
 import torch
 from speechbrain.inference.speaker import SpeakerRecognition
-
-import deeper_dhamma.config  # Enforces HF_HOME and TORCH_HOME under C:\ai-models
 
 logger = logging.getLogger("speaker_encoder")
 
