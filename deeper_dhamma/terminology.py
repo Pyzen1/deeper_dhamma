@@ -229,5 +229,25 @@ class TerminologyEditor:
         return synced_fb
 
 
-# Singleton instance
-terminology_editor = TerminologyEditor()
+_editor_instance: Optional[TerminologyEditor] = None
+
+
+def get_terminology_editor(db_path: Optional[Path | str] = None) -> TerminologyEditor:
+    """Returns a singleton or configured TerminologyEditor instance."""
+    global _editor_instance
+    if _editor_instance is None or db_path is not None:
+        inst = TerminologyEditor(db_path)
+        if db_path is None:
+            _editor_instance = inst
+        return inst
+    return _editor_instance
+
+
+class _LazyTerminologyEditorProxy:
+    """Lazy proxy so legacy `from deeper_dhamma.terminology import terminology_editor` works without eager init."""
+
+    def __getattr__(self, name: str):
+        return getattr(get_terminology_editor(), name)
+
+
+terminology_editor = _LazyTerminologyEditorProxy()
