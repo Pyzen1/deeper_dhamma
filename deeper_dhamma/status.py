@@ -97,40 +97,38 @@ def collect_status(
             pipeline_db = tdb.pipeline_db
             fp_map = pipeline_db.get_filepath_map()
 
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT id, title, year, date, primary_teacher, primary_display, duration_sec FROM episodes WHERE is_transcribed = 1 ORDER BY date ASC;"
-            ).fetchall()
-            db_episodes = [dict(r) for r in rows]
-            for ep in db_episodes:
-                ep["filepath"] = fp_map.get(ep["id"])
+            with tdb._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT id, title, year, date, primary_teacher, primary_display, duration_sec FROM episodes WHERE is_transcribed = 1 ORDER BY date ASC;"
+                ).fetchall()
+                db_episodes = [dict(r) for r in rows]
+                for ep in db_episodes:
+                    ep["filepath"] = fp_map.get(ep["id"])
 
-            res_rows = conn.execute(
-                "SELECT id, title, primary_display FROM episodes WHERE primary_teacher != 'unknown_teacher' AND primary_display IS NOT NULL;"
-            ).fetchall()
-            for r in res_rows:
-                disp = r["primary_display"]
-                db_resolved_teachers[r["id"]] = disp
-                db_resolved_teachers[clean_slug(r["id"])] = disp
-                fp = fp_map.get(r["id"])
-                if fp:
-                    fp_stem = Path(fp).stem
-                    db_resolved_teachers[fp_stem] = disp
-                    db_resolved_teachers[clean_slug(fp_stem)] = disp
-                if r["title"]:
-                    db_resolved_teachers[clean_slug(r["title"])] = disp
+                res_rows = conn.execute(
+                    "SELECT id, title, primary_display FROM episodes WHERE primary_teacher != 'unknown_teacher' AND primary_display IS NOT NULL;"
+                ).fetchall()
+                for r in res_rows:
+                    disp = r["primary_display"]
+                    db_resolved_teachers[r["id"]] = disp
+                    db_resolved_teachers[clean_slug(r["id"])] = disp
+                    fp = fp_map.get(r["id"])
+                    if fp:
+                        fp_stem = Path(fp).stem
+                        db_resolved_teachers[fp_stem] = disp
+                        db_resolved_teachers[clean_slug(fp_stem)] = disp
+                    if r["title"]:
+                        db_resolved_teachers[clean_slug(r["title"])] = disp
 
-            cur = conn.execute("SELECT COUNT(*) FROM speech_segments;")
-            seg_row = cur.fetchone()
-            if seg_row:
-                total_db_segments = seg_row[0]
+                cur = conn.execute("SELECT COUNT(*) FROM speech_segments;")
+                seg_row = cur.fetchone()
+                if seg_row:
+                    total_db_segments = seg_row[0]
 
-            ep_year_map = {
-                r["id"]: r["year"]
-                for r in conn.execute("SELECT id, year FROM episodes;").fetchall()
-            }
-            conn.close()
+                ep_year_map = {
+                    r["id"]: r["year"]
+                    for r in conn.execute("SELECT id, year FROM episodes;").fetchall()
+                }
 
             error_years = Counter()
             for ed in pipeline_db.list_errors():

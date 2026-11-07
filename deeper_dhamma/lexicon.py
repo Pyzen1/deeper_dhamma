@@ -8,6 +8,7 @@ over canonical Pali terms and English descriptions from:
 - BSWA: Ajahn Brahm & Ajahn Brahmali meditation, retreat, and monastery terminology
 """
 
+from contextlib import contextmanager
 import json
 import logging
 import math
@@ -15,7 +16,7 @@ import re
 import sqlite3
 import unicodedata
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from deeper_dhamma.config import BUDDHISM_LEXICON_DB_PATH
 
@@ -48,7 +49,7 @@ class BuddhismLexiconDatabase:
             from deeper_dhamma.build_lexicon import build_buddhism_lexicon_db
             build_buddhism_lexicon_db()
         else:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._get_connection() as conn:
                 conn.execute("""
                     CREATE VIEW IF NOT EXISTS v_terms AS
                     SELECT
@@ -73,10 +74,16 @@ class BuddhismLexiconDatabase:
                     LEFT JOIN source_documents s ON t.source_document_id = s.id;
                 """)
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    connection = _get_connection
 
     def get_all_terms(self) -> List[Dict]:
         """

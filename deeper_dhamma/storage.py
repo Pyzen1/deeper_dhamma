@@ -2,11 +2,12 @@
 Unified SQLite Canonical Storage & On-Demand Format Exporter.
 """
 
+from contextlib import contextmanager
 import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from deeper_dhamma.config import ARCHIVE_DIR, PIPELINE_DB_PATH, TRANSCRIPTS_DB_PATH
 
@@ -44,13 +45,19 @@ class PipelineStateDatabase:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    connection = _get_connection
 
     def _init_schema(self) -> None:
         with self._get_connection() as conn:
@@ -284,7 +291,8 @@ class TranscriptDatabase:
         self.pipeline_db = PipelineStateDatabase(resolved_pipe_path)
         self._init_schema()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON;")
@@ -293,7 +301,12 @@ class TranscriptDatabase:
         conn.execute("PRAGMA cache_size = -64000;")
         conn.execute("PRAGMA mmap_size = 268435456;")
         conn.execute("PRAGMA temp_store = MEMORY;")
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    connection = _get_connection
 
     def _init_schema(self) -> None:
         """Initializes tables, triggers, and FTS5 external content virtual table."""

@@ -114,13 +114,16 @@ def test_search_vocab_table_schema_and_pk():
     if not DIST_DB_PATH.exists():
         pytest.skip("dhamma_web.db not yet compiled in dist/")
 
-    with sqlite3.connect(DIST_DB_PATH) as conn:
+    conn = sqlite3.connect(DIST_DB_PATH)
+    try:
         schema = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'search_vocab';").fetchone()
         assert schema is not None, "search_vocab table missing from dhamma_web.db"
         sql = schema[0].upper()
         assert "ID INTEGER PRIMARY KEY AUTOINCREMENT" in sql or "ID INTEGER PRIMARY KEY" in sql
         assert "WORD TEXT UNIQUE NOT NULL" in sql
         assert "COUNT INTEGER NOT NULL" in sql
+    finally:
+        conn.close()
 
 
 def test_search_vocab_contents_and_pali_coverage():
@@ -128,7 +131,8 @@ def test_search_vocab_contents_and_pali_coverage():
     if not DIST_DB_PATH.exists():
         pytest.skip("dhamma_web.db not yet compiled in dist/")
 
-    with sqlite3.connect(DIST_DB_PATH) as conn:
+    conn = sqlite3.connect(DIST_DB_PATH)
+    try:
         total = conn.execute("SELECT COUNT(*) FROM search_vocab;").fetchone()[0]
         assert total > 2000, f"Expected >2000 words in search_vocab, got {total}"
 
@@ -142,6 +146,8 @@ def test_search_vocab_contents_and_pali_coverage():
         # Verify no nulls, empty strings, or uppercase words
         invalid_words = conn.execute("SELECT COUNT(*) FROM search_vocab WHERE word IS NULL OR word = '' OR word != lower(word);").fetchone()[0]
         assert invalid_words == 0, f"Found {invalid_words} invalid/uppercase words in search_vocab"
+    finally:
+        conn.close()
 
 
 # ==============================================================================

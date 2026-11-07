@@ -2,12 +2,13 @@
 Voiceprint Database & Reference Gallery Bootstrapper.
 """
 
+from contextlib import contextmanager
 import json
 import logging
 import re
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 import numpy as np
 import torch
 
@@ -36,8 +37,19 @@ class VoiceprintDatabase:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    connection = _get_connection
+
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_connection() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS voiceprints (
@@ -68,7 +80,7 @@ class VoiceprintDatabase:
         embedding: np.ndarray,
     ) -> int:
         blob = embedding.astype(np.float32).tobytes()
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with self._get_connection() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO voiceprints (
@@ -81,8 +93,7 @@ class VoiceprintDatabase:
             return cursor.lastrowid
 
     def load_gallery(self, era: Optional[str] = None) -> List[Dict]:
-        with sqlite3.connect(str(self.db_path)) as conn:
-            conn.row_factory = sqlite3.Row
+        with self._get_connection() as conn:
             if era:
                 cursor = conn.execute("SELECT * FROM voiceprints WHERE era = ?;", (era,))
             else:
@@ -237,7 +248,7 @@ def bootstrap_voiceprints(
     db = VoiceprintDatabase(db_path)
 
     if clear_existing:
-        with sqlite3.connect(str(db.db_path)) as conn:
+        with db.connection() as conn:
             conn.execute("DELETE FROM voiceprints;")
             conn.execute("DROP TABLE IF EXISTS speaker_gallery;")
             conn.commit()
@@ -248,7 +259,7 @@ def bootstrap_voiceprints(
     # Load existing counts from voiceprints table if not cleared
     counts = {}
     if not clear_existing:
-        with sqlite3.connect(str(db.db_path)) as conn:
+        with db.connection() as conn:
             cur = conn.execute("SELECT teacher_slug, era, COUNT(*) FROM voiceprints GROUP BY teacher_slug, era;")
             counts = {(row[0], row[1]): row[2] for row in cur.fetchall()}
 
@@ -379,8 +390,8 @@ def sanitize_and_prune_voiceprints(
         return 0
 
     removed_ids = set()
-    with sqlite3.connect(str(db_p)) as conn:
-        conn.row_factory = sqlite3.Row
+    db = VoiceprintDatabase(db_p)
+    with db.connection() as conn:
         rows = conn.execute("SELECT * FROM voiceprints ORDER BY id ASC;").fetchall()
 
         # 1. Normalize slugs, fix eras from source_file recording year, and find exact duplicates

@@ -36,7 +36,8 @@ def test_vbr_episodes_store_unwarped_physical_timestamps_and_vbr1_trailer():
     if not TRANSCRIPTS_DB_PATH.exists():
         pytest.skip("Transcript database not found")
 
-    with sqlite3.connect(TRANSCRIPTS_DB_PATH) as conn:
+    conn = sqlite3.connect(TRANSCRIPTS_DB_PATH)
+    try:
         # Verify pb27802310 Turn 0 starts at physical 216.30s (not legacy warped 203.14s)
         seg0 = conn.execute(
             "SELECT start_sec, end_sec, text FROM speech_segments WHERE episode_id = 'pb27802310' AND turn_index = 0"
@@ -44,6 +45,8 @@ def test_vbr_episodes_store_unwarped_physical_timestamps_and_vbr1_trailer():
         assert seg0 is not None
         assert abs(float(seg0[0]) - 216.30) <= 0.15, f"Expected Turn 0 at ~216.30s physical, got {seg0[0]}"
         assert seg0[2].startswith("Everyone,")
+    finally:
+        conn.close()
 
     # Check pb27802310 words BLOB timestamps & VBR1 trailer from SQLite (11,923 words after canonical multi-word mergers)
     db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
@@ -397,7 +400,8 @@ def test_static_dist_bundle_parity_staleness_and_no_local_audio_route():
     dist_db_path = dist_dir / "dhamma_web.db"
     assert dist_db_path.exists()
     src_db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
-    with sqlite3.connect(dist_db_path) as dist_conn:
+    dist_conn = sqlite3.connect(dist_db_path)
+    try:
         dist_words_count = dist_conn.execute("SELECT COUNT(*) FROM episode_words;").fetchone()[0]
         assert dist_words_count == 9
         for ep_id in VBR_EPISODES | CBR_EPISODES:
@@ -406,6 +410,8 @@ def test_static_dist_bundle_parity_staleness_and_no_local_audio_route():
                 row = dist_conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = ?;", (ep_id,)).fetchone()
                 assert row is not None, f"Missing {ep_id} in dist/dhamma_web.db episode_words"
                 assert bytes(row[0]) == src_bytes, f"Byte mismatch for {ep_id} in dist/dhamma_web.db"
+    finally:
+        dist_conn.close()
 
     # Verify _is_dist_stale detects missing directory or outdated index.html mtime
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -599,12 +605,15 @@ def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
 
     word_sync_js = word_sync_js_path.read_bytes()
 
-    with sqlite3.connect(TRANSCRIPTS_DB_PATH) as conn:
+    conn = sqlite3.connect(TRANSCRIPTS_DB_PATH)
+    try:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT * FROM speech_segments WHERE episode_id = 'pb10641521' ORDER BY turn_index"
         ).fetchall()
         segments = [dict(r) for r in rows]
+    finally:
+        conn.close()
 
     report = {}
 
