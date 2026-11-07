@@ -15,7 +15,7 @@
 
 'use strict';
 
-const CACHE_NAME = 'deeper_dhamma_shell_v4';
+const CACHE_NAME = 'deeper_dhamma_shell_{{db_version}}';
 
 const CORE_ASSETS = [
   './',
@@ -92,8 +92,12 @@ self.addEventListener('activate', (event) => {
 // ============================================================================
 
 async function matchInCache(req) {
-  // 1. Exact match with ignoreSearch (handles ?v=... query parameters)
-  let match = await caches.match(req, { ignoreSearch: true });
+  // 1. Exact match with query params if present
+  let match = await caches.match(req);
+  if (match) return match;
+
+  // 2. Exact match with ignoreSearch (handles ?v=... query parameters)
+  match = await caches.match(req, { ignoreSearch: true });
   if (match) return match;
 
   const url = new URL(req.url);
@@ -176,10 +180,26 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 3. Navigation Requests (User clicks browser Refresh / F5 / deep-link navigation)
-  // Cache-First: immediately return cached index.html so page never breaks on refresh.
+  // When online, fetch fresh application shell so page updates immediately on refresh.
+  // Fall back to Cache-First offline so the PWA works seamlessly without internet.
   if (req.mode === 'navigate') {
     event.respondWith(
       (async () => {
+        if (navigator.onLine) {
+          try {
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeoutId = controller ? setTimeout(() => controller.abort(), 1200) : null;
+            const fresh = await fetch(req, { signal: controller ? controller.signal : undefined });
+            if (timeoutId) clearTimeout(timeoutId);
+            if (fresh && fresh.status === 200) {
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put('./index.html', fresh.clone());
+              await cache.put('/', fresh.clone());
+              return fresh;
+            }
+          } catch (_) {}
+        }
+
         const cached =
           (await caches.match('./index.html', { ignoreSearch: true })) ||
           (await caches.match('/index.html', { ignoreSearch: true })) ||
@@ -188,18 +208,6 @@ self.addEventListener('fetch', (event) => {
           (await caches.match('index.html', { ignoreSearch: true }));
 
         if (cached) {
-          // Revalidate in background if online
-          if (navigator.onLine) {
-            fetch(req)
-              .then(async (fresh) => {
-                if (fresh && fresh.status === 200) {
-                  const cache = await caches.open(CACHE_NAME);
-                  await cache.put('./index.html', fresh.clone());
-                  await cache.put('/', fresh);
-                }
-              })
-              .catch(() => {});
-          }
           return cached;
         }
 
@@ -224,9 +232,24 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 4. Static Application Shell Assets (.js, .css, .wasm, .svg, .json, .bin)
-  // Cache-First: Serve locally from cache immediately with zero network latency.
+  // When online, check for updated version query parameters (?v=...) to prevent stale script/markup skew.
   event.respondWith(
     (async () => {
+      const hasVersionQuery = url.search.includes('v=');
+      if (hasVersionQuery && navigator.onLine) {
+        const exact = await caches.match(req);
+        if (!exact) {
+          try {
+            const fresh = await fetch(req);
+            if (fresh && fresh.status === 200) {
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put(req, fresh.clone());
+              return fresh;
+            }
+          } catch (_) {}
+        }
+      }
+
       const cached = await matchInCache(req);
       if (cached) {
         // Revalidate in background if online

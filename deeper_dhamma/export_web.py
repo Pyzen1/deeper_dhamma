@@ -72,28 +72,60 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
 
     # 1. Clone base transcripts database
     logger.info(f"Cloning transcripts database from {TRANSCRIPTS_DB_PATH} ...")
-    with sqlite3.connect(TRANSCRIPTS_DB_PATH) as src, sqlite3.connect(output_db_path) as dst:
+    src = sqlite3.connect(TRANSCRIPTS_DB_PATH)
+    dst = sqlite3.connect(output_db_path)
+    try:
         src.backup(dst)
+    finally:
+        src.close()
+        dst.close()
 
-    # 2. Attach lexicon and import terms, source documents, and views
-    lex_db_str = str(BUDDHISM_LEXICON_DB_PATH.resolve()).replace("\\", "/")
-    logger.info(f"Attaching lexicon database from {lex_db_str} ...")
-    with sqlite3.connect(output_db_path) as conn:
+    # 2. Import lexicon reference tables (source_documents, terms, phrase_rules)
+    lex_uri = BUDDHISM_LEXICON_DB_PATH.resolve().as_uri()
+    logger.info(f"Importing lexicon reference tables from {lex_uri} ...")
+    conn = sqlite3.connect(output_db_path)
+    try:
         conn.execute("PRAGMA foreign_keys = OFF;")
-        conn.execute(f"ATTACH DATABASE '{lex_db_str}' AS lex;")
-        attached = conn.execute("PRAGMA database_list;").fetchall()
-        logger.info(f"Attached databases: {attached}")
-        lex_tables = [r[0] for r in conn.execute("SELECT name FROM lex.sqlite_master;").fetchall()]
-        logger.info(f"Tables in lex: {lex_tables}")
+        lex_conn = sqlite3.connect(f"{lex_uri}?mode=ro", uri=True)
+        try:
+            lex_conn.execute("PRAGMA query_only = ON;")
+            # 2.1 source_documents (stripping large compressed text/PDF blobs)
+            conn.execute("DROP TABLE IF EXISTS main.source_documents;")
+            conn.execute("""
+                CREATE TABLE main.source_documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT UNIQUE NOT NULL,
+                    mirror_url TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    author TEXT NOT NULL,
+                    publisher TEXT NOT NULL,
+                    retrieved_date TEXT NOT NULL,
+                    content_format TEXT NOT NULL,
+                    uncompressed_bytes INTEGER NOT NULL,
+                    compressed_bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    content_compressed BLOB,
+                    content_text TEXT
+                );
+            """)
+            src_rows = lex_conn.execute(
+                "SELECT id, url, mirror_url, title, author, publisher, retrieved_date, content_format, "
+                "uncompressed_bytes, compressed_bytes, sha256, NULL, content_text FROM source_documents;"
+            ).fetchall()
+            conn.executemany("INSERT INTO main.source_documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", src_rows)
 
-        # Copy lexicon reference tables (explicitly targeting main database to avoid dropping from attached lex)
-        conn.execute("DROP TABLE IF EXISTS main.source_documents;")
-        conn.execute("CREATE TABLE main.source_documents AS SELECT * FROM lex.source_documents;")
-        conn.execute("UPDATE main.source_documents SET content_compressed = NULL;")
-        conn.execute("DROP TABLE IF EXISTS main.terms;")
-        conn.execute("CREATE TABLE main.terms AS SELECT * FROM lex.terms;")
-        conn.execute("DROP TABLE IF EXISTS main.phrase_rules;")
-        conn.execute("CREATE TABLE main.phrase_rules AS SELECT * FROM lex.phrase_rules;")
+            # 2.2 terms & phrase_rules
+            for tbl in ["terms", "phrase_rules"]:
+                schema_row = lex_conn.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{tbl}';").fetchone()
+                if schema_row and schema_row[0]:
+                    conn.execute(f"DROP TABLE IF EXISTS main.{tbl};")
+                    conn.execute(schema_row[0])
+                    rows = lex_conn.execute(f"SELECT * FROM {tbl};").fetchall()
+                    if rows:
+                        placeholders = ",".join(["?"] * len(rows[0]))
+                        conn.executemany(f"INSERT INTO main.{tbl} VALUES ({placeholders});", rows)
+        finally:
+            lex_conn.close()
 
         # Safety guard: ensure only playable or transcribed talks remain in the exported web DB
         conn.execute(
@@ -106,9 +138,9 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         conn.execute("DELETE FROM main.episode_teachers WHERE episode_id NOT IN (SELECT id FROM main.episodes);")
 
         # Recreate lexical join view
-        conn.execute("DROP VIEW IF EXISTS v_terms;")
+        conn.execute("DROP VIEW IF EXISTS main.v_terms;")
         conn.execute("""
-            CREATE VIEW v_terms AS
+            CREATE VIEW main.v_terms AS
             SELECT
                 t.id,
                 t.pali_plain,
@@ -127,14 +159,14 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
                 s.mirror_url AS source_mirror_url,
                 s.title AS source_title,
                 s.author AS source_author
-            FROM terms t
-            LEFT JOIN source_documents s ON t.source_document_id = s.id;
+            FROM main.terms t
+            LEFT JOIN main.source_documents s ON t.source_document_id = s.id;
         """)
 
         # Rebuild lexical FTS5 search table
-        conn.execute("DROP TABLE IF EXISTS fts_terms;")
+        conn.execute("DROP TABLE IF EXISTS main.fts_terms;")
         conn.execute("""
-            CREATE VIRTUAL TABLE fts_terms USING fts5(
+            CREATE VIRTUAL TABLE main.fts_terms USING fts5(
                 pali_plain,
                 pali_diacritic,
                 english_description,
@@ -147,10 +179,10 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
                 content_rowid='id'
             );
         """)
-        conn.execute("INSERT INTO fts_terms(fts_terms) VALUES('rebuild');")
+        conn.execute("INSERT INTO main.fts_terms(fts_terms) VALUES('rebuild');")
 
         # 3. Build search_vocab table for ultra-fast in-browser fuzzy search & spell correction
-        conn.execute("DROP TABLE IF EXISTS search_vocab;")
+        conn.execute("DROP TABLE IF EXISTS main.search_vocab;")
         conn.execute("""
             CREATE TABLE search_vocab (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,9 +209,6 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
             vocab_counter.most_common(),
         )
 
-        conn.commit()
-        conn.execute("DETACH DATABASE lex;")
-
         # Ensure episode_words table exists and is indexed
         conn.execute("""
             CREATE TABLE IF NOT EXISTS episode_words (
@@ -203,6 +232,8 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         segments_count = conn.execute("SELECT COUNT(*) FROM speech_segments;").fetchone()[0]
         terms_count = conn.execute("SELECT COUNT(*) FROM terms;").fetchone()[0]
         words_count = conn.execute("SELECT COUNT(*) FROM episode_words;").fetchone()[0]
+    finally:
+        conn.close()
 
     final_size = output_db_path.stat().st_size
     return {
@@ -325,6 +356,14 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
     out_index = out_path / "index.html"
     with open(out_index, "w", encoding="utf-8") as f:
         f.write(rendered_html)
+
+    # 5. Pre-render svc_worker.js with version stamp for atomic cache invalidation
+    sw_dist = out_path / "svc_worker.js"
+    if sw_dist.exists():
+        sw_content = sw_dist.read_text(encoding="utf-8")
+        sw_content = sw_content.replace("{{db_version}}", str(version_int))
+        sw_dist.write_text(sw_content, encoding="utf-8")
+        print(f"[✓] Pre-rendered svc_worker.js with cache version 'deeper_dhamma_shell_{version_int}'")
 
     print(f"[✓] Pre-rendered index.html with relative asset links")
     print("-" * 80)

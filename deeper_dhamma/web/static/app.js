@@ -3798,32 +3798,40 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    els.drawerTurns.innerHTML = '<div class="loading-spinner">Loading transcript turns...</div>';
+    if (els.drawerTurns) {
+      els.drawerTurns.innerHTML = '<div class="loading-spinner">Loading transcript turns...</div>';
+    }
 
     try {
       const ep = await dbService.getEpisode(episodeId);
       if (!ep) {
-        els.drawerTurns.innerHTML = '<div class="empty-state"><p>Episode details could not be loaded.</p></div>';
+        if (els.drawerTurns) {
+          els.drawerTurns.innerHTML = '<div class="empty-state"><p>Episode details could not be loaded.</p></div>';
+        }
         return;
       }
       state.currentEpisode = ep;
 
-      els.drawerTitle.textContent = ep.title;
-      els.drawerDateTag.textContent = ep.date || `Year ${ep.year}`;
+      if (els.drawerTitle) els.drawerTitle.textContent = ep.title;
+      if (els.drawerDateTag) els.drawerDateTag.textContent = ep.date || `Year ${ep.year}`;
       const durMin = Math.round((ep.duration_sec || 0) / 60);
-      els.drawerMetaInfo.innerHTML = `
-        ${renderTeacherBadgesHtml(ep)}
-        <span class="bullet-sep">•</span>
-        <span>${durMin} mins</span>
-        <span class="bullet-sep">•</span>
-        <span>${ep.segments ? ep.segments.length : 0} speech turns</span>
-      `;
+      if (els.drawerMetaInfo) {
+        els.drawerMetaInfo.innerHTML = `
+          ${renderTeacherBadgesHtml(ep)}
+          <span class="bullet-sep">•</span>
+          <span>${durMin} mins</span>
+          <span class="bullet-sep">•</span>
+          <span>${ep.segments ? ep.segments.length : 0} speech turns</span>
+        `;
+      }
 
-      if (ep.permalink) {
-        els.drawerPodbeanLink.href = getPodbeanUrl(ep.permalink);
-        els.drawerPodbeanLink.style.display = 'inline-flex';
-      } else {
-        els.drawerPodbeanLink.style.display = 'none';
+      if (els.drawerPodbeanLink) {
+        if (ep.permalink) {
+          els.drawerPodbeanLink.href = getPodbeanUrl(ep.permalink);
+          els.drawerPodbeanLink.style.display = 'inline-flex';
+        } else {
+          els.drawerPodbeanLink.style.display = 'none';
+        }
       }
 
       if (els.drawerShareBtn) {
@@ -3986,8 +3994,19 @@
         console.warn('[Transcript] Progressive enrichment notice:', enrichErr);
       });
     } catch (err) {
-      els.drawerTurns.innerHTML = '<div class="empty-state"><p>Failed to load transcript.</p></div>';
-      console.error(err);
+      console.error('[Transcript] Failed to load transcript:', err);
+      if (els.drawerTurns) {
+        els.drawerTurns.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">⚠️</div>
+            <p>Failed to load transcript.</p>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">${escapeHtml(err.message || String(err))}</p>
+            <button type="button" class="btn-primary" style="margin-top: 1rem;" onclick="window.resetDeeperDhammaCache()">
+              🔄 Reset Cache & Reload
+            </button>
+          </div>
+        `;
+      }
     }
   }
 

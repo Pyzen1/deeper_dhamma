@@ -47,6 +47,10 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
       - **`On`**: Highlights active words in real time with audio playback; preserves 100% manual scroll control.
       - **`Track`** (default): Seamless teleprompter auto-scrolling that continuously interpolates vertical reading progression across each spoken line with sub-pixel damping, smoothly gliding upward without jarring line-break jumps. Temporarily yields to manual user touch/wheel interaction with automatic resumption.
   - Deterministic zero-loss sentence scanner (`splitSentences`) in WordSync: preserves internal decimals (`6.15`, `5.30`, `3.14`), spaced dots (`6 .15`), quotes, and abbreviations without regex backtracking or dropping DOM tokens, guaranteeing 100% word-highlight synchronization.
+  - **Atomic Service Worker Versioning & Network-First Navigation**:
+    - Pre-rendered Service Worker (`svc_worker.js`) stamped with dynamic Unix build version (`deeper_dhamma_shell_{timestamp}`), automatically rotating caches and purging obsolete assets across builds.
+    - Online Network-First navigation with 1.2s timeout fallback ensures browser refreshes (`Ctrl+R` / `F5`) always serve the freshest application shell while guaranteeing 100% offline PWA resilience.
+    - Defensive DOM null guards across all drawer elements and in-app 1-click OPFS cache recovery button (`window.resetDeeperDhammaCache()`).
   - 1-click "Share Talk" and "Share Moment" (🔗) copy-to-clipboard buttons with toast feedback.
 - **Lossless On-Demand Format Generation**:
   - Generates Markdown (`.md`), WebVTT (`.vtt`), or JSON (`.json`) on the fly directly from SQLite.
@@ -114,7 +118,7 @@ python main.py web -r --port 8080       # Custom port or output directory
 python main.py serve --run              # Serve static bundle on http://127.0.0.1:34266
 python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
 
-# 13. Run Full Verification & Unit Test Suite (130 tests, 100% passing)
+# 13. Run Full Verification & Unit Test Suite (132 tests, 100% passing)
 pytest tests                            # Execute all unit and integration tests
 ```
 
@@ -156,7 +160,7 @@ deeper_dhamma/
 │       ├── static/             # CSS, app.js, word_sync.js, db_worker.js, sqlite3.wasm
 │       │   └── adapters/       # In-browser SQLite WASM adapter (wasm_client.js)
 │       └── views/              # Static HTML template (index.html)
-├── tests/                      # Comprehensive Unit & Integration Test Suite (130 tests)
+├── tests/                      # Comprehensive Unit & Integration Test Suite (132 tests)
 │   ├── test_cli.py             # CLI parser, "One Obvious Way" flags, subcommands dispatch
 │   ├── test_audit.py           # Ghost files, temp fragments, html error pages, archive cleanup
 │   ├── test_catalog.py         # Era determination, teacher matching, clean slugging, dates
