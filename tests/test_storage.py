@@ -215,3 +215,71 @@ def test_episode_words_storage_lifecycle_and_cascade(tmp_path: Path):
     with tdb._get_connection() as conn:
         count = conn.execute("SELECT COUNT(*) FROM episode_words WHERE episode_id = ?;", ("pb12345",)).fetchone()[0]
         assert count == 0, "Deleting episode must cascade delete associated episode_words row"
+
+
+def test_transcript_database_additional_operations(tmp_path: Path):
+    """Verifies extended operations: JSON generation, error tracking, preflight checks, and listing."""
+    db_path = tmp_path / "test_dhamma.db"
+    tdb = TranscriptDatabase(db_path)
+
+    meta = {
+        "id": "pb77777",
+        "title": "Mindful Breathing Talk",
+        "date": "2026-04-01",
+        "primary_teacher": "ajahn_brahm",
+        "primary_display": "Ajahn Brahm",
+    }
+    segments = [
+        {"turn_index": 0, "start": 0.0, "end": 5.0, "speaker": "ajahn_brahm", "speaker_display": "Ajahn Brahm", "text": "Take a deep breath and relax."},
+        {"turn_index": 1, "start": 5.5, "end": 10.0, "speaker": "ajahn_brahm", "speaker_display": "Ajahn Brahm", "text": "Notice the sensation of peace."},
+    ]
+    tdb.save_episode(meta, segments, duration_sec=10.0, year="2026", filename_stem="2026-04-01_mindful_breathing")
+
+    # 1. has_episode
+    assert tdb.has_episode("pb77777") is True
+    assert tdb.has_episode("pb00000") is False
+
+    # 2. list_episodes
+    all_eps = tdb.list_episodes()
+    assert len(all_eps) == 1
+    assert all_eps[0]["id"] == "pb77777"
+
+    year_eps = tdb.list_episodes(year=2026)
+    assert len(year_eps) == 1
+    empty_year = tdb.list_episodes(year=1990)
+    assert len(empty_year) == 0
+
+    # 3. generate_json
+    json_data = tdb.generate_json("pb77777")
+    assert json_data["id"] == "pb77777"
+    assert json_data["title"] == "Mindful Breathing Talk"
+    assert len(json_data["segments"]) == 2
+
+    # 4. Error management
+    tdb.record_error("pb77777", error_message="Simulated pipeline failure", operation="transcribe")
+    err = tdb.get_error("pb77777")
+    assert err is not None
+    assert "Simulated pipeline failure" in err["last_error"]
+    assert err["last_error_op"] == "transcribe"
+
+    err_list = tdb.list_errors()
+    assert len(err_list) >= 1
+
+    tdb.clear_error("pb77777")
+    assert tdb.get_error("pb77777") is None
+
+    # 5. check_preflight
+    proceed, reason = tdb.check_preflight("pb77777", operation="transcribe")
+    assert proceed is True
+    assert reason is None
+
+    # Record error and check preflight blocks
+    tdb.record_error("pb77777", error_message="Acoustic decode error", operation="transcribe")
+    blocked, block_reason = tdb.check_preflight("pb77777", operation="transcribe")
+    assert blocked is False
+    assert "error" in block_reason.lower()
+
+    # Retry flag unblocks
+    retry_ok, retry_msg = tdb.check_preflight("pb77777", operation="transcribe", retry_errors=True)
+    assert retry_ok is True
+    assert "cleared" in retry_msg.lower()
