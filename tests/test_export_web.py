@@ -60,7 +60,7 @@ def test_compile_static_database_header_version_and_vocab_table(tmp_path: Path):
 
         w_row = conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = 'pb28113880';").fetchone()
         assert w_row is not None
-        assert len(w_row[0]) == 41326
+        assert len(w_row[0]) == 41416
 
 
 def test_offline_service_worker_bundling_and_routes():

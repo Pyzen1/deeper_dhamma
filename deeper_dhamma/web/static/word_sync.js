@@ -24,11 +24,17 @@
 (function () {
   'use strict';
 
-  const STORAGE_KEY_ENABLED = 'deeper_dhamma_word_sync_enabled';
-
   const WordSync = {
-    // State
-    enabled: localStorage.getItem(STORAGE_KEY_ENABLED) !== 'false', // Default to true
+    // Global in-memory word synchronization mode: 'off' | 'on' | 'track'
+    mode: 'track',
+
+    get enabled() {
+      return this.mode !== 'off';
+    },
+    set enabled(val) {
+      this.setMode(val ? 'track' : 'off');
+    },
+
     currentEpisodeId: null,
     currentEpisode: null,
     dbClient: null,
@@ -57,12 +63,26 @@
 
     _rafId: null,
     _boundAudio: null,
+    _userInteractedAt: 0,
+    _teleprompterLine: null,
 
     /**
      * Initializes WordSync.
      */
     init: function () {
       this.updateUI();
+      if (typeof window !== 'undefined') {
+        window.addEventListener('wheel', () => this.handleUserInteraction(), { passive: true });
+        window.addEventListener('touchmove', () => this.handleUserInteraction(), { passive: true });
+        window.addEventListener('resize', () => { this._teleprompterLine = null; }, { passive: true });
+      }
+    },
+
+    /**
+     * Handles manual user interaction (wheel/touch) by pausing teleprompter auto-centering.
+     */
+    handleUserInteraction: function () {
+      this._userInteractedAt = performance.now();
     },
 
     /**
@@ -306,22 +326,37 @@
     },
 
     /**
-     * Toggles word synchronization on or off.
+     * Sets the word synchronization mode ('off' | 'on' | 'track').
+     */
+    setMode: function (newMode) {
+      if (!['off', 'on', 'track'].includes(newMode)) return this.mode;
+      this.mode = newMode;
+      this._teleprompterLine = null;
+      this._userInteractedAt = 0;
+      if (this.mode === 'off') {
+        this.clearHighlights();
+      }
+      this.updateUI();
+      return this.mode;
+    },
+
+    /**
+     * Cycles word synchronization mode: off -> on -> track -> off.
+     */
+    cycleMode: function () {
+      const modes = ['off', 'on', 'track'];
+      const nextIdx = (modes.indexOf(this.mode) + 1) % modes.length;
+      return this.setMode(modes[nextIdx]);
+    },
+
+    /**
+     * Toggles word synchronization on or off (backward compatibility).
      */
     toggle: function (forceState) {
       if (typeof forceState === 'boolean') {
-        this.enabled = forceState;
-      } else {
-        this.enabled = !this.enabled;
+        return this.setMode(forceState ? (this.mode === 'off' ? 'track' : this.mode) : 'off') !== 'off';
       }
-      localStorage.setItem(STORAGE_KEY_ENABLED, this.enabled ? 'true' : 'false');
-
-      if (!this.enabled) {
-        this.clearHighlights();
-      }
-
-      this.updateUI();
-      return this.enabled;
+      return this.setMode(this.mode === 'off' ? 'track' : 'off') !== 'off';
     },
 
     /**
@@ -336,32 +371,22 @@
     },
 
     /**
-     * Updates toggle button and metrics UI.
+     * Updates segmented word sync controls.
      */
     updateUI: function () {
-      const btnToggle = document.getElementById('btn-toggle-word-sync');
-      if (btnToggle) {
-        const stateText = btnToggle.querySelector('.toggle-state-text');
-        if (this.enabled) {
-          btnToggle.classList.add('active');
-          btnToggle.setAttribute('aria-pressed', 'true');
-          if (stateText) stateText.textContent = 'ON';
-        } else {
-          btnToggle.classList.remove('active');
-          btnToggle.setAttribute('aria-pressed', 'false');
-          if (stateText) stateText.textContent = 'OFF';
-        }
-      }
-
-      const metricsEl = document.getElementById('word-sync-metrics-badge');
-      if (metricsEl) {
-        if (this.words.length > 0) {
-          const kb = (this.metrics.bytesLoaded / 1024).toFixed(1);
-          metricsEl.textContent = `✓ Word Sync: ${this.words.length.toLocaleString()} words (${kb} KB, ${this.metrics.loadMs}ms)`;
-          metricsEl.style.display = 'inline-flex';
-        } else {
-          metricsEl.style.display = 'none';
-        }
+      const segControl = document.getElementById('segmented-word-sync-control');
+      if (segControl) {
+        const btns = segControl.querySelectorAll('.seg-btn');
+        btns.forEach(btn => {
+          const btnMode = btn.dataset.mode;
+          if (btnMode === this.mode) {
+            btn.classList.add('active');
+            btn.setAttribute('aria-pressed', 'true');
+          } else {
+            btn.classList.remove('active');
+            btn.setAttribute('aria-pressed', 'false');
+          }
+        });
       }
     },
 
@@ -375,6 +400,8 @@
       this.words = [];
       this.vbrData = null;
       this.turnWordMap = {};
+      this._teleprompterLine = null;
+      this._userInteractedAt = 0;
       this.clearHighlights();
 
       const t0 = performance.now();
@@ -1128,8 +1155,129 @@
     },
 
     /**
+     * Resolves the visual line geometry and speech timing for continuous teleprompter interpolation.
+     * Caches line boundaries so lookup across words on the same line is O(1).
+     */
+    getLineInfo: function (targetIdx, wordEl) {
+      if (this._teleprompterLine &&
+          targetIdx >= this._teleprompterLine.lineStartIdx &&
+          targetIdx < this._teleprompterLine.nextLineStartIdx) {
+        return this._teleprompterLine;
+      }
+
+      const rect = wordEl.getBoundingClientRect();
+      const currentDocY = rect.top + window.scrollY;
+      const wordHeight = rect.height || 28;
+      const currentLineCenterY = currentDocY + wordHeight / 2;
+
+      // 1. Scan backward for start of current line
+      let lineStartIdx = targetIdx;
+      for (let i = targetIdx - 1; i >= Math.max(0, targetIdx - 25); i--) {
+        const prevSpan = document.getElementById(this.words[i].domId || this.words[i].id);
+        if (!prevSpan) break;
+        const prevDocY = prevSpan.getBoundingClientRect().top + window.scrollY;
+        if (Math.abs(prevDocY - currentDocY) > 8) {
+          // Found previous line
+          break;
+        }
+        lineStartIdx = i;
+      }
+      const lineStartTime = this.words[lineStartIdx].s;
+
+      // 2. Scan forward for start of next line
+      let nextLineStartIdx = this.words.length;
+      let nextLineCenterY = currentLineCenterY + 32;
+      let nextLineStartTime = lineStartTime + 4.0;
+
+      for (let i = targetIdx + 1; i < Math.min(this.words.length, targetIdx + 30); i++) {
+        const nextSpan = document.getElementById(this.words[i].domId || this.words[i].id);
+        if (!nextSpan) continue;
+        const nextDocY = nextSpan.getBoundingClientRect().top + window.scrollY;
+        if (nextDocY > currentDocY + 10) {
+          // Found first word on next line
+          nextLineStartIdx = i;
+          nextLineCenterY = nextDocY + (nextSpan.offsetHeight || wordHeight) / 2;
+          nextLineStartTime = this.words[i].s;
+          break;
+        }
+      }
+
+      this._teleprompterLine = {
+        lineStartIdx,
+        lineStartTime,
+        currentLineCenterY,
+        nextLineStartIdx,
+        nextLineStartTime,
+        nextLineCenterY,
+      };
+      return this._teleprompterLine;
+    },
+
+    /**
+     * In 'track' mode, drives a continuous, seamless teleprompter scroll on every animation frame.
+     * Continuously interpolates vertical document position across the duration of each line,
+     * so text glides upward at a steady, gentle, constant velocity without jumping at line breaks.
+     */
+    updateTeleprompter: function (currentTime, targetIdx, wordEl) {
+      if (this.mode !== 'track' || !wordEl || !this.words || targetIdx < 0) return;
+
+      const view = document.getElementById('transcript-view');
+      if (view && !view.classList.contains('active')) return;
+
+      // If user recently scrolled manually (wheel or touch), pause teleprompter for 2.5s
+      if (performance.now() - this._userInteractedAt < 2500) return;
+
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+
+      // 1. Calculate active reading viewport bounds between sticky toolbar and audio player
+      const toolbar = document.getElementById('transcript-sticky-toolbar');
+      let toolbarBottom = 0;
+      if (toolbar) {
+        toolbarBottom = Math.max(0, toolbar.getBoundingClientRect().bottom);
+      }
+
+      const playerBar = document.getElementById('audio-player-bar');
+      let playerTop = viewportHeight;
+      if (playerBar) {
+        playerTop = Math.min(viewportHeight, playerBar.getBoundingClientRect().top);
+      }
+
+      const availableHeight = playerTop - toolbarBottom;
+      if (availableHeight <= 100) return;
+      const centerLine = toolbarBottom + (availableHeight * 0.46);
+
+      // 2. Line interpolation: continuous progress across the line
+      const line = this.getLineInfo(targetIdx, wordEl);
+      const lineDuration = Math.max(0.6, line.nextLineStartTime - line.lineStartTime);
+      const progress = Math.max(0, Math.min(1, (currentTime - line.lineStartTime) / lineDuration));
+
+      // Continuous document Y moving steadily from this line toward the next line
+      const idealDocY = line.currentLineCenterY + progress * (line.nextLineCenterY - line.currentLineCenterY);
+      const targetScrollY = Math.max(0, idealDocY - centerLine);
+
+      // 3. Smooth continuous damping
+      const currentScrollY = window.scrollY || window.pageYOffset || 0;
+      const diff = targetScrollY - currentScrollY;
+
+      if (Math.abs(diff) >= 0.4) {
+        // Fast glide for seeks (> 150px), silky sub-pixel drift for continuous playback
+        const factor = Math.abs(diff) > 150 ? 0.15 : 0.08;
+        window.scrollTo(0, currentScrollY + diff * factor);
+      }
+    },
+
+    /**
+     * Backward-compatible alias for unit test checks.
+     */
+    scrollToWordIfOffScreen: function (wordEl) {
+      if (!wordEl || this.mode !== 'track') return;
+      const curT = this.getPhysicalTime(this._boundAudio ? this._boundAudio.currentTime : 0);
+      this.updateTeleprompter(curT, this.activeWordIdx, wordEl);
+    },
+
+    /**
      * Updates active word highlight based on raw audio.currentTime.
-     * (Zero auto-scrolling: user retains complete natural scroll control).
+     * In 'track' mode, auto-scrolls with a smooth, continuous teleprompter glide.
      */
     update: function (rawCurrentTime) {
       if (!this.enabled || !this.words || this.words.length === 0) return;
@@ -1145,6 +1293,7 @@
       // Binary search across words for physical currentTime
       const targetIdx = this.findWordIndex(currentTime);
       if (targetIdx >= 0) {
+        let activeSpan = this.activeWordEl;
         if (this.activeWordIdx !== targetIdx) {
           const targetWord = this.words[targetIdx];
           const spanId = targetWord.domId || targetWord.id;
@@ -1157,6 +1306,7 @@
             }
             newSpan.classList.add('active-word');
             this.activeWordEl = newSpan;
+            activeSpan = newSpan;
 
             // Trigger live companion lookup if word/phrase is an annotated Pali doctrinal term
             if (newSpan.classList.contains('pali-term') && newSpan.dataset && newSpan.dataset.pali) {
@@ -1175,6 +1325,11 @@
               this._lastSpokenWordId = null;
             }
           }
+        }
+
+        // Smooth continuous teleprompter scrolling (runs on every frame while playing in 'track' mode)
+        if (this.mode === 'track' && activeSpan) {
+          this.updateTeleprompter(currentTime, targetIdx, activeSpan);
         }
       } else {
         // Between turns or in silence

@@ -483,15 +483,22 @@
             </div>
           </div>
           <h2 class="transcript-title" id="drawer-episode-title">Episode Title</h2>
-          <div class="transcript-actions-row">
-            <button type="button" class="btn-primary" id="drawer-play-full-btn" title="Play talk from beginning">
-              ▶ Play Talk
-            </button>
-            <button type="button" class="word-sync-toggle-btn active" id="btn-toggle-word-sync" title="Toggle synchronized word highlighting">
-              <span class="toggle-indicator-dot"></span>
-              <span class="toggle-btn-label">Word Follow: <strong class="toggle-state-text">ON</strong></span>
-            </button>
-            <span class="word-sync-metrics-badge" id="word-sync-metrics-badge" style="display: none;"></span>
+        </div>
+
+        <!-- Sticky Transcript Toolbar -->
+        <div class="transcript-sticky-toolbar" id="transcript-sticky-toolbar">
+          <div class="toolbar-sync-group">
+            <div class="word-sync-control" id="word-sync-control" role="group" aria-label="Word Synchronization Mode">
+              <span class="sync-control-label">Word Sync:</span>
+              <div class="segmented-control" id="segmented-word-sync-control">
+                <button type="button" class="seg-btn" data-mode="off" title="Disable synchronized word highlighting">Off</button>
+                <button type="button" class="seg-btn" data-mode="on" title="Highlight words as audio plays (manual scrolling)">On</button>
+                <button type="button" class="seg-btn active" data-mode="track" title="Highlight words and scroll to top when off screen">Track</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="toolbar-actions-group">
             <div class="download-dropdown-wrapper" id="single-talk-dropdown-wrapper">
               <button type="button" class="btn-secondary download-dropdown-btn" id="drawer-download-btn" title="Download transcript in selected format">
                 📥 Download Transcript ▾

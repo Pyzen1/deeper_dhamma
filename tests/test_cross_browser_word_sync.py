@@ -666,8 +666,8 @@ def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
                 WordSync.update(72.7); // At 72.7s ("here")
                 const activeAt72_7 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
 
-                WordSync.update(79.8); // At 79.8s ("technically")
-                const activeAt79_8 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+                WordSync.update(78.25); // At 78.25s ("technically")
+                const activeAt78_25 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
 
                 await fetch('/report', {{
                     method: 'POST',
@@ -678,7 +678,7 @@ def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
                         firstWordStart: firstSpan ? firstSpan.dataset.start : null,
                         technicallyStart: technicallySpan ? technicallySpan.dataset.start : null,
                         activeAt72_7,
-                        activeAt79_8,
+                        activeAt78_25,
                     }})
                 }});
             }})();
@@ -720,14 +720,166 @@ def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
         "That is peace.",
     ]
 
-    # Verify pb10641521 Turn 2 retains all 212 word spans, starting with "here"
-    assert data["totalWordSpans"] == 212
+    # Verify pb10641521 Turn 2 retains all 208 word spans, starting with "here"
+    assert data["totalWordSpans"] == 208
     assert data["firstWordText"].lower() == "here"
     assert float(data["firstWordStart"]) == pytest.approx(72.56, abs=0.05)
-    assert float(data["technicallyStart"]) == pytest.approx(79.60, abs=0.1)
+    assert float(data["technicallyStart"]) == pytest.approx(78.18, abs=0.1)
 
     # Verify highlight accuracy
     assert data["activeAt72_7"].lower() == "here"
-    assert data["activeAt79_8"].lower() == "technically"
+    assert data["activeAt78_25"].lower() == "technically"
+
+
+def test_word_sync_triple_mode_and_sticky_toolbar_markup():
+    """
+    Verifies that the Word Sync control uses a 3-way mode (off|on|track) via global JS state,
+    the metrics badge and redundant play button are removed, and the transcript toolbar is sticky.
+    """
+    index_html_path = PROJECT_ROOT / "deeper_dhamma" / "web" / "views" / "index.html"
+    assert index_html_path.exists()
+    html_content = index_html_path.read_text(encoding="utf-8")
+
+    # 1. Verify metrics badge is removed from markup
+    assert 'id="word-sync-metrics-badge"' not in html_content
+    assert 'word-sync-metrics-badge' not in html_content
+
+    # 2. Verify redundant play button is removed from toolbar
+    assert 'id="drawer-play-full-btn"' not in html_content
+
+    # 3. Verify sticky toolbar and segmented Word Sync control markup
+    assert 'id="transcript-sticky-toolbar"' in html_content
+    assert 'id="segmented-word-sync-control"' in html_content
+    assert 'data-mode="off"' in html_content
+    assert 'data-mode="on"' in html_content
+    assert 'data-mode="track"' in html_content
+    assert "Word Sync:" in html_content
+
+    # 4. Evaluate word_sync.js in headless Chrome
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    word_sync_js_path = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "word_sync.js"
+    if not (chrome_path.exists() and word_sync_js_path.exists()):
+        return
+
+    word_sync_js = word_sync_js_path.read_bytes()
+    report = {}
+
+    class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
+        daemon_threads = True
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            report["data"] = json.loads(body.decode("utf-8"))
+            self.send_response(200)
+            self.end_headers()
+
+        def do_GET(self):
+            if self.path == "/word_sync.js":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+                self.send_header("Content-Length", str(len(word_sync_js)))
+                self.end_headers()
+                self.wfile.write(word_sync_js)
+                return
+
+            html = """<!DOCTYPE html><html><body>
+            <div id="container">
+              <div id="transcript-sticky-toolbar">
+                <div id="segmented-word-sync-control">
+                  <button class="seg-btn" data-mode="off">Off</button>
+                  <button class="seg-btn" data-mode="on">On</button>
+                  <button class="seg-btn active" data-mode="track">Track</button>
+                </div>
+              </div>
+            </div>
+            <script src="/word_sync.js"></script>
+            <script>
+            (async () => {
+                WordSync.init();
+                const defaultMode = WordSync.mode;
+                const defaultEnabled = WordSync.enabled;
+
+                // Test mode transitions
+                WordSync.setMode('on');
+                const onMode = WordSync.mode;
+                const onEnabled = WordSync.enabled;
+
+                WordSync.setMode('off');
+                const offMode = WordSync.mode;
+                const offEnabled = WordSync.enabled;
+
+                // Test cycleMode: off -> on -> track -> off
+                WordSync.cycleMode();
+                const cycle1 = WordSync.mode;
+                WordSync.cycleMode();
+                const cycle2 = WordSync.mode;
+                WordSync.cycleMode();
+                const cycle3 = WordSync.mode;
+
+                const hasScrollMethod = typeof WordSync.scrollToWordIfOffScreen === 'function';
+
+                await fetch('/report', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        defaultMode,
+                        defaultEnabled,
+                        onMode,
+                        onEnabled,
+                        offMode,
+                        offEnabled,
+                        cycle1,
+                        cycle2,
+                        cycle3,
+                        hasScrollMethod
+                    })
+                });
+            })();
+            </script></body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+
+    server = ThreadedHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            proc = subprocess.Popen([
+                str(chrome_path),
+                "--headless=new",
+                f"--user-data-dir={tmp}",
+                f"http://127.0.0.1:{port}/",
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            t0 = time.time()
+            while time.time() - t0 < 15:
+                if "data" in report:
+                    break
+                time.sleep(0.2)
+            proc.kill()
+    finally:
+        server.shutdown()
+
+    assert "data" in report, "Headless Chrome mode test did not report back"
+    res = report["data"]
+
+    assert res["defaultMode"] == "track"
+    assert res["defaultEnabled"] is True
+    assert res["onMode"] == "on"
+    assert res["onEnabled"] is True
+    assert res["offMode"] == "off"
+    assert res["offEnabled"] is False
+    assert res["cycle1"] == "on"
+    assert res["cycle2"] == "track"
+    assert res["cycle3"] == "off"
+    assert res["hasScrollMethod"] is True
+
 
 

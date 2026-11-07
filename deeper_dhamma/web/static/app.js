@@ -183,7 +183,6 @@
     drawerTitle: document.getElementById('drawer-episode-title'),
     drawerDateTag: document.getElementById('drawer-date-tag'),
     drawerMetaInfo: document.getElementById('drawer-meta-info'),
-    drawerPlayFullBtn: document.getElementById('drawer-play-full-btn'),
     drawerPodbeanLink: document.getElementById('drawer-podbean-link'),
     drawerShareBtn: document.getElementById('drawer-share-btn'),
     drawerTurns: document.getElementById('drawer-turns-container'),
@@ -1564,12 +1563,16 @@
       router.handleRoute();
     });
 
-    const btnToggleWordSync = document.getElementById('btn-toggle-word-sync');
-    if (btnToggleWordSync) {
-      btnToggleWordSync.addEventListener('click', () => {
+    // Word Synchronization Mode Controls (Segmented: Off | On | Track)
+    const segmentedWordSyncControl = document.getElementById('segmented-word-sync-control');
+    if (segmentedWordSyncControl) {
+      segmentedWordSyncControl.addEventListener('click', (e) => {
+        const btn = e.target.closest('.seg-btn');
+        if (!btn || !btn.dataset.mode) return;
+        const targetMode = btn.dataset.mode;
         if (window.WordSync) {
-          const isEnabled = window.WordSync.toggle();
-          if (isEnabled && !els.nativeAudio.paused) {
+          window.WordSync.setMode(targetMode);
+          if (targetMode !== 'off' && els.nativeAudio && !els.nativeAudio.paused) {
             window.WordSync.update(els.nativeAudio.currentTime);
           }
         }
@@ -1623,6 +1626,9 @@
         const wSpan = e.target.closest('.transcript-word');
         if (wSpan) {
           e.stopPropagation();
+          if (window.WordSync) {
+            window.WordSync._userInteractedAt = 0;
+          }
           const start = parseFloat(wSpan.dataset.start);
           playAudioSegment({
             episode_id: ep.id,
@@ -3829,16 +3835,6 @@
           copyTextToClipboard(shareUrl, 'Talk link copied to clipboard!');
         };
       }
-
-      els.drawerPlayFullBtn.onclick = () => {
-        playAudioSegment({
-          episode_id: ep.id,
-          media_url: ep.media_url,
-          title: ep.title,
-          teacher: ep.primary_display,
-          start_sec: 0,
-        });
-      };
 
       if (!ep.segments || ep.segments.length === 0) {
         els.drawerTurns.innerHTML = `

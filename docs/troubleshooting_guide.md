@@ -261,9 +261,74 @@ Profiling in headless Mozilla Firefox and Google Chrome revealed five compoundin
 
 ---
 
-## 6. Diagnostic & Verification Procedures
+## 6. Architecture: Sticky Toolbar, Triple Word Sync (`Off | On | Track`), & Continuous Teleprompter Auto-Scroll
 
-### 6.1 Running the Cross-Browser Synchronization Test Suite
+### 6.1 Evolution of Auto-Scroll Approaches
+During synchronized audio playback, long Dhamma talks require the reader to navigate through thousands of words across multiple turns:
+1. **Initial Requirement & Metric Removal**:
+   - The `#word-sync-metrics-badge` (showing loaded bytes and word counts) created visual clutter without providing user utility and was removed.
+   - The top drawer play button (`#drawer-play-full-btn`) was redundant with the bottom global player bar controls and was removed.
+   - The word sync control was placed in a dedicated sticky toolbar (`#transcript-sticky-toolbar`) so users can switch synchronization modes from anywhere in the transcript without scrolling back up to the top.
+2. **First Scroll Attempt (Discrete Off-Screen Jump)**:
+   - When the active word scrolled off screen, the viewport jumped the active element to the top of the viewport.
+   - *Issue*: A sudden ~800px vertical leap was disorienting and broke reading concentration.
+3. **Second Scroll Attempt (Discrete Word-by-Word Center Snap)**:
+   - Centered each highlighted word with smooth scrolling whenever `activeWordIdx` changed.
+   - *Issue*: At line breaks, as the human eye scanned from right to left toward the beginning of the next line, the text jumped upward abruptly, producing a jerky and distracting effect.
+4. **Third Working Approach (Continuous Line-Interpolated Teleprompter Scroll)**:
+   - Distributes the vertical line transition smoothly and continuously across the spoken duration of that line.
+   - The active reading viewport ($Y_{\text{center}}$) sits comfortably at 46% of the available space between the sticky toolbar and the bottom audio player.
+   - Calculates the continuous fractional progress $\rho(t) \in [0, 1]$ of the current line:
+     $$\rho(t) = \frac{t - t_{\text{line\_start}}}{\Delta t_{\text{line}}}$$
+   - The target document position glides upward continuously at a steady sub-pixel rate ($\approx 0.13\text{ px/frame}$ at 60fps), eliminating boundary jumps entirely.
+
+```text
++-----------------------------------------------------------------------------------------+
+|                  CONTINUOUS LINE-INTERPOLATED TELEPROMPTER ENGINE                       |
++-----------------------------------------------------------------------------------------+
+                                       |
+    [ Audio Decoder 44.1 kHz PCM ] --->| audio.currentTime (Physical Timestamp)
+                                       v
+    +---------------------------------------------------------------------------------+
+    | 1. getLineInfo(targetIdx, wordEl)                                               |
+    |    - Scans backward/forward for DOM word spans sharing visual DocY (+-8px)       |
+    |    - Caches line bounds: currentLineCenterY, nextLineCenterY, lineStartTime     |
+    +---------------------------------------------------------------------------------+
+                                       |
+                                       v
+    +---------------------------------------------------------------------------------+
+    | 2. Fractional Time-Interpolated Target Scroll Calculation                       |
+    |    progress = clamp((currentTime - lineStartTime) / lineDuration, 0, 1)         |
+    |    idealDocY = currentLineCenterY + progress * (nextLineCenterY - currentLineCenterY)
+    |    targetScrollY = max(0, idealDocY - activeCenterLine)                         |
+    +---------------------------------------------------------------------------------+
+                                       |
+                                       v
+    +---------------------------------------------------------------------------------+
+    | 3. Sub-Pixel Continuous Damping Loop (60fps rAF)                                 |
+    |    diff = targetScrollY - currentScrollY                                         |
+    |    factor = abs(diff) > 150 ? 0.15 : 0.08                                        |
+    |    window.scrollTo(0, currentScrollY + diff * factor)                            |
+    +---------------------------------------------------------------------------------+
+```
+
+### 6.2 Word Sync Mode Semantics (`WordSync.mode`)
+The synchronization state is managed as a lightweight, in-memory global state variable (`WordSync.mode`) with three distinct modes:
+- **`'off'`**: Synchronized highlighting and auto-scrolling are fully deactivated. Transcript text acts as a static document.
+- **`'on'`**: Real-time highlighting of the currently spoken word is active, but auto-scrolling is disabled so the user retains complete manual control over document scrolling.
+- **`'track'`** (default): Real-time highlighting is paired with continuous teleprompter auto-scrolling.
+
+### 6.3 Manual Interaction Cooldown
+To respect user agency during playback:
+- Listening to passive `wheel` and `touchmove` events records `WordSync._userInteractedAt = performance.now()`.
+- The teleprompter loop automatically pauses auto-scrolling for 2.5 seconds upon user interaction, allowing the reader to freely inspect preceding or subsequent turns without fighting the scroll engine.
+- Clicking any transcript word span immediately resets the interaction cooldown (`_userInteractedAt = 0`) and centers playback smoothly on the clicked word.
+
+---
+
+## 7. Diagnostic & Verification Procedures
+
+### 7.1 Running the Cross-Browser Synchronization Test Suite
 Run `pytest` to verify byte parity, `VBR1` trailer integrity, client-side `Xing -> Info` progressive `Blob` neutralization, and real headless Firefox + Chrome playback synchronization:
 
 ```powershell
@@ -277,7 +342,7 @@ Specifically:
 - `tests/test_audio_cdn_sync.py`:
   - Verifies 1:1 bit-for-bit parity between local `archive/` MP3 files and Podbean CDN streams.
 
-### 6.2 Rebuilding Static Web Assets & Resetting Browser Cache
+### 7.2 Rebuilding Static Web Assets & Resetting Browser Cache
 Whenever `dhamma_transcripts.db`, `word_sync.js`, or `app.js` are updated, recompile the static `dist/` bundle:
 
 ```powershell

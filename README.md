@@ -40,6 +40,12 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - Full browser Back and Forward history support (`popstate` SPA history routing) without interrupting audio streaming.
   - Universal shareable URLs for text messages and email: supports hashes (`/#talk/pb28113880`), query parameters (`/?talk=pb28113880`), and clean server paths (`/talk/pb28113880`).
   - Precision timestamp links (`?t=125` or `?t=2m05s` or `?t=02:05`): automatically scrolls to the turn, highlights the speech segment, and starts playback at that exact second.
+  - **Sticky Transcript Toolbar & Triple-Option Word Sync (`Off | On | Track`)**:
+    - Glassmorphic sticky header (`#transcript-sticky-toolbar`) keeps synchronization and export controls permanently reachable during long reads.
+    - Global in-memory state (`WordSync.mode`) with three dedicated operational modes:
+      - **`Off`**: Completely disables word-level highlight tracking.
+      - **`On`**: Highlights active words in real time with audio playback; preserves 100% manual scroll control.
+      - **`Track`** (default): Seamless teleprompter auto-scrolling that continuously interpolates vertical reading progression across each spoken line with sub-pixel damping, smoothly gliding upward without jarring line-break jumps. Temporarily yields to manual user touch/wheel interaction with automatic resumption.
   - Deterministic zero-loss sentence scanner (`splitSentences`) in WordSync: preserves internal decimals (`6.15`, `5.30`, `3.14`), spaced dots (`6 .15`), quotes, and abbreviations without regex backtracking or dropping DOM tokens, guaranteeing 100% word-highlight synchronization.
   - 1-click "Share Talk" and "Share Moment" (🔗) copy-to-clipboard buttons with toast feedback.
 - **Lossless On-Demand Format Generation**:
