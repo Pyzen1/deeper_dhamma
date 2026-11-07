@@ -36,6 +36,7 @@
     },
 
     currentEpisodeId: null,
+    playingEpisodeId: null,
     currentEpisode: null,
     dbClient: null,
     words: [], // Sorted array of exact physical words: [{ s, e, turnIdx, wordIdx, id }]
@@ -291,7 +292,9 @@
             this.seekOffset = physT - rawT;
           }
         }
-        this.update(audio.currentTime);
+        if (!this.playingEpisodeId || this.currentEpisodeId === this.playingEpisodeId) {
+          this.update(audio.currentTime);
+        }
       };
 
       audio.addEventListener('play', onPlay);
@@ -309,7 +312,9 @@
       if (this._rafId) return;
       const step = () => {
         if (this._boundAudio && !this._boundAudio.paused) {
-          this.update(this._boundAudio.currentTime);
+          if (!this.playingEpisodeId || this.currentEpisodeId === this.playingEpisodeId) {
+            this.update(this._boundAudio.currentTime);
+          }
           this._rafId = requestAnimationFrame(step);
         } else {
           this._rafId = null;
@@ -1281,6 +1286,9 @@
      */
     update: function (rawCurrentTime) {
       if (!this.enabled || !this.words || this.words.length === 0) return;
+      if (this.playingEpisodeId && this.currentEpisodeId !== this.playingEpisodeId) {
+        return;
+      }
       if (typeof rawCurrentTime !== 'number' || isNaN(rawCurrentTime)) return;
 
       const currentTime = this.getPhysicalTime(rawCurrentTime);

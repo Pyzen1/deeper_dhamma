@@ -1972,6 +1972,7 @@ select:hover, select:focus {
   align-items: center;
   gap: 0.85rem;
   flex-wrap: wrap;
+  margin-top: 1rem;
 }
 
 .transcript-reader-container {
@@ -2126,7 +2127,7 @@ select:hover, select:focus {
   align-items: center;
   gap: 0.85rem;
   min-width: 260px;
-  max-width: 340px;
+  max-width: 420px;
 }
 
 .track-icon-wrapper {
@@ -2157,6 +2158,37 @@ select:hover, select:focus {
 
 .track-details {
   overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.btn-player-transcript {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+  margin-left: 0.25rem;
+}
+
+.btn-player-transcript:hover {
+  background: var(--accent-saffron);
+  color: #0b1120;
+  border-color: var(--accent-saffron);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+}
+
+.btn-player-transcript-icon {
+  font-size: 0.85rem;
 }
 
 .track-title {

@@ -744,8 +744,10 @@ def test_word_sync_triple_mode_and_sticky_toolbar_markup():
     assert 'id="word-sync-metrics-badge"' not in html_content
     assert 'word-sync-metrics-badge' not in html_content
 
-    # 2. Verify redundant play button is removed from toolbar
+    # 2. Verify redundant play button is removed from toolbar and header play button exists
     assert 'id="drawer-play-full-btn"' not in html_content
+    assert 'id="transcript-play-btn"' in html_content
+    assert 'id="btn-player-transcript"' in html_content
 
     # 3. Verify sticky toolbar and segmented Word Sync control markup
     assert 'id="transcript-sticky-toolbar"' in html_content
@@ -823,6 +825,22 @@ def test_word_sync_triple_mode_and_sticky_toolbar_markup():
 
                 const hasScrollMethod = typeof WordSync.scrollToWordIfOffScreen === 'function';
 
+                // Test decoupled reader guard (Option 2):
+                WordSync.setMode('on');
+                WordSync.currentEpisodeId = 'talk_b';
+                WordSync.playingEpisodeId = 'talk_a';
+                WordSync.words = [{ s: 0, e: 1, domId: 'test-w1' }, { s: 1, e: 2, domId: 'test-w2' }];
+                const dummySpan = document.createElement('span');
+                dummySpan.id = 'test-w2';
+                document.body.appendChild(dummySpan);
+
+                WordSync.update(1.5);
+                const decoupledActiveSpan = WordSync.activeWordEl;
+
+                WordSync.playingEpisodeId = 'talk_b';
+                WordSync.update(1.5);
+                const matchedActiveSpanId = WordSync.activeWordEl ? WordSync.activeWordEl.id : null;
+
                 await fetch('/report', {
                     method: 'POST',
                     body: JSON.stringify({
@@ -835,7 +853,9 @@ def test_word_sync_triple_mode_and_sticky_toolbar_markup():
                         cycle1,
                         cycle2,
                         cycle3,
-                        hasScrollMethod
+                        hasScrollMethod,
+                        decoupledActiveSpan,
+                        matchedActiveSpanId
                     })
                 });
             })();
@@ -880,6 +900,8 @@ def test_word_sync_triple_mode_and_sticky_toolbar_markup():
     assert res["cycle2"] == "track"
     assert res["cycle3"] == "off"
     assert res["hasScrollMethod"] is True
+    assert res["decoupledActiveSpan"] is None, "WordSync must not highlight words when viewing a different talk than the playing talk"
+    assert res["matchedActiveSpanId"] == "test-w2", "WordSync must highlight words when viewing matches the playing talk"
 
 
 

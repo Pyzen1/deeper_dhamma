@@ -169,6 +169,8 @@ def test_service_worker_dynamic_version_stamping_and_network_first_navigation():
     app_js = app_js_path.read_text(encoding="utf-8")
     assert "drawerPlayFullBtn" not in app_js, "app.js must not reference deleted drawerPlayFullBtn"
     assert "drawer-play-full-btn" not in app_js, "app.js must not reference deleted #drawer-play-full-btn"
+    assert "transcriptPlayBtn" in app_js, "app.js must wire up transcriptPlayBtn"
+    assert "btn-player-transcript" in app_js, "app.js must wire up btn-player-transcript"
     assert "if (els.drawerTurns)" in app_js, "app.js must null-guard els.drawerTurns"
     assert "if (els.drawerTitle)" in app_js, "app.js must null-guard els.drawerTitle"
     assert "window.resetDeeperDhammaCache" in app_js, "app.js must provide resetDeeperDhammaCache recovery"

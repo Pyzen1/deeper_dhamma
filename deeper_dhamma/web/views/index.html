@@ -483,6 +483,11 @@
             </div>
           </div>
           <h2 class="transcript-title" id="drawer-episode-title">Episode Title</h2>
+          <div class="transcript-actions-row">
+            <button type="button" class="btn-primary" id="transcript-play-btn" title="Play talk from beginning">
+              ▶ Play Talk
+            </button>
+          </div>
         </div>
 
         <!-- Sticky Transcript Toolbar -->
@@ -632,6 +637,10 @@
             <span class="track-stream-badge">Podbean CDN</span>
           </div>
         </div>
+        <button type="button" class="btn-player-transcript" id="btn-player-transcript" title="View transcript for actively playing talk" aria-label="View transcript for actively playing talk" style="display: none;">
+          <span class="btn-player-transcript-icon">📜</span>
+          <span class="btn-player-transcript-label">Transcript</span>
+        </button>
       </div>
 
       <!-- Player Center Controls -->
