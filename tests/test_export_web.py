@@ -365,5 +365,42 @@ def test_bookmark_reorder_persistence_and_episodes_sync():
     assert [e["id"] for e in resequenced] == ["talk_6", "talk_3", "talk_5", "talk_4"]
 
 
+def test_bookmark_finger_touch_and_physical_exchange_animation():
+    """
+    Verifies that:
+    1. The 6-dots handle (⠿) is removed from bookmark cards, avoiding visual clutter.
+    2. Up/down arrow reorder buttons have generous finger-tappable dimensions (>= 36px height).
+    3. stepExchange in card_physics.js explicitly configures smooth CSS transitions on transform,
+       triggers layout flush (offsetHeight), and cleans up properly.
+    4. CSS applies transition: transform on exchanging cards and bookmark-card.
+    """
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    card_physics_js = (web_dir / "static" / "card_physics.js").read_text(encoding="utf-8")
+    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+
+    # 1. 6-dots icon removed from bookmark list cards
+    assert "bookmark-drag-handle" not in app_js, "Six dots handle must be removed from bookmark cards"
+    assert "⠿" not in app_js, "Six dots unicode symbol must not be rendered in bookmark cards"
+
+    # 2. Large finger-tappable buttons in style.css
+    assert "height: 36px;" in style_css, "Reorder buttons must have at least 36px height"
+    assert "min-height: 36px;" in style_css, "Reorder buttons must enforce min-height 36px"
+    assert "touch-action: manipulation;" in style_css, "Must optimize mobile touch delay"
+
+    # 3. Physics engine hardware-accelerated transition and reflow flush
+    assert "currentCard.style.transition =" in card_physics_js, "Must set explicit transition on currentCard"
+    assert "targetCard.style.transition =" in card_physics_js, "Must set explicit transition on targetCard"
+    assert "offsetHeight" in card_physics_js, "Must force browser reflow to guarantee CSS transition animation"
+    assert "translateY" in card_physics_js, "Must translate along Y axis"
+    assert "scale" in card_physics_js, "Must apply depth scale during physical exchange"
+
+    # 4. CSS transition rules on cards
+    assert "transition: transform" in style_css, "Must declare transition on transform in CSS"
+
+
+
 
 

@@ -119,16 +119,15 @@
       const currIdx = cards.indexOf(currentCard);
       if (currIdx === -1) return false;
 
-      const targetCard = direction === 'up'
-        ? currentCard.previousElementSibling
-        : currentCard.nextElementSibling;
-
+      // Identify target card reliably from current layout sequence
+      const targetIdx = direction === 'up' ? currIdx - 1 : currIdx + 1;
+      if (targetIdx < 0 || targetIdx >= cards.length) {
+        return false;
+      }
+      const targetCard = cards[targetIdx];
       if (!targetCard || !targetCard.matches(this.options.itemSelector)) {
         return false;
       }
-
-      const targetIdx = cards.indexOf(targetCard);
-      if (targetIdx === -1) return false;
 
       this.isExchanging = true;
       this.container.style.pointerEvents = 'none';
@@ -141,14 +140,28 @@
       const targetId = targetCard.getAttribute(this.options.idAttribute);
 
       const { activeExchange, targetExchange, landed } = this.options.classes;
+      const dur = this.options.exchangeDuration || 280;
+      const easing = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
 
+      // 1. Mark exchange classes for z-index and elevation
       currentCard.classList.add(activeExchange);
       targetCard.classList.add(targetExchange);
 
+      // 2. Explicitly bind hardware-accelerated glide transition
+      currentCard.style.transition = `transform ${dur}ms ${easing}, box-shadow ${dur}ms ease`;
+      targetCard.style.transition = `transform ${dur}ms ${easing}, box-shadow ${dur}ms ease`;
+
+      // 3. Force layout reflow so browser commits transition before starting transform
+      void currentCard.offsetHeight;
+      void targetCard.offsetHeight;
+
+      // 4. Trigger physical exchange translation
       currentCard.style.transform = `translateY(${deltaY}px) scale(1.015)`;
       targetCard.style.transform = `translateY(${-deltaY}px) scale(0.995)`;
 
       setTimeout(() => {
+        currentCard.style.transition = '';
+        targetCard.style.transition = '';
         currentCard.style.transform = '';
         targetCard.style.transform = '';
         currentCard.classList.remove(activeExchange);
@@ -171,7 +184,7 @@
         }
 
         this.isExchanging = false;
-      }, this.options.exchangeDuration);
+      }, dur);
 
       return true;
     }

@@ -3303,15 +3303,14 @@
 
       return `
         <div class="bookmark-card" data-ep-id="${escapeHtml(ep.id)}" data-index="${idx}">
-          <!-- Left Reorder Rail: Index badge + drag handle + arrows -->
+          <!-- Left Reorder Rail: Index badge + finger-tappable arrows -->
           <div class="bookmark-rail">
-            <span class="bookmark-order-badge" title="Bookmark #${idx + 1}" aria-label="Bookmark #${idx + 1}">#${idx + 1}</span>
-            <div class="bookmark-reorder-group" title="Drag to reorder, or use arrows">
-              <span class="bookmark-drag-handle" title="Drag to reorder" aria-hidden="true">⠿</span>
-              <button type="button" class="btn-reorder btn-reorder-up" data-action="bookmark-up" data-ep-id="${escapeHtml(ep.id)}" ${isFirst ? 'disabled' : ''} title="Move Up (earlier in list)" aria-label="Move Up">
+            <span class="bookmark-order-badge" title="Hold or drag to reorder" aria-label="Bookmark #${idx + 1}">#${idx + 1}</span>
+            <div class="bookmark-reorder-group" role="group" aria-label="Reorder bookmark">
+              <button type="button" class="btn-reorder btn-reorder-up" data-action="bookmark-up" data-ep-id="${escapeHtml(ep.id)}" ${isFirst ? 'disabled' : ''} title="Move talk up" aria-label="Move Up">
                 ▲
               </button>
-              <button type="button" class="btn-reorder btn-reorder-down" data-action="bookmark-down" data-ep-id="${escapeHtml(ep.id)}" ${isLast ? 'disabled' : ''} title="Move Down (later in list)" aria-label="Move Down">
+              <button type="button" class="btn-reorder btn-reorder-down" data-action="bookmark-down" data-ep-id="${escapeHtml(ep.id)}" ${isLast ? 'disabled' : ''} title="Move talk down" aria-label="Move Down">
                 ▼
               </button>
             </div>
@@ -3479,7 +3478,7 @@
       state.bookmarkPhysics = new CardPhysics({
         container,
         itemSelector: '.bookmark-card',
-        handleSelector: '.bookmark-drag-handle',
+        handleSelector: '.bookmark-order-badge',
         idAttribute: 'data-ep-id',
         classes: {
           ghost: 'is-ghost',
