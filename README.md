@@ -53,9 +53,10 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
     - Online Network-First navigation with 1.2s timeout fallback ensures browser refreshes (`Ctrl+R` / `F5`) always serve the freshest application shell while guaranteeing 100% offline PWA resilience.
     - Defensive DOM null guards across all drawer elements and in-app 1-click OPFS cache recovery button (`window.resetDeeperDhammaCache()`).
   - **Local Bookmarks & Fluid Card Reordering Physics**:
-    - Fast recall bookmarks stored locally with zero metadata bloat (persists only talk IDs in `localStorage`, querying SQLite on-demand).
+    - Fast recall bookmarks stored locally with zero metadata bloat (persists only talk IDs in `localStorage`, querying SQLite on-demand with resilient fallback).
     - Dedicated Bookmarks tab (`#bookmarks-view`) with unread badge counter, dynamic reordering, and talk playback controls.
-    - Physics-driven reordering: ▲ / ▼ arrow buttons trigger simultaneous physical card exchange glide animations; pointer drag-and-drop leaves an in-place ghost card while dragging a full-opacity elevated clone (with 240ms touch long-press support), guided by a glowing placement indicator line, and resolving with a multi-card FLIP drop animation that physically opens space and glides into position.
+    - Sleek compact two-column card layout (<110px height, >50% space savings) with pinned left reorder rail, large finger-friendly touch targets (`min-height: 36px`), and immediate talk playback/download action strip.
+    - Decoupled generic `CardPhysics` engine: ▲ / ▼ arrow buttons trigger simultaneous physical card exchange glide animations; pointer/touch drag-and-drop leaves an in-place ghost card while dragging a full-opacity elevated clone (with 240ms touch long-press support), guided by a glowing placement indicator line, and resolving with a multi-card FLIP drop animation that physically opens space and glides into position.
   - 1-click "Share Talk" and "Share Moment" (🔗) copy-to-clipboard buttons with toast feedback.
 - **Lossless On-Demand Format Generation**:
   - Generates Markdown (`.md`), WebVTT (`.vtt`), or JSON (`.json`) on the fly directly from SQLite.
