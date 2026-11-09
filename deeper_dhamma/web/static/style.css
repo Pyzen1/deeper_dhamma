@@ -3572,6 +3572,313 @@ select:hover, select:focus {
   font-weight: 800;
 }
 
+/* ==========================================================================
+   Bookmarks Feature & Ribbon Icon Controls
+   ========================================================================== */
+
+.btn-bookmark-icon {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.btn-bookmark-icon:hover {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-bookmark-icon.is-bookmarked {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.18);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+}
+
+.btn-bookmark-icon svg {
+  display: block;
+}
+
+.bookmark-ribbon-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* Card Pinned Top-Right Bookmark Button */
+.card-bookmark-btn {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 5;
+}
+
+/* Transcript action button bookmark */
+.btn-bookmark-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.btn-bookmark-action.is-bookmarked {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.15);
+}
+
+.bookmark-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Player Bar Bookmark Button */
+.btn-player-bookmark {
+  margin-left: 0.5rem;
+}
+
+/* Bookmarks View */
+.bookmarks-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.bookmarks-status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 1.15rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.bookmarks-reorder-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.bookmarks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Bookmark Card Layout */
+.bookmark-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.15rem 1.25rem;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.bookmark-card:active {
+  cursor: grabbing;
+}
+
+/* In-flow ghost card left in place while dragging */
+.bookmark-card.is-ghost {
+  opacity: 0.28 !important;
+  border: 2px dashed rgba(245, 158, 11, 0.75) !important;
+  background: rgba(245, 158, 11, 0.04) !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+}
+
+/* Floating Solid Drag Card following cursor/finger (full opacity) */
+.bookmark-floating-drag-card,
+.bookmark-drag-floating-preview {
+  position: fixed !important;
+  z-index: 99999 !important;
+  pointer-events: none !important;
+  opacity: 1 !important;
+  background: var(--bg-card, #131926) !important;
+  border: 2px solid #f59e0b !important;
+  border-radius: var(--radius-md, 8px) !important;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.95), 0 0 26px rgba(245, 158, 11, 0.5) !important;
+  transform: scale(1.02) rotate(0.4deg);
+  cursor: grabbing !important;
+  will-change: left, top, transform;
+}
+
+/* Glowing placement indicator line between cards */
+.bookmark-drop-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0) 0%, #f59e0b 15%, #fbbf24 50%, #f59e0b 85%, rgba(245, 158, 11, 0) 100%);
+  box-shadow: 0 0 12px #f59e0b, 0 0 24px rgba(245, 158, 11, 0.85);
+  border-radius: 2px;
+  z-index: 40;
+  pointer-events: none;
+  display: none;
+  transition: top 0.08s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.bookmark-drop-indicator::before,
+.bookmark-drop-indicator::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59e0b;
+  transform: translateY(-50%);
+  box-shadow: 0 0 8px #f59e0b;
+}
+
+.bookmark-drop-indicator::before {
+  left: -4px;
+}
+
+.bookmark-drop-indicator::after {
+  right: -4px;
+}
+
+.bookmark-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Bright Top-Left Bookmark Order Badge (outside reorder group) */
+.bookmark-order-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.35rem;
+  height: 1.85rem;
+  padding: 0 0.55rem;
+  background: #f59e0b; /* Bright golden amber */
+  color: #0b0f19;      /* Ultra high-contrast dark text */
+  font-weight: 800;
+  font-size: 0.88rem;
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.45), 0 0 10px rgba(245, 158, 11, 0.25);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.bookmark-reorder-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.5rem;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.bookmark-drag-handle {
+  font-size: 1.15rem;
+  color: #f59e0b;
+  cursor: grab;
+  padding: 0 0.25rem;
+  line-height: 1;
+  opacity: 0.85;
+  touch-action: none;
+  transition: opacity var(--transition-fast);
+}
+
+.bookmark-drag-handle:hover {
+  opacity: 1;
+}
+
+.btn-reorder {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.btn-reorder:hover:not(:disabled) {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.btn-reorder:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+/* Card Reorder Exchange Glide Animation */
+.bookmark-card.is-exchanging-active {
+  z-index: 25 !important;
+  opacity: 1 !important;
+  border-color: #f59e0b !important;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.9), 0 0 22px rgba(245, 158, 11, 0.45) !important;
+  will-change: transform;
+}
+
+.bookmark-card.is-exchanging-target {
+  z-index: 10 !important;
+  opacity: 0.95 !important;
+  border-color: rgba(245, 158, 11, 0.35) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+  will-change: transform;
+}
+
+@keyframes bookmarkExchangePulse {
+  0% {
+    border-color: #f59e0b;
+    box-shadow: 0 0 18px rgba(245, 158, 11, 0.5);
+  }
+  100% {
+    border-color: var(--border-subtle);
+    box-shadow: none;
+  }
+}
+
+.bookmark-card.just-exchanged {
+  animation: bookmarkExchangePulse 0.6s ease-out;
+}
+
+.btn-remove-bookmark {
+  color: var(--text-muted);
+}
+.btn-remove-bookmark:hover {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+
 
 
 

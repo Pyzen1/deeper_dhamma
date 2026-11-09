@@ -30,6 +30,7 @@
     currentFilteredTalks: [],
     dateFilterMode: 'year',
     archiveCancelRequested: false,
+    isDbReady: false,
     lexicon: {
       term: '',
       mode: 'core',
@@ -70,8 +71,12 @@
     speakerHigh: `<svg class="fluent-icon fluent-speaker-high" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7.99756 23.001L16.6106 26.8308C17.7343 27.3704 19.0356 26.551 19.0356 25.3044V19.0768C20.6809 19.0289 21.9999 17.6801 21.9999 16.0232C21.9999 14.3663 20.6809 13.0175 19.0356 12.9696V6.49639C19.0356 5.25508 17.1704 4.70337 16.0474 5.23141L8.01223 9.0124V9H3.80282C2.80707 9 2 9.84705 2 10.8921V21.1079C2 22.153 2.80707 23 3.80282 23L7.99756 23.001ZM17.0356 7.03194V24.831L9.99756 21.7015L9.99758 10.2885L16.8909 7.04485L16.8926 7.04443C16.9011 7.04219 16.9385 7.03229 17.0069 7.03165C17.0165 7.03156 17.0261 7.03166 17.0356 7.03194Z" fill="currentColor"/><path d="M24.11 11.0695C23.9694 10.9151 23.8237 10.7676 23.6725 10.6276C23.035 10.0376 22 10.4914 22 11.3601V11.3876C22 11.6595 22.1181 11.9164 22.3175 12.1007C23.3031 13.0139 23.9212 14.3189 23.9212 15.7682C23.9212 17.2176 23.3037 18.5226 22.3175 19.4357C22.1119 19.6257 22 19.8964 22 20.1764C22 21.047 23.0369 21.4976 23.6756 20.9057C23.7419 20.8445 23.8069 20.782 23.8706 20.7176C25.2437 19.3445 25.9762 17.5014 25.9175 15.5514C25.8681 13.8932 25.2256 12.2976 24.11 11.0695Z" fill="currentColor"/><path d="M23.5063 7.97456C23.195 7.79455 23 7.46518 23 7.1058C23 6.3333 23.8369 5.85705 24.5056 6.24455C27.79 8.14705 30 11.6989 30 15.7683C30 19.8371 27.7906 23.3896 24.505 25.2921C23.8363 25.6796 22.9994 25.2027 22.9994 24.4302C22.9994 24.0714 23.1931 23.7427 23.5038 23.5627C24.1756 23.1739 24.8006 22.6952 25.3638 22.1321C27.0863 20.4096 28.0244 18.1121 27.9994 15.6721C27.9763 13.4202 27.1031 11.2471 25.56 9.60643C24.9475 8.95518 24.2556 8.40893 23.5063 7.97456Z" fill="currentColor"/></svg>`,
     speakerLow: `<svg class="fluent-icon fluent-speaker-low" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M16.6106 26.8308L7.99756 23.001L3.80282 23C2.80707 23 2 22.153 2 21.1079V10.8921C2 9.84705 2.80707 9 3.80282 9H8.01223V9.0124L16.0474 5.23141C17.1704 4.70337 19.0356 5.25508 19.0356 6.49639V12.9696C20.6809 13.0175 21.9999 14.3663 21.9999 16.0232C21.9999 17.6801 20.6809 19.0289 19.0356 19.0768V25.3044C19.0356 26.551 17.7343 27.3704 16.6106 26.8308ZM17.0356 24.831V7.03194C17.0261 7.03166 17.0165 7.03156 17.0069 7.03165C16.9385 7.03229 16.9011 7.04219 16.8926 7.04443L16.8909 7.04485L9.99758 10.2885L9.99756 21.7015L17.0356 24.831Z" fill="currentColor"/><path d="M24.11 11.0695C23.9694 10.9151 23.8237 10.7676 23.6725 10.6276C23.035 10.0376 22 10.4914 22 11.3601V11.3876C22 11.6595 22.1181 11.9164 22.3175 12.1007C23.3031 13.0139 23.9212 14.3189 23.9212 15.7682C23.9212 17.2176 23.3037 18.5226 22.3175 19.4357C22.1119 19.6257 22 19.8964 22 20.1764C22 21.047 23.0369 21.4976 23.6756 20.9057C23.7419 20.8445 23.8069 20.782 23.8706 20.7176C25.2437 19.3445 25.9762 17.5014 25.9175 15.5514C25.8681 13.8932 25.2256 12.2976 24.11 11.0695Z" fill="currentColor"/></svg>`,
     speakerMute: `<svg class="fluent-icon fluent-speaker-mute" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M19.0356 20.7181L24.9692 26.6519C25.4342 27.1161 26.1866 27.1161 26.6509 26.6511C27.1151 26.1869 27.1151 25.4337 26.6509 24.9694L6.83142 5.14994C6.36718 4.6857 5.61394 4.6857 5.1497 5.14994C4.68545 5.61418 4.68545 6.36742 5.1497 6.83167L7.31807 9.00012H3.80282C2.80707 9.00012 2 9.84717 2 10.8922V21.108C2 22.1531 2.80707 23.0001 3.80282 23.0001L7.99756 23.0011L16.6106 26.8309C17.7343 27.3705 19.0356 26.5512 19.0356 25.3045V20.7181ZM17.0356 18.718V24.8311L9.99756 21.7016L9.99758 11.6797L17.0356 18.718Z" fill="currentColor"/><path d="M21.9999 16.0233C21.9999 16.5266 21.8782 17.0015 21.6626 17.4201L17.0356 12.7931V7.03206C17.0261 7.03178 17.0165 7.03168 17.0069 7.03177C16.9385 7.03241 16.9011 7.04231 16.8926 7.04455L16.8909 7.04498L13.0805 8.83799L11.5774 7.33491L16.0474 5.23153C17.1704 4.70349 19.0356 5.2552 19.0356 6.49651V12.9697C20.6809 13.0176 21.9999 14.3664 21.9999 16.0233Z" fill="currentColor"/></svg>`,
-    mic: `<svg class="fluent-icon fluent-mic" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M17.2889 2H14.7289C12.1789 2 10.0989 4.07 10.0989 6.63V8.12H14.8589C15.2789 8.12 15.6089 8.46 15.6089 8.87C15.6089 9.27999 15.2789 9.62 14.8589 9.62H10.0989V11.3101H14.8589C15.2789 11.3101 15.6089 11.6401 15.6089 12.0601C15.6089 12.4701 15.2789 12.8101 14.8589 12.8101H10.0989V14.49H14.8589C15.2789 14.49 15.6089 14.83 15.6089 15.24C15.6089 15.65 15.2789 15.99 14.8589 15.99H10.0989V17.37C10.0989 19.93 12.1689 22 14.7289 22H17.2889C19.8489 22 21.9189 19.93 21.9189 17.37V6.63C21.9189 4.07 19.8389 2 17.2889 2ZM21.9188 8.12V9.62H17.1588C16.7388 9.62 16.4088 9.27999 16.4088 8.87C16.4088 8.46 16.7388 8.12 17.1588 8.12H21.9188ZM17.1588 11.3101H21.9188V12.8101H17.1588C16.7388 12.8101 16.4088 12.4701 16.4088 12.0601C16.4088 11.6401 16.7388 11.3101 17.1588 11.3101ZM21.9188 14.49V15.99H17.1588C16.7388 15.99 16.4088 15.65 16.4088 15.24C16.4088 14.83 16.7388 14.49 17.1588 14.49H21.9188Z" fill="currentColor"/><path d="M23.9189 12.88C24.4712 12.88 24.9189 13.3277 24.9189 13.88V18.17C24.9189 21.9419 21.8618 24.9994 18.0901 25H18.0889L13.8289 25.01C10.0655 25.01 7.00891 21.9512 7.00891 18.18V13.89C7.00891 13.3377 7.45663 12.89 8.00891 12.89C8.5612 12.89 9.00891 13.3377 9.00891 13.89V18.18C9.00891 20.8485 11.1717 23.0094 13.8278 23.01H13.8289L18.0889 23C20.7566 23 22.9189 20.8377 22.9189 18.17V13.88C22.9189 13.3277 23.3666 12.88 23.9189 12.88Z" fill="currentColor"/><path d="M11.2889 26H13.819V25.01H18.209V26H20.7289C21.6589 26 22.5089 26.51 22.9389 27.32L23.9289 29.14C24.1388 29.53 23.8588 30 23.4188 30H8.58885C8.14885 30 7.86885 29.53 8.07885 29.14L9.06885 27.32C9.50885 26.51 10.3689 26 11.2889 26Z" fill="currentColor"/></svg>`
+    mic: `<svg class="fluent-icon fluent-mic" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M17.2889 2H14.7289C12.1789 2 10.0989 4.07 10.0989 6.63V8.12H14.8589C15.2789 8.12 15.6089 8.46 15.6089 8.87C15.6089 9.27999 15.2789 9.62 14.8589 9.62H10.0989V11.3101H14.8589C15.2789 11.3101 15.6089 11.6401 15.6089 12.0601C15.6089 12.4701 15.2789 12.8101 14.8589 12.8101H10.0989V14.49H14.8589C15.2789 14.49 15.6089 14.83 15.6089 15.24C15.6089 15.65 15.2789 15.99 14.8589 15.99H10.0989V17.37C10.0989 19.93 12.1689 22 14.7289 22H17.2889C19.8489 22 21.9189 19.93 21.9189 17.37V6.63C21.9189 4.07 19.8389 2 17.2889 2ZM21.9188 8.12V9.62H17.1588C16.7388 9.62 16.4088 9.27999 16.4088 8.87C16.4088 8.46 16.7388 8.12 17.1588 8.12H21.9188ZM17.1588 11.3101H21.9188V12.8101H17.1588C16.7388 12.8101 16.4088 12.4701 16.4088 12.0601C16.4088 11.6401 16.7388 11.3101 17.1588 11.3101ZM21.9188 14.49V15.99H17.1588C16.7388 15.99 16.4088 15.65 16.4088 15.24C16.4088 14.83 16.7388 14.49 17.1588 14.49H21.9188Z" fill="currentColor"/><path d="M23.9189 12.88C24.4712 12.88 24.9189 13.3277 24.9189 13.88V18.17C24.9189 21.9419 21.8618 24.9994 18.0901 25H18.0889L13.8289 25.01C10.0655 25.01 7.00891 21.9512 7.00891 18.18V13.89C7.00891 13.3377 7.45663 12.89 8.00891 12.89C8.5612 12.89 9.00891 13.3377 9.00891 13.89V18.18C9.00891 20.8485 11.1717 23.0094 13.8278 23.01H13.8289L18.0889 23C20.7566 23 22.9189 20.8377 22.9189 18.17V13.88C22.9189 13.3377 23.3666 12.88 23.9189 12.88Z" fill="currentColor"/><path d="M11.2889 26H13.819V25.01H18.209V26H20.7289C21.6589 26 22.5089 26.51 22.9389 27.32L23.9289 29.14C24.1388 29.53 23.8588 30 23.4188 30H8.58885C8.14885 30 7.86885 29.53 8.07885 29.14L9.06885 27.32C9.50885 26.51 10.3689 26 11.2889 26Z" fill="currentColor"/></svg>`
   };
+
+  function renderBookmarkRibbonSvg(isBookmarked = false) {
+    return `<svg class="bookmark-ribbon-icon" viewBox="0 0 24 24" width="18" height="18" fill="${isBookmarked ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="${isBookmarked ? '1.5' : '2'}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5C6 2.67157 6.67157 2 7.5 2H16.5C17.3284 2 18 2.67157 18 3.5V21.25C18 21.7303 17.446 22.0028 17.0645 21.7099L12 17.8182L6.93553 21.7099C6.55403 22.0028 6 21.7303 6 21.25V3.5Z"></path></svg>`;
+  }
 
   // DOM Elements Cache
   const els = {
@@ -117,16 +122,25 @@
     statEpisodes: document.getElementById('stat-episodes'),
     tabSearchBtn: document.getElementById('tab-search-btn'),
     tabBrowseBtn: document.getElementById('tab-browse-btn'),
+    tabBookmarksBtn: document.getElementById('tab-bookmarks-btn'),
     tabLexiconBtn: document.getElementById('tab-lexicon-btn'),
     tabTranscriptBtn: document.getElementById('tab-transcript-btn'),
     searchCountBadge: document.getElementById('search-count-badge'),
     browseCountBadge: document.getElementById('browse-count-badge'),
+    bookmarksCountBadge: document.getElementById('bookmarks-count-badge'),
 
     // Views
     searchView: document.getElementById('search-view'),
     browseView: document.getElementById('browse-view'),
+    bookmarksView: document.getElementById('bookmarks-view'),
     lexiconView: document.getElementById('lexicon-view'),
     transcriptView: document.getElementById('transcript-view'),
+
+    // Bookmarks Content
+    bookmarksList: document.getElementById('bookmarks-list'),
+    bookmarksStatusBar: document.getElementById('bookmarks-status-bar'),
+    bookmarksStatusCount: document.getElementById('bookmarks-status-count'),
+    btnClearBookmarks: document.getElementById('btn-clear-bookmarks'),
     
     // Search Content
     searchMetaBar: document.getElementById('search-meta-bar'),
@@ -209,6 +223,10 @@
     playerTitle: document.getElementById('player-track-title'),
     playerSpeaker: document.getElementById('player-track-speaker'),
     btnPlayerTranscript: document.getElementById('btn-player-transcript'),
+    btnPlayerBookmark: document.getElementById('btn-player-bookmark'),
+    transcriptBookmarkBtn: document.getElementById('transcript-bookmark-btn'),
+    transcriptBookmarkIcon: document.getElementById('transcript-bookmark-icon'),
+    transcriptBookmarkLabel: document.getElementById('transcript-bookmark-label'),
     btnPrevTrack: document.getElementById('btn-prev-track'),
     btnPlayPause: document.getElementById('btn-play-pause'),
     btnNextTrack: document.getElementById('btn-next-track'),
@@ -221,6 +239,190 @@
     volumeSlider: document.getElementById('volume-slider'),
     volIcon: document.getElementById('vol-icon'),
     volToggleBtn: document.getElementById('vol-toggle-btn'),
+  };
+
+  // ==========================================================================
+  // Bookmarks Storage & Reactive State Manager (Local Episode IDs Only)
+  // ==========================================================================
+  const BOOKMARKS_STORAGE_KEY = 'deeper_dhamma_bookmarks';
+
+  const BookmarkStore = {
+    _ids: [],
+    _set: new Set(),
+
+    init() {
+      try {
+        const raw = localStorage.getItem(BOOKMARKS_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            this._ids = [];
+            this._set = new Set();
+            parsed.forEach(id => {
+              if (typeof id === 'string' && id.trim() && !this._set.has(id.trim())) {
+                const cleanId = id.trim();
+                this._ids.push(cleanId);
+                this._set.add(cleanId);
+              }
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[BookmarkStore] Failed to read bookmarks from localStorage:', err);
+        this._ids = [];
+        this._set = new Set();
+      }
+      this.updateBadges();
+    },
+
+    save() {
+      try {
+        localStorage.setItem(BOOKMARKS_STORAGE_KEY, JSON.stringify(this._ids));
+      } catch (err) {
+        console.warn('[BookmarkStore] Failed to persist bookmarks to localStorage:', err);
+      }
+      this.updateBadges();
+      this.syncUiButtons();
+    },
+
+    getAll() {
+      return [...this._ids];
+    },
+
+    count() {
+      return this._ids.length;
+    },
+
+    has(epId) {
+      if (!epId) return false;
+      return this._set.has(String(epId));
+    },
+
+    add(epId) {
+      if (!epId) return;
+      const idStr = String(epId);
+      if (this._set.has(idStr)) return;
+      this._ids.unshift(idStr);
+      this._set.add(idStr);
+      this.save();
+    },
+
+    remove(epId) {
+      if (!epId) return;
+      const idStr = String(epId);
+      if (!this._set.has(idStr)) return;
+      this._ids = this._ids.filter(id => id !== idStr);
+      this._set.delete(idStr);
+      this.save();
+    },
+
+    toggle(epId) {
+      if (!epId) return false;
+      const idStr = String(epId);
+      if (this.has(idStr)) {
+        this.remove(idStr);
+        if (typeof showToast === 'function') showToast('Removed from Bookmarks');
+        return false;
+      } else {
+        this.add(idStr);
+        if (typeof showToast === 'function') showToast('Saved to Bookmarks');
+        return true;
+      }
+    },
+
+    moveUp(epId) {
+      const idx = this._ids.indexOf(String(epId));
+      if (idx > 0) {
+        const temp = this._ids[idx];
+        this._ids[idx] = this._ids[idx - 1];
+        this._ids[idx - 1] = temp;
+        this.save();
+        return true;
+      }
+      return false;
+    },
+
+    moveDown(epId) {
+      const idx = this._ids.indexOf(String(epId));
+      if (idx >= 0 && idx < this._ids.length - 1) {
+        const temp = this._ids[idx];
+        this._ids[idx] = this._ids[idx + 1];
+        this._ids[idx + 1] = temp;
+        this.save();
+        return true;
+      }
+      return false;
+    },
+
+    moveRelativeTo(draggedId, targetId, placeBefore) {
+      const dIdx = this._ids.indexOf(String(draggedId));
+      if (dIdx < 0) return;
+      this._ids.splice(dIdx, 1);
+      let tIdx = this._ids.indexOf(String(targetId));
+      if (tIdx < 0) {
+        this._ids.push(String(draggedId));
+      } else {
+        const insertIdx = placeBefore ? tIdx : tIdx + 1;
+        this._ids.splice(insertIdx, 0, String(draggedId));
+      }
+      this.save();
+    },
+
+    clear() {
+      this._ids = [];
+      this._set.clear();
+      this.save();
+    },
+
+    updateBadges() {
+      const count = this.count();
+      if (els.bookmarksCountBadge) {
+        els.bookmarksCountBadge.textContent = String(count);
+      }
+      if (els.bookmarksStatusCount) {
+        els.bookmarksStatusCount.textContent = `${count} saved talk${count === 1 ? '' : 's'}`;
+      }
+    },
+
+    syncUiButtons() {
+      // Synchronize all visible bookmark ribbon buttons across the document
+      document.querySelectorAll('[data-action="toggle-bookmark"]').forEach(btn => {
+        const epId = btn.dataset.epId;
+        const isBmk = this.has(epId);
+        btn.classList.toggle('is-bookmarked', isBmk);
+        btn.setAttribute('aria-label', isBmk ? 'Remove bookmark' : 'Bookmark this talk');
+        btn.title = isBmk ? 'Remove bookmark' : 'Bookmark this talk';
+        btn.innerHTML = renderBookmarkRibbonSvg(isBmk);
+      });
+
+      // Update transcript drawer bookmark button if open
+      if (state.currentEpisode && els.transcriptBookmarkBtn) {
+        const isBmk = this.has(state.currentEpisode.id);
+        els.transcriptBookmarkBtn.classList.toggle('is-bookmarked', isBmk);
+        els.transcriptBookmarkBtn.title = isBmk ? 'Remove bookmark' : 'Bookmark talk';
+        if (els.transcriptBookmarkIcon) {
+          els.transcriptBookmarkIcon.innerHTML = renderBookmarkRibbonSvg(isBmk);
+        }
+        if (els.transcriptBookmarkLabel) {
+          els.transcriptBookmarkLabel.textContent = isBmk ? 'Bookmarked' : 'Bookmark';
+        }
+      }
+
+      // Update player bar bookmark button if playing
+      if (els.btnPlayerBookmark) {
+        if (state.playingEpisode && state.playingEpisode.id) {
+          const isBmk = this.has(state.playingEpisode.id);
+          els.btnPlayerBookmark.style.display = 'inline-flex';
+          els.btnPlayerBookmark.classList.toggle('is-bookmarked', isBmk);
+          els.btnPlayerBookmark.dataset.epId = state.playingEpisode.id;
+          els.btnPlayerBookmark.title = isBmk ? 'Remove bookmark' : 'Bookmark current talk';
+          els.btnPlayerBookmark.setAttribute('aria-label', isBmk ? 'Remove bookmark' : 'Bookmark current talk');
+          els.btnPlayerBookmark.innerHTML = renderBookmarkRibbonSvg(isBmk);
+        } else {
+          els.btnPlayerBookmark.style.display = 'none';
+        }
+      }
+    }
   };
 
   // ==========================================================================
@@ -659,6 +861,10 @@
           switchTab('browse-view', { skipHistory: true });
           break;
 
+        case 'bookmarks':
+          switchTab('bookmarks-view', { skipHistory: true });
+          break;
+
         case 'lexicon':
           switchTab('lexicon-view', { skipHistory: true });
           if (params.term) {
@@ -730,6 +936,7 @@
 
   async function init() {
     registerServiceWorker();
+    BookmarkStore.init();
     setupEventListeners();
     setupAudioEngine();
     if (window.WordSync) {
@@ -741,11 +948,16 @@
     if (!dbService) return;
     try {
       await dbService.init();
+      state.isDbReady = true;
       await Promise.all([
         loadArchiveStats(),
         loadBrowseCatalog(),
         ensurePaliTermsLoaded(),
       ]);
+
+      if (state.activeTab === 'bookmarks-view') {
+        loadBookmarksView();
+      }
 
       // Initialize router state from URL (hash, search params, or pathname)
       const hasInitialRoute = Boolean(
@@ -1408,6 +1620,20 @@
         openTranscriptDrawer(epId);
       });
     });
+
+    container.querySelectorAll('[data-action="toggle-bookmark"]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const epId = btn.dataset.epId;
+        if (epId) {
+          BookmarkStore.toggle(epId);
+          if (state.activeTab === 'bookmarks-view') {
+            loadBookmarksView();
+          }
+        }
+      });
+    });
   }
 
   // ==========================================================================
@@ -1553,6 +1779,9 @@
     // Tabs
     els.tabSearchBtn.addEventListener('click', () => switchTab('search-view'));
     els.tabBrowseBtn.addEventListener('click', () => switchTab('browse-view'));
+    if (els.tabBookmarksBtn) {
+      els.tabBookmarksBtn.addEventListener('click', () => switchTab('bookmarks-view'));
+    }
     els.tabLexiconBtn.addEventListener('click', () => switchTab('lexicon-view'));
     if (els.tabDocsBtn) {
       els.tabDocsBtn.addEventListener('click', () => switchTab('documents-view'));
@@ -1560,6 +1789,67 @@
     if (els.tabTranscriptBtn) {
       els.tabTranscriptBtn.addEventListener('click', () => switchTab('transcript-view'));
     }
+
+    // Bookmarks Controls & Event Listeners
+    if (els.btnClearBookmarks) {
+      els.btnClearBookmarks.addEventListener('click', () => {
+        const count = BookmarkStore.count();
+        if (count === 0) return;
+        if (window.confirm(`Are you sure you want to remove all ${count} saved bookmark${count === 1 ? '' : 's'}?`)) {
+          BookmarkStore.clear();
+          loadBookmarksView();
+        }
+      });
+    }
+
+    if (els.transcriptBookmarkBtn) {
+      els.transcriptBookmarkBtn.addEventListener('click', () => {
+        if (state.currentEpisode && state.currentEpisode.id) {
+          BookmarkStore.toggle(state.currentEpisode.id);
+          if (state.activeTab === 'bookmarks-view') {
+            loadBookmarksView();
+          }
+        }
+      });
+    }
+
+    if (els.btnPlayerBookmark) {
+      els.btnPlayerBookmark.addEventListener('click', () => {
+        if (state.playingEpisode && state.playingEpisode.id) {
+          BookmarkStore.toggle(state.playingEpisode.id);
+          if (state.activeTab === 'bookmarks-view') {
+            loadBookmarksView();
+          }
+        }
+      });
+    }
+
+    // Delegated click handler for bookmark buttons across all views
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action="toggle-bookmark"]');
+      if (btn) {
+        e.stopPropagation();
+        e.preventDefault();
+        const epId = btn.dataset.epId;
+        if (epId) {
+          BookmarkStore.toggle(epId);
+          if (state.activeTab === 'bookmarks-view') {
+            loadBookmarksView();
+          }
+        }
+      }
+    });
+
+    // Cross-tab synchronization via localStorage events
+    window.addEventListener('storage', (e) => {
+      if (e.key === BOOKMARKS_STORAGE_KEY) {
+        BookmarkStore.init();
+        BookmarkStore.syncUiButtons();
+        if (state.activeTab === 'bookmarks-view') {
+          loadBookmarksView();
+        }
+      }
+    });
 
     if (els.transcriptBackBtn) {
       els.transcriptBackBtn.addEventListener('click', () => {
@@ -2014,6 +2304,9 @@
     if (viewId === 'browse-view' && (!state.catalog || state.catalog.length === 0)) {
       loadBrowseCatalog();
     }
+    if (viewId === 'bookmarks-view') {
+      loadBookmarksView();
+    }
     if (viewId === 'lexicon-view' && (!state.lexicon || !state.lexicon.loadedOnce)) {
       loadLexiconView();
     }
@@ -2039,6 +2332,7 @@
       const tabToRouteMap = {
         'search-view': state.currentQuery ? `search?q=${encodeURIComponent(state.currentQuery)}` : 'search',
         'browse-view': 'browse',
+        'bookmarks-view': 'bookmarks',
         'lexicon-view': state.lexicon.term ? `lexicon?term=${encodeURIComponent(state.lexicon.term)}` : 'lexicon',
         'documents-view': docRoute,
         'transcript-view': state.currentEpisode ? `talk/${state.currentEpisode.id}` : 'search',
@@ -2578,6 +2872,9 @@
             </div>
 
             <div class="result-header-badges">
+              <button type="button" class="btn-bookmark-icon${BookmarkStore.has(group.id) ? ' is-bookmarked' : ''}" data-action="toggle-bookmark" data-ep-id="${escapeHtml(group.id)}" title="${BookmarkStore.has(group.id) ? 'Remove bookmark' : 'Bookmark this talk'}" aria-label="${BookmarkStore.has(group.id) ? 'Remove bookmark' : 'Bookmark this talk'}">
+                ${renderBookmarkRibbonSvg(BookmarkStore.has(group.id))}
+              </button>
               <span class="match-count-badge" title="${matchCount} search match${matchCount === 1 ? '' : 'es'} in this transcript">
                 ${matchCount} match${matchCount === 1 ? '' : 'es'}
               </span>
@@ -2757,10 +3054,14 @@
   function renderBrowseEpisodeCardHtml(ep) {
     const isTranscribed = Boolean(ep.is_transcribed);
     const durMin = Math.round((ep.duration_sec || 0) / 60);
+    const isBmk = BookmarkStore.has(ep.id);
     return `
-      <div class="episode-card">
+      <div class="episode-card" data-ep-id="${escapeHtml(ep.id)}">
+        <button type="button" class="btn-bookmark-icon card-bookmark-btn${isBmk ? ' is-bookmarked' : ''}" data-action="toggle-bookmark" data-ep-id="${escapeHtml(ep.id)}" title="${isBmk ? 'Remove bookmark' : 'Bookmark this talk'}" aria-label="${isBmk ? 'Remove bookmark' : 'Bookmark this talk'}">
+          ${renderBookmarkRibbonSvg(isBmk)}
+        </button>
         <div>
-          <div class="result-meta-line" style="margin-bottom: 0.5rem;">
+          <div class="result-meta-line" style="margin-bottom: 0.5rem; padding-right: 2.5rem;">
             ${renderTeacherBadgesHtml(ep)}
             <span>📅 ${escapeHtml(ep.date || '')}</span>
             ${durMin > 0 ? `<span>• ⏱️ ${durMin} mins</span>` : ''}
@@ -2913,6 +3214,638 @@
     } catch (err) {
       console.error('Failed to load browse catalog:', err);
     }
+  }
+
+  // ==========================================================================
+  // Bookmarks Catalog View (Local Episode IDs Only)
+  // ==========================================================================
+
+  async function loadBookmarksView() {
+    if (!els.bookmarksList) return;
+
+    // Check if database is ready
+    if (!state.isDbReady) {
+      els.bookmarksList.innerHTML = `
+        <div class="empty-state">
+          <div class="loading-spinner"></div>
+          <h2>Waiting for database to load...</h2>
+          <p>The talk archive database is initializing. Your bookmarked talks will load momentarily.</p>
+        </div>
+      `;
+      if (els.bookmarksStatusBar) els.bookmarksStatusBar.style.display = 'none';
+      if (els.btnClearBookmarks) els.btnClearBookmarks.style.display = 'none';
+      return;
+    }
+
+    const ids = BookmarkStore.getAll();
+    if (ids.length === 0) {
+      els.bookmarksList.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">🔖</div>
+          <h2>No Bookmarked Talks Yet</h2>
+          <p>Click the bookmark ribbon icon (🔖) on any talk in Search or Browse to store it locally for fast recall.</p>
+          <button type="button" class="btn-primary" style="margin-top: 1rem;" id="btn-bookmarks-go-browse">
+            📚 Browse Talks Catalog
+          </button>
+        </div>
+      `;
+      const goBrowse = document.getElementById('btn-bookmarks-go-browse');
+      if (goBrowse) {
+        goBrowse.addEventListener('click', () => switchTab('browse-view'));
+      }
+      if (els.bookmarksStatusBar) els.bookmarksStatusBar.style.display = 'none';
+      if (els.btnClearBookmarks) els.btnClearBookmarks.style.display = 'none';
+      return;
+    }
+
+    if (els.bookmarksStatusBar) els.bookmarksStatusBar.style.display = 'flex';
+    if (els.btnClearBookmarks) els.btnClearBookmarks.style.display = 'inline-flex';
+    els.bookmarksList.innerHTML = '<div class="loading-spinner">Loading bookmarked talks...</div>';
+
+    try {
+      const episodes = await dbService.getEpisodesByIds(ids);
+      if (!episodes || episodes.length === 0) {
+        els.bookmarksList.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">⚠️</div>
+            <h2>No matching talks found</h2>
+            <p>The bookmarked talks could not be found in the current archive index.</p>
+          </div>
+        `;
+        return;
+      }
+
+      renderBookmarksList(episodes);
+    } catch (err) {
+      console.error('[Bookmarks] Failed to load bookmarked episodes:', err);
+      els.bookmarksList.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⚠️</div>
+          <h2>Failed to load bookmarks</h2>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">${escapeHtml(err.message || String(err))}</p>
+        </div>
+      `;
+    }
+  }
+
+  function renderBookmarksList(episodes) {
+    if (!els.bookmarksList) return;
+    const total = episodes.length;
+
+    let html = episodes.map((ep, idx) => {
+      const isTranscribed = Boolean(ep.is_transcribed);
+      const durMin = Math.round((ep.duration_sec || 0) / 60);
+      const isFirst = idx === 0;
+      const isLast = idx === total - 1;
+
+      return `
+        <div class="bookmark-card episode-card" data-ep-id="${escapeHtml(ep.id)}" data-index="${idx}">
+          <div class="bookmark-card-top">
+            <span class="bookmark-order-badge" title="Bookmark #${idx + 1}" aria-label="Bookmark #${idx + 1}">#${idx + 1}</span>
+            <div class="bookmark-reorder-group" title="Drag to reorder, or use arrows">
+              <span class="bookmark-drag-handle" title="Drag to reorder" aria-hidden="true">⠿</span>
+              <button type="button" class="btn-reorder btn-reorder-up" data-action="bookmark-up" data-ep-id="${escapeHtml(ep.id)}" ${isFirst ? 'disabled' : ''} title="Move Up (earlier in list)" aria-label="Move Up">
+                ▲
+              </button>
+              <button type="button" class="btn-reorder btn-reorder-down" data-action="bookmark-down" data-ep-id="${escapeHtml(ep.id)}" ${isLast ? 'disabled' : ''} title="Move Down (later in list)" aria-label="Move Down">
+                ▼
+              </button>
+            </div>
+
+            <div class="result-meta-line" style="flex: 1; margin-left: 0.5rem; justify-content: space-between;">
+              <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
+                ${renderTeacherBadgesHtml(ep)}
+                <span>📅 ${escapeHtml(ep.date || '')}</span>
+                ${durMin > 0 ? `<span>• ⏱️ ${durMin} mins</span>` : ''}
+                ${isTranscribed
+                  ? '<span class="status-pill transcribed-pill" title="Full synchronized transcript available">✓ Transcribed</span>'
+                  : '<span class="status-pill audio-only-pill" title="Stream audio directly from Podbean CDN">🎧 Audio</span>'
+                }
+              </div>
+              <button type="button" class="btn-bookmark-icon is-bookmarked" data-action="toggle-bookmark" data-ep-id="${escapeHtml(ep.id)}" title="Remove bookmark" aria-label="Remove bookmark">
+                ${renderBookmarkRibbonSvg(true)}
+              </button>
+            </div>
+          </div>
+
+          <h3 class="episode-title" style="margin-top: 0.5rem;">${escapeHtml(ep.title)}</h3>
+
+          <div class="episode-footer">
+            <button type="button" class="btn-primary" data-action="play-ep-start" data-ep-id="${escapeHtml(ep.id)}">
+              ▶ Play Talk
+            </button>
+            ${isTranscribed ? `
+              <button type="button" class="btn-secondary" data-action="view-transcript" data-ep-id="${escapeHtml(ep.id)}">
+                📜 Transcript
+              </button>
+              <div class="download-dropdown-wrapper">
+                <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
+                  📥 Download ▾
+                </button>
+                <div class="download-dropdown-menu">
+                  <div class="dropdown-menu-header">Export Transcript</div>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="md">
+                    <span class="download-opt-icon">📝</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">Markdown</span>
+                      <span class="download-opt-desc">Formatted notes (.md)</span>
+                    </div>
+                    <span class="download-opt-badge">.md</span>
+                  </button>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="txt">
+                    <span class="download-opt-icon">📄</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">Plain Text</span>
+                      <span class="download-opt-desc">Clean transcript text (.txt)</span>
+                    </div>
+                    <span class="download-opt-badge">.txt</span>
+                  </button>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="srt">
+                    <span class="download-opt-icon">🎬</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">SubRip Subtitles</span>
+                      <span class="download-opt-desc">For VLC / media players (.srt)</span>
+                    </div>
+                    <span class="download-opt-badge">.srt</span>
+                  </button>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="vtt">
+                    <span class="download-opt-icon">🌐</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">WebVTT Captions</span>
+                      <span class="download-opt-desc">Web caption track (.vtt)</span>
+                    </div>
+                    <span class="download-opt-badge">.vtt</span>
+                  </button>
+                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="json">
+                    <span class="download-opt-icon">📊</span>
+                    <div class="download-opt-text">
+                      <span class="download-opt-title">JSON Data</span>
+                      <span class="download-opt-desc">Structured turn array (.json)</span>
+                    </div>
+                    <span class="download-opt-badge">.json</span>
+                  </button>
+                </div>
+              </div>
+            ` : ''}
+            <button type="button" class="btn-secondary btn-remove-bookmark" data-action="remove-bookmark" data-ep-id="${escapeHtml(ep.id)}" title="Remove from bookmarks">
+              ✕ Remove
+            </button>
+            ${ep.permalink ? `
+              <a href="${getPodbeanUrl(ep.permalink)}" target="_blank" rel="noopener noreferrer" class="link-btn">
+                ↗ Podbean
+              </a>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    els.bookmarksList.innerHTML = html;
+    attachBookmarkCardEvents(els.bookmarksList, episodes);
+  }
+
+  function attachBookmarkCardEvents(container, episodes) {
+    attachCardEventListeners(container, episodes);
+
+    // Ensure container has relative positioning for the glowing drop indicator
+    container.style.position = 'relative';
+
+    // Ensure glowing drop indicator element exists in container
+    let indicator = container.querySelector('.bookmark-drop-indicator');
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.className = 'bookmark-drop-indicator';
+      container.appendChild(indicator);
+    }
+    indicator.style.display = 'none';
+
+    // Remove bookmark
+    container.querySelectorAll('[data-action="remove-bookmark"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const epId = btn.dataset.epId;
+        BookmarkStore.remove(epId);
+        loadBookmarksView();
+      });
+    });
+
+    // Exchange Glide Animation state flag
+    let isExchanging = false;
+
+    function performCardExchange(currentCard, targetCard, epId, direction) {
+      if (isExchanging || !currentCard || !targetCard) return;
+      isExchanging = true;
+
+      // Lock container clicks during physical glide transition
+      container.style.pointerEvents = 'none';
+
+      const currentRect = currentCard.getBoundingClientRect();
+      const targetRect = targetCard.getBoundingClientRect();
+      const deltaY = targetRect.top - currentRect.top;
+
+      // Apply floating exchange glide styling
+      currentCard.classList.add('is-exchanging-active');
+      targetCard.classList.add('is-exchanging-target');
+
+      // Trigger FLIP glide transform past each other
+      currentCard.style.transform = `translateY(${deltaY}px) scale(1.015)`;
+      targetCard.style.transform = `translateY(${-deltaY}px) scale(0.995)`;
+
+      const durationMs = 280;
+
+      setTimeout(() => {
+        // Reset transforms and animation classes
+        currentCard.style.transform = '';
+        targetCard.style.transform = '';
+        currentCard.classList.remove('is-exchanging-active');
+        targetCard.classList.remove('is-exchanging-target');
+        container.style.pointerEvents = '';
+
+        // Persist order in BookmarkStore
+        if (direction === 'up') {
+          BookmarkStore.moveUp(epId);
+        } else {
+          BookmarkStore.moveDown(epId);
+        }
+
+        // Reorder local in-memory episodes array synchronously for instant re-render
+        const currIdx = episodes.findIndex(e => String(e.id) === String(epId));
+        const targetIdx = direction === 'up' ? currIdx - 1 : currIdx + 1;
+        if (currIdx !== -1 && targetIdx >= 0 && targetIdx < episodes.length) {
+          const temp = episodes[currIdx];
+          episodes[currIdx] = episodes[targetIdx];
+          episodes[targetIdx] = temp;
+        }
+
+        // Re-render DOM with updated order
+        renderBookmarksList(episodes);
+
+        // Flash gentle accent highlight on moved card
+        const selector = CSS && CSS.escape ? `.bookmark-card[data-ep-id="${CSS.escape(epId)}"]` : `.bookmark-card[data-ep-id="${epId}"]`;
+        const movedEl = container.querySelector(selector);
+        if (movedEl) {
+          movedEl.classList.add('just-exchanged');
+          setTimeout(() => movedEl.classList.remove('just-exchanged'), 600);
+        }
+
+        isExchanging = false;
+      }, durationMs);
+    }
+
+    // Move Up with exchange glide animation
+    container.querySelectorAll('[data-action="bookmark-up"]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isExchanging) return;
+        const epId = btn.dataset.epId;
+        const currentCard = btn.closest('.bookmark-card');
+        if (!currentCard) return;
+        const targetCard = currentCard.previousElementSibling;
+        if (!targetCard || !targetCard.classList.contains('bookmark-card')) return;
+        performCardExchange(currentCard, targetCard, epId, 'up');
+      });
+    });
+
+    // Move Down with exchange glide animation
+    container.querySelectorAll('[data-action="bookmark-down"]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isExchanging) return;
+        const epId = btn.dataset.epId;
+        const currentCard = btn.closest('.bookmark-card');
+        if (!currentCard) return;
+        const targetCard = currentCard.nextElementSibling;
+        if (!targetCard || !targetCard.classList.contains('bookmark-card')) return;
+        performCardExchange(currentCard, targetCard, epId, 'down');
+      });
+    });
+
+    // =========================================================================
+    // Pointer-Based Fluid Drag & Drop with Ghost, Glowing Line & FLIP Drop
+    // =========================================================================
+
+    let dragSession = null;
+
+    // Helper to calculate target slot based on pointer Y
+    function getSlotAtY(cards, pointerY) {
+      if (cards.length === 0) return 0;
+      for (let i = 0; i < cards.length; i++) {
+        const rect = cards[i].getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (pointerY < midY) {
+          return i;
+        }
+      }
+      return cards.length;
+    }
+
+    // Helper to compute indicator line Y in container coordinate space
+    function getIndicatorTop(cards, slot) {
+      const containerRect = container.getBoundingClientRect();
+      if (cards.length === 0) return 0;
+
+      if (slot === 0) {
+        const firstRect = cards[0].getBoundingClientRect();
+        return (firstRect.top - containerRect.top) - 6;
+      }
+      if (slot >= cards.length) {
+        const lastRect = cards[cards.length - 1].getBoundingClientRect();
+        return (lastRect.bottom - containerRect.top) + 6;
+      }
+
+      const prevRect = cards[slot - 1].getBoundingClientRect();
+      const nextRect = cards[slot].getBoundingClientRect();
+      const midY = (prevRect.bottom + nextRect.top) / 2;
+      return midY - containerRect.top;
+    }
+
+    function initCardPointerDrag(card) {
+      // Prevent browser default HTML5 drag
+      card.addEventListener('dragstart', (e) => e.preventDefault());
+
+      let pressTimer = null;
+      let startX = 0;
+      let startY = 0;
+      let isTracking = false;
+      let hasStartedDrag = false;
+
+      function onPointerDown(e) {
+        if (isExchanging || dragSession) return;
+        // Ignore right clicks or secondary buttons
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        // Ignore clicks on buttons, links, inputs, dropdown menus
+        if (e.target.closest('button, a, input, select, .download-dropdown-menu, .download-dropdown-wrapper')) {
+          return;
+        }
+
+        isTracking = true;
+        hasStartedDrag = false;
+        startX = e.clientX;
+        startY = e.clientY;
+
+        const isHandle = Boolean(e.target.closest('.bookmark-drag-handle'));
+
+        if (e.pointerType === 'touch') {
+          // Touch device: immediate if on drag handle, or 240ms long-press timer if on card body
+          if (isHandle) {
+            startDrag(e);
+          } else {
+            pressTimer = setTimeout(() => {
+              if (isTracking && !hasStartedDrag) {
+                if (navigator.vibrate) {
+                  try { navigator.vibrate(30); } catch (_) {}
+                }
+                startDrag(e);
+              }
+            }, 240);
+          }
+        }
+
+        // Attach global move/up handlers on window for rock-solid drag tracking
+        window.addEventListener('pointermove', onPointerMove, { passive: false });
+        window.addEventListener('pointerup', onPointerUp);
+        window.addEventListener('pointercancel', onPointerCancel);
+      }
+
+      function startDrag(e) {
+        if (hasStartedDrag || dragSession || isExchanging) return;
+        hasStartedDrag = true;
+
+        const epId = card.dataset.epId;
+        const origIdx = parseInt(card.dataset.index, 10);
+        const cardRect = card.getBoundingClientRect();
+        const grabOffsetX = startX - cardRect.left;
+        const grabOffsetY = startY - cardRect.top;
+
+        // 1. Create floating solid drag clone (full opacity, not a ghost)
+        const floatingEl = card.cloneNode(true);
+        floatingEl.classList.remove('is-ghost', 'just-exchanged', 'is-exchanging-active', 'is-exchanging-target');
+        floatingEl.classList.add('bookmark-floating-drag-card', 'bookmark-drag-floating-preview');
+        floatingEl.style.width = `${cardRect.width}px`;
+        floatingEl.style.left = `${cardRect.left}px`;
+        floatingEl.style.top = `${cardRect.top}px`;
+        document.body.appendChild(floatingEl);
+
+        // 2. Mark in-flow card as ghost in place
+        card.classList.add('is-ghost');
+
+        // 3. Setup drag session
+        dragSession = {
+          card,
+          epId,
+          origIdx,
+          floatingEl,
+          grabOffsetX,
+          grabOffsetY,
+          targetSlot: origIdx,
+          cards: Array.from(container.querySelectorAll('.bookmark-card')),
+        };
+
+        // 4. Initial positioning of indicator
+        updateIndicator(e.clientY);
+      }
+
+      function updateIndicator(clientY) {
+        if (!dragSession) return;
+        const slot = getSlotAtY(dragSession.cards, clientY);
+        dragSession.targetSlot = slot;
+
+        const topPos = getIndicatorTop(dragSession.cards, slot);
+        indicator.style.top = `${topPos}px`;
+        indicator.style.display = 'block';
+      }
+
+      function onPointerMove(e) {
+        if (!isTracking) return;
+
+        if (!hasStartedDrag) {
+          const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+          const isHandle = Boolean(e.target.closest('.bookmark-drag-handle'));
+          const threshold = isHandle ? 3 : 6;
+
+          if (dist > threshold) {
+            // If touch and moved before long-press timer, user is scrolling the page
+            if (e.pointerType === 'touch' && !isHandle) {
+              clearTimeout(pressTimer);
+              pressTimer = null;
+              cleanupTracking();
+              return;
+            }
+            startDrag(e);
+          }
+        }
+
+        if (hasStartedDrag && dragSession) {
+          e.preventDefault(); // Prevent native scrolling while dragging
+          // Position floating solid card with pointer coordinates
+          const x = e.clientX - dragSession.grabOffsetX;
+          const y = e.clientY - dragSession.grabOffsetY;
+          dragSession.floatingEl.style.left = `${x}px`;
+          dragSession.floatingEl.style.top = `${y}px`;
+
+          // Indicate placement by glowing line without affecting existing cards
+          updateIndicator(e.clientY);
+        }
+      }
+
+      function onPointerUp(e) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+        if (hasStartedDrag && dragSession) {
+          finishDrag();
+        } else {
+          cleanupTracking();
+        }
+      }
+
+      function onPointerCancel() {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+        if (hasStartedDrag && dragSession) {
+          finishDrag();
+        } else {
+          cleanupTracking();
+        }
+      }
+
+      function cleanupTracking() {
+        isTracking = false;
+        hasStartedDrag = false;
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerCancel);
+      }
+
+      function finishDrag() {
+        if (!dragSession) return;
+        cleanupTracking();
+
+        const { card, epId, origIdx, floatingEl, targetSlot } = dragSession;
+        dragSession = null;
+        indicator.style.display = 'none';
+
+        // Calculate new array index from targetSlot
+        let newIdx = targetSlot;
+        if (targetSlot > origIdx) {
+          newIdx = targetSlot - 1;
+        }
+
+        // Case A: Released in same place (no reorder)
+        if (newIdx === origIdx) {
+          const currentRect = floatingEl.getBoundingClientRect();
+          const targetRect = card.getBoundingClientRect();
+          const deltaX = targetRect.left - currentRect.left;
+          const deltaY = targetRect.top - currentRect.top;
+
+          floatingEl.style.transition = 'transform 0.28s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.28s ease, border-color 0.28s ease';
+          floatingEl.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(1)`;
+          floatingEl.style.boxShadow = 'var(--shadow-card)';
+          floatingEl.style.borderColor = 'var(--border-subtle)';
+
+          setTimeout(() => {
+            floatingEl.remove();
+            card.classList.remove('is-ghost');
+            card.classList.add('just-exchanged');
+            setTimeout(() => card.classList.remove('just-exchanged'), 600);
+          }, 280);
+          return;
+        }
+
+        // Case B: Reordered! Physical exchange FLIP animation
+        isExchanging = true;
+        container.style.pointerEvents = 'none';
+
+        // 1. Snapshot all cards' FIRST bounding rects
+        const allCards = Array.from(container.querySelectorAll('.bookmark-card'));
+        const firstRects = new Map();
+        allCards.forEach(c => {
+          firstRects.set(c.dataset.epId, c.getBoundingClientRect());
+        });
+        const floatingRect = floatingEl.getBoundingClientRect();
+
+        // 2. Commit reorder to BookmarkStore
+        const targetEpId = episodes[newIdx] ? episodes[newIdx].id : null;
+        if (targetEpId) {
+          const placeBefore = newIdx < origIdx;
+          BookmarkStore.moveRelativeTo(epId, targetEpId, placeBefore);
+        }
+
+        // 3. Reorder local in-memory episodes array synchronously
+        const movedEp = episodes.splice(origIdx, 1)[0];
+        episodes.splice(newIdx, 0, movedEp);
+
+        // 4. Render new DOM layout
+        renderBookmarksList(episodes);
+
+        // 5. Invert all card positions relative to where they just were
+        const newCards = Array.from(container.querySelectorAll('.bookmark-card'));
+        newCards.forEach(c => {
+          const cardId = c.dataset.epId;
+          const lastRect = c.getBoundingClientRect();
+
+          if (cardId === epId) {
+            // Dropped card glides from floatingRect into its new slot!
+            const deltaX = floatingRect.left - lastRect.left;
+            const deltaY = floatingRect.top - lastRect.top;
+            c.classList.add('is-exchanging-active');
+            c.style.transition = 'none';
+            c.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(1.02)`;
+          } else {
+            // Surrounding cards glide up or down to make space / close gap!
+            const firstRect = firstRects.get(cardId);
+            if (firstRect) {
+              const deltaY = firstRect.top - lastRect.top;
+              if (Math.abs(deltaY) > 1) {
+                c.classList.add('is-exchanging-target');
+                c.style.transition = 'none';
+                c.style.transform = `translateY(${deltaY}px)`;
+              }
+            }
+          }
+        });
+
+        // 6. Remove floating clone now that inverted DOM card is at the exact same coordinates
+        floatingEl.remove();
+
+        // 7. Force reflow so invert styles apply before playing transition
+        void container.offsetWidth;
+
+        // 8. Play transition: physical cards move and make space, new card drops into place
+        const durationMs = 320;
+        newCards.forEach(c => {
+          if (c.classList.contains('is-exchanging-active')) {
+            c.style.transition = 'transform 0.32s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.32s ease, border-color 0.32s ease';
+            c.style.transform = '';
+          } else if (c.classList.contains('is-exchanging-target')) {
+            c.style.transition = 'transform 0.32s cubic-bezier(0.25, 1, 0.5, 1)';
+            c.style.transform = '';
+          }
+        });
+
+        // 9. Clean up on transition finish
+        setTimeout(() => {
+          newCards.forEach(c => {
+            c.style.transition = '';
+            c.style.transform = '';
+            c.classList.remove('is-exchanging-active', 'is-exchanging-target');
+          });
+          container.style.pointerEvents = '';
+
+          const droppedCard = container.querySelector(`.bookmark-card[data-ep-id="${CSS && CSS.escape ? CSS.escape(epId) : epId}"]`);
+          if (droppedCard) {
+            droppedCard.classList.add('just-exchanged');
+            setTimeout(() => droppedCard.classList.remove('just-exchanged'), 600);
+          }
+
+          isExchanging = false;
+        }, durationMs);
+      }
+
+      card.addEventListener('pointerdown', onPointerDown);
+    }
+
+    container.querySelectorAll('.bookmark-card').forEach(card => {
+      initCardPointerDrag(card);
+    });
   }
 
   // ==========================================================================
@@ -3889,6 +4822,7 @@
       }
       state.currentEpisode = ep;
       updateHeaderPlayButton();
+      BookmarkStore.syncUiButtons();
 
       if (els.drawerTitle) els.drawerTitle.textContent = ep.title;
       if (els.drawerDateTag) els.drawerDateTag.textContent = ep.date || `Year ${ep.year}`;
@@ -4450,6 +5384,7 @@
       els.btnPlayerTranscript.style.display = 'inline-flex';
     }
     updateHeaderPlayButton();
+    BookmarkStore.syncUiButtons();
 
     // Apply exactly 500ms lead time to first word for any/all seek ref points (clamped to 0)
     const rawTarget = typeof start_sec === 'number' ? start_sec : parseFloat(start_sec || 0);

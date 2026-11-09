@@ -176,4 +176,75 @@ def test_service_worker_dynamic_version_stamping_and_network_first_navigation():
     assert "window.resetDeeperDhammaCache" in app_js, "app.js must provide resetDeeperDhammaCache recovery"
 
 
+def test_bookmark_feature_and_view_integrity():
+    """
+    Verifies the bookmark feature architecture:
+    1. index.html defines the Bookmarks tab nav button, badge counter, and view panel.
+    2. Bookmark ribbon icon buttons exist on cards, transcript reader, and audio player bar.
+    3. db_worker.js and wasm_client.js implement getEpisodesByIds to load talks from stored IDs.
+    4. app.js contains BookmarkStore with localStorage persistence, reordering (moveUp/moveDown/drag),
+       deletion, and waiting for database load state.
+    5. style.css includes styling for bookmark ribbon buttons, drag handles, and reorder controls.
+    """
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
+    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    db_worker_js = (web_dir / "static" / "db_worker.js").read_text(encoding="utf-8")
+    wasm_client_js = (web_dir / "static" / "adapters" / "wasm_client.js").read_text(encoding="utf-8")
+    db_client_js = (web_dir / "static" / "db_client.js").read_text(encoding="utf-8")
+    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+
+    # 1. Navigation & View elements in index.html
+    assert 'id="tab-bookmarks-btn"' in index_html, "Must have bookmarks nav tab"
+    assert 'data-tab="bookmarks-view"' in index_html, "Must point to bookmarks-view"
+    assert 'id="bookmarks-count-badge"' in index_html, "Must have bookmarks counter badge"
+    assert 'id="bookmarks-view"' in index_html, "Must have bookmarks-view panel"
+    assert 'id="bookmarks-list"' in index_html, "Must have bookmarks-list container"
+    assert 'id="transcript-bookmark-btn"' in index_html, "Must have transcript drawer bookmark button"
+    assert 'id="btn-player-bookmark"' in index_html, "Must have audio player bar bookmark button"
+
+    # 2. Worker & Client APIs for batch fetching by IDs
+    assert "handleGetEpisodesByIds" in db_worker_js
+    assert "case 'get_episodes_by_ids':" in db_worker_js
+    assert "async getEpisodesByIds(ids)" in wasm_client_js
+    assert "async getEpisodesByIds(ids)" in db_client_js
+
+    # 3. BookmarkStore & reordering in app.js
+    assert "BookmarkStore" in app_js
+    assert "deeper_dhamma_bookmarks" in app_js
+    assert "renderBookmarkRibbonSvg" in app_js
+    assert "bookmark-ribbon-icon" in app_js
+    assert "loadBookmarksView" in app_js
+    assert "renderBookmarksList" in app_js
+    assert "Waiting for database to load..." in app_js
+    assert "moveUp(" in app_js
+    assert "moveDown(" in app_js
+    assert "moveRelativeTo(" in app_js
+    assert "performCardExchange" in app_js
+    assert "initCardPointerDrag" in app_js
+    assert "bookmark-floating-drag-card" in app_js
+    assert "bookmark-drop-indicator" in app_js
+    assert "is-ghost" in app_js
+    assert "bookmark-drag-floating-preview" in app_js
+    assert "bookmark-order-badge" in app_js
+    assert "btn-bookmark-icon" in app_js
+
+    # 4. CSS styling
+    assert ".btn-bookmark-icon" in style_css
+    assert ".bookmark-ribbon-icon" in style_css
+    assert ".bookmark-card" in style_css
+    assert ".bookmark-card.is-ghost" in style_css
+    assert ".bookmark-floating-drag-card" in style_css
+    assert ".bookmark-drop-indicator" in style_css
+    assert ".bookmark-order-badge" in style_css
+    assert ".bookmark-drag-floating-preview" in style_css
+    assert ".bookmark-card.is-exchanging-active" in style_css
+    assert ".bookmark-card.is-exchanging-target" in style_css
+    assert ".bookmark-drag-handle" in style_css
+    assert ".btn-reorder" in style_css
+
+
+
 

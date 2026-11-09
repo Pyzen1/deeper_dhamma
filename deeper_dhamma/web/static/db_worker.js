@@ -381,6 +381,20 @@ function handleGetEpisodeWords(episodeId) {
   }
 }
 
+function handleGetEpisodesByIds(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  const uniqueIds = Array.from(new Set(ids));
+  const placeholders = uniqueIds.map(() => '?').join(',');
+  const rows = queryAll(`
+    SELECT id, title, date, year, primary_teacher, primary_display AS teacher, 
+           identified_teachers, media_url, permalink, duration_sec, is_transcribed 
+    FROM episodes 
+    WHERE id IN (${placeholders});
+  `, uniqueIds);
+  const map = new Map(rows.map(r => [r.id, r]));
+  return ids.map(id => map.get(id)).filter(Boolean);
+}
+
 // ============================================================================
 // In-Browser Fuzzy Search, Vocabulary Cache & Unicode Normalization
 // ============================================================================
@@ -932,6 +946,11 @@ self.onmessage = async (e) => {
       case 'get_episode_words': {
         const wordsBlob = handleGetEpisodeWords(payload && payload.episodeId);
         self.postMessage({ id, success: true, data: wordsBlob });
+        break;
+      }
+      case 'get_episodes_by_ids': {
+        const episodes = handleGetEpisodesByIds(payload && payload.ids);
+        self.postMessage({ id, success: true, data: episodes });
         break;
       }
       case 'search': {

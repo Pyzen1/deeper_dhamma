@@ -100,6 +100,11 @@ class WasmDatabaseClient {
     return this.send('get_episode_words', { episodeId });
   }
 
+  async getEpisodesByIds(ids) {
+    await this.init();
+    return this.send('get_episodes_by_ids', { ids });
+  }
+
   async getAllTerms() {
     await this.init();
     return this.send('get_all_terms');

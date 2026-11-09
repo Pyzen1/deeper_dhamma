@@ -45,6 +45,11 @@
           <span class="nav-label">Browse Talks</span>
           <span class="badge" id="browse-count-badge">0</span>
         </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-bookmarks-btn" data-tab="bookmarks-view">
+          <span class="nav-icon">🔖</span>
+          <span class="nav-label">Bookmarks</span>
+          <span class="badge" id="bookmarks-count-badge">0</span>
+        </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-lexicon-btn" data-tab="lexicon-view">
           <span class="nav-icon">📖</span>
           <span class="nav-label">Pali Lexicon</span>
@@ -299,6 +304,34 @@
         </div>
       </div>
 
+      <!-- Bookmarks View -->
+      <div class="view-panel" id="bookmarks-view">
+        <div class="bookmarks-header">
+          <div class="bookmarks-header-info">
+            <h2>Bookmarked Talks</h2>
+            <p class="section-desc">Quickly access, organize, and reorder your saved talks for fast offline recall.</p>
+          </div>
+          <div class="bookmarks-actions-bar">
+            <button type="button" class="btn-secondary" id="btn-clear-bookmarks" style="display: none;" title="Remove all saved bookmarks">
+              ✕ Clear All
+            </button>
+          </div>
+        </div>
+
+        <div class="bookmarks-status-bar" id="bookmarks-status-bar" style="display: none;">
+          <span id="bookmarks-status-count">0 saved talks</span>
+          <span class="bookmarks-reorder-hint">Tip: Drag items or use ▲ / ▼ to reorder your bookmarks.</span>
+        </div>
+
+        <div class="bookmarks-list" id="bookmarks-list">
+          <div class="empty-state">
+            <div class="empty-icon">🔖</div>
+            <h2>No Bookmarked Talks Yet</h2>
+            <p>Click the bookmark ribbon icon (🔖) on any talk in Search or Browse to store it locally for fast recall.</p>
+          </div>
+        </div>
+      </div>
+
       <!-- 3. Pali Lexicon View -->
       <div class="view-panel" id="lexicon-view">
         <div class="lexicon-header">
@@ -491,6 +524,12 @@
             <button type="button" class="btn-primary" id="transcript-play-btn" title="Play talk from beginning">
               ▶ Play Talk
             </button>
+            <button type="button" class="btn-secondary btn-bookmark-action" id="transcript-bookmark-btn" title="Bookmark talk">
+              <span class="bookmark-icon-wrap" id="transcript-bookmark-icon">
+                <svg class="bookmark-ribbon-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+              </span>
+              <span class="bookmark-label" id="transcript-bookmark-label">Bookmark</span>
+            </button>
           </div>
         </div>
 
@@ -641,6 +680,9 @@
             <span class="track-stream-badge">Podbean CDN</span>
           </div>
         </div>
+        <button type="button" class="btn-bookmark-icon btn-player-bookmark" id="btn-player-bookmark" title="Bookmark current talk" aria-label="Bookmark current talk" style="display: none;">
+          <svg class="bookmark-ribbon-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+        </button>
         <button type="button" class="btn-player-transcript" id="btn-player-transcript" title="View transcript for actively playing talk" aria-label="View transcript for actively playing talk" style="display: none;">
           <span class="btn-player-transcript-icon">📜</span>
           <span class="btn-player-transcript-label">Transcript</span>
