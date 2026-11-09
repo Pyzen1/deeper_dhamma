@@ -20,6 +20,7 @@ class SpeakerEncoder:
         self,
         model_source: str = "speechbrain/spkrec-ecapa-voxceleb",
         device: str = "cuda:0",
+        check_updates: bool = False,
     ):
         self.device = device if torch.cuda.is_available() and "cuda" in device else "cpu"
         logger.info(f"Loading SpeechBrain ECAPA-TDNN from '{model_source}' on {self.device}...")
@@ -28,10 +29,31 @@ class SpeakerEncoder:
         import warnings
         warnings.filterwarnings("ignore", message=".*symlink.*")
 
-        self.model = SpeakerRecognition.from_hparams(
-            source=model_source,
-            run_opts={"device": self.device},
-        )
+        import os
+        local_dir = Path(os.environ.get("HF_HOME", r"C:\ai-models\cache\huggingface")) / "hub" / "speechbrain-spkrec-ecapa-voxceleb"
+        if Path(model_source).exists():
+            target_source = Path(model_source)
+        elif model_source == "speechbrain/spkrec-ecapa-voxceleb" and local_dir.exists():
+            target_source = local_dir
+        else:
+            target_source = None
+
+        if not check_updates and target_source and (target_source / "hyperparams.yaml").exists():
+            from speechbrain.utils.fetching import LocalStrategy
+            self.model = SpeakerRecognition.from_hparams(
+                source=str(target_source),
+                savedir=str(target_source),
+                overrides={"pretrained_path": str(target_source)},
+                local_strategy=LocalStrategy.NO_LINK,
+                run_opts={"device": self.device},
+            )
+        else:
+            if check_updates:
+                logger.info("Checking Hugging Face Hub for SpeechBrain ECAPA-TDNN updates...")
+            self.model = SpeakerRecognition.from_hparams(
+                source=model_source,
+                run_opts={"device": self.device},
+            )
         logger.info("ECAPA-TDNN model ready.")
 
     def encode_waveform(self, waveform_16k: Union[torch.Tensor, np.ndarray]) -> np.ndarray:

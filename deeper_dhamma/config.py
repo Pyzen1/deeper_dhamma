@@ -20,6 +20,7 @@ if sys.platform == "win32":
 os.environ.setdefault("HF_HOME", r"C:\ai-models\cache\huggingface")
 os.environ.setdefault("OLLAMA_MODELS", r"C:\ai-models\cache\ollama")
 os.environ.setdefault("TORCH_HOME", r"C:\ai-models\cache\torch")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 # 2. Configure Windows DLL search paths for CTranslate2 / faster-whisper (CUDA 12 cuBLAS & cuDNN)
 if sys.platform == "win32":

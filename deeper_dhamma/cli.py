@@ -220,6 +220,7 @@ def cmd_transcribe(args):
         device=args.device,
         model_size=getattr(args, "model_size", "large-v3"),
         batch_size=getattr(args, "batch_size", 1),
+        check_updates=getattr(args, "check_updates", False),
     )
 
     completed = 0
@@ -520,6 +521,7 @@ def cmd_test(args):
         device=args.device,
         model_size=getattr(args, "model_size", "large-v3"),
         batch_size=getattr(args, "batch_size", 1),
+        check_updates=getattr(args, "check_updates", False),
     )
 
     result = pipeline.process_file(
@@ -751,6 +753,7 @@ def main(argv=None):
     p_trans.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
     p_trans.add_argument("--retry-errors", action="store_true", help="Retry transcribing episodes with previous recorded errors")
     p_trans.add_argument("--no-progress", action="store_true", help="Disable the live updating transcription progress bar")
+    p_trans.add_argument("--check-updates", action="store_true", help="Check Hugging Face Hub for newer model snapshots/checkpoints before running")
     p_trans.set_defaults(func=cmd_transcribe, subparser=p_trans)
 
     # 4. Search
@@ -809,6 +812,7 @@ def main(argv=None):
     p_test.add_argument("--batch-size", "-b", type=int, default=1, help="Batch size for inference (default: 1)")
     p_test.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
     p_test.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
+    p_test.add_argument("--check-updates", action="store_true", help="Check Hugging Face Hub for newer model snapshots/checkpoints before running")
     p_test.set_defaults(func=cmd_test, subparser=p_test)
 
     # 10. Status

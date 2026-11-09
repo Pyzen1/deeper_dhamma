@@ -33,6 +33,7 @@ Consolidated application for the Buddhist Society of Western Australia (BSWA) **
   - Canonical dictionary normalization in standard Latin Pali (`jhana`, `samadhi`, `anatta`, `Bodhinyana`, `Rains Retreat`).
   - Inlines structured audit changelogs into episode metadata.
 - **Dynamic Serverless Web Application (SQLite WASM & REST)**:
+  - **Live Production Deployment**: Hosted at [https://deeperdhamma.com/](https://deeperdhamma.com/) (GitHub Pages on `gh-pages` branch) with automated HTTP/HTTPS forwarding from `deeperdhamma.net`.
   - 100% dynamic, on-demand querying directly from SQLite (zero hardcoded HTML).
   - Diacritic-insensitive real-time search filtering across all lexicon terms and authority documents.
   - Full 3,246-talk playable archive in Browse Talks with a "Transcribed Only" toggle (default ON) and paginated "Load More" browsing.
@@ -66,6 +67,7 @@ python main.py search "hindrances OR obstacles"
 # 2. Transcribe Audio (single file, specific year, series, or full archive)
 python main.py transcribe --file archive/2001/standalone/2001-08-15_the_five_hindrances_ajahn_brahm_15_august_2001.mp3
 python main.py transcribe --year 2001 --limit 5
+python main.py transcribe --check-updates     # Explicitly check Hugging Face for model updates
 
 # 3. Export Transcripts on demand
 python main.py export --list
@@ -112,6 +114,7 @@ python main.py status --completed       # List already transcribed talks in data
 python main.py web --build              # Compiles vacuumed dhamma_web.db & static bundle into dist/
 python main.py web --run                # Preview static site with native HTTP Range support
 python main.py web --build --run        # Compile and immediately preview
+python main.py web --deploy             # Compiles & deploys dist/ directly to GitHub Pages (deeperdhamma.com)
 python main.py web -r --port 8080       # Custom port or output directory
 
 # 12. Local Static Preview Server (Stdlib HTTP with RFC 7233 Range Support)
@@ -119,7 +122,7 @@ python main.py serve --run              # Serve static bundle on http://127.0.0.
 python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
 
 # 13. Run Full Verification & Unit Test Suite (151 tests, 100% passing, 0 warnings)
-pytest tests                            # Execute all unit and integration tests
+python -m pytest tests -p no:cov        # Execute all unit and integration tests
 pytest --cov=deeper_dhamma              # Generate full code coverage report
 ```
 

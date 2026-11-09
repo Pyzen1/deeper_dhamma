@@ -185,18 +185,40 @@ class Transcriber:
         compute_type: str = "float16",
         initial_prompt: Optional[str] = PALI_PROMPT,
         batch_size: int = 1,
+        local_files_only: bool = True,
     ):
         self.device = device
         self.compute_type = compute_type
         self.initial_prompt = initial_prompt
         self.batch_size = batch_size
 
-        logger.info(f"Loading faster-whisper '{model_size}' on {device} ({compute_type}, batch_size={batch_size})...")
-        self.model = WhisperModel(
-            model_size_or_path=model_size,
-            device=self.device,
-            compute_type=self.compute_type,
-        )
+        if not local_files_only:
+            logger.info(f"Checking Hugging Face Hub for faster-whisper '{model_size}' updates...")
+            self.model = WhisperModel(
+                model_size_or_path=model_size,
+                device=self.device,
+                compute_type=self.compute_type,
+                local_files_only=False,
+            )
+        else:
+            logger.info(f"Loading faster-whisper '{model_size}' on {device} ({compute_type}, batch_size={batch_size})...")
+            # Local-first load to avoid unnecessary online Hugging Face validation pings
+            try:
+                self.model = WhisperModel(
+                    model_size_or_path=model_size,
+                    device=self.device,
+                    compute_type=self.compute_type,
+                    local_files_only=True,
+                )
+            except Exception:
+                # Fall back to downloading/resolving if model is not yet cached locally
+                logger.info(f"Model '{model_size}' not found locally. Fetching from Hugging Face Hub...")
+                self.model = WhisperModel(
+                    model_size_or_path=model_size,
+                    device=self.device,
+                    compute_type=self.compute_type,
+                    local_files_only=False,
+                )
         if self.batch_size > 1:
             from faster_whisper import BatchedInferencePipeline
             self.batched_pipeline = BatchedInferencePipeline(model=self.model)

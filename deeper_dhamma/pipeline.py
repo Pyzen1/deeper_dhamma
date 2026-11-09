@@ -47,11 +47,18 @@ class TranscriptionPipeline:
         device: str = "cuda:0",
         model_size: str = "large-v3",
         batch_size: int = 1,
+        check_updates: bool = False,
     ):
         logger.info(f"[*] Initializing TranscriptionPipeline components (model={model_size}, batch_size={batch_size})...")
         self.voiceprints_db = VoiceprintDatabase(voiceprints_db_path)
-        self.encoder = SpeakerEncoder(device=device)
-        self.transcriber = Transcriber(model_size=model_size, device="cuda", compute_type="float16", batch_size=batch_size)
+        self.encoder = SpeakerEncoder(device=device, check_updates=check_updates)
+        self.transcriber = Transcriber(
+            model_size=model_size,
+            device="cuda",
+            compute_type="float16",
+            batch_size=batch_size,
+            local_files_only=not check_updates,
+        )
         self.aligner = SpeakerAligner(voiceprint_db=self.voiceprints_db, encoder=self.encoder)
         self.profiler = SpeakerProfiler(voiceprint_db=self.voiceprints_db, encoder=self.encoder)
         self.lexicon_db = BuddhismLexiconDatabase()
