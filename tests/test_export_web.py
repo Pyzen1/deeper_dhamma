@@ -195,6 +195,7 @@ def test_bookmark_feature_and_view_integrity():
     db_worker_js = (web_dir / "static" / "db_worker.js").read_text(encoding="utf-8")
     wasm_client_js = (web_dir / "static" / "adapters" / "wasm_client.js").read_text(encoding="utf-8")
     db_client_js = (web_dir / "static" / "db_client.js").read_text(encoding="utf-8")
+    svc_worker_js = (web_dir / "static" / "svc_worker.js").read_text(encoding="utf-8")
     style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
 
     # 1. Navigation & View elements in index.html
@@ -206,6 +207,9 @@ def test_bookmark_feature_and_view_integrity():
     assert 'id="transcript-bookmark-btn"' in index_html, "Must have transcript drawer bookmark button"
     assert 'id="btn-player-bookmark"' in index_html, "Must have audio player bar bookmark button"
     assert 'card_physics.js' in index_html, "Must load decoupled card_physics.js engine"
+    assert '__DEEPER_DHAMMA_VERSION__' in index_html, "Must stamp global version in index.html"
+    assert '__DEEPER_DHAMMA_VERSION__' in wasm_client_js, "Must propagate version query to db_worker.js"
+    assert 'card_physics.js' in svc_worker_js, "Must cache card_physics.js in svc_worker.js"
 
     # 2. Worker & Client APIs for batch fetching by IDs
     assert "handleGetEpisodesByIds" in db_worker_js

@@ -24,6 +24,7 @@ const CORE_ASSETS = [
   './manifest.json',
   './style.css',
   './app.js',
+  './card_physics.js',
   './word_sync.js',
   './db_client.js',
   './db_worker.js',

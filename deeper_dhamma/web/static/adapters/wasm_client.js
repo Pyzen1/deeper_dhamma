@@ -28,7 +28,10 @@ class WasmDatabaseClient {
       }
 
       try {
-        this.worker = new Worker('./db_worker.js');
+        const versionQuery = (typeof window !== 'undefined' && window.__DEEPER_DHAMMA_VERSION__)
+          ? `?v=${encodeURIComponent(window.__DEEPER_DHAMMA_VERSION__)}`
+          : '';
+        this.worker = new Worker(`./db_worker.js${versionQuery}`);
         this.worker.onmessage = (e) => {
           const { id, success, data, error } = e.data || {};
           if (this.pending.has(id)) {
