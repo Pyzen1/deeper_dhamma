@@ -3302,8 +3302,9 @@
       const isLast = idx === total - 1;
 
       return `
-        <div class="bookmark-card episode-card" data-ep-id="${escapeHtml(ep.id)}" data-index="${idx}">
-          <div class="bookmark-card-top">
+        <div class="bookmark-card" data-ep-id="${escapeHtml(ep.id)}" data-index="${idx}">
+          <!-- Left Reorder Rail: Index badge + drag handle + arrows -->
+          <div class="bookmark-rail">
             <span class="bookmark-order-badge" title="Bookmark #${idx + 1}" aria-label="Bookmark #${idx + 1}">#${idx + 1}</span>
             <div class="bookmark-reorder-group" title="Drag to reorder, or use arrows">
               <span class="bookmark-drag-handle" title="Drag to reorder" aria-hidden="true">⠿</span>
@@ -3314,90 +3315,94 @@
                 ▼
               </button>
             </div>
+          </div>
 
-            <div class="result-meta-line" style="flex: 1; margin-left: 0.5rem; justify-content: space-between;">
-              <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
+          <!-- Main Content Area -->
+          <div class="bookmark-body">
+            <!-- Top Line: Metadata pills on left, Remove action on right -->
+            <div class="bookmark-meta-bar">
+              <div class="bookmark-meta-pills">
                 ${renderTeacherBadgesHtml(ep)}
-                <span>📅 ${escapeHtml(ep.date || '')}</span>
-                ${durMin > 0 ? `<span>• ⏱️ ${durMin} mins</span>` : ''}
+                <span class="bookmark-meta-item">📅 ${escapeHtml(ep.date || '')}</span>
+                ${durMin > 0 ? `<span class="bookmark-meta-item">• ⏱️ ${durMin}m</span>` : ''}
                 ${isTranscribed
                   ? '<span class="status-pill transcribed-pill" title="Full synchronized transcript available">✓ Transcribed</span>'
                   : '<span class="status-pill audio-only-pill" title="Stream audio directly from Podbean CDN">🎧 Audio</span>'
                 }
               </div>
-              <button type="button" class="btn-bookmark-icon is-bookmarked" data-action="toggle-bookmark" data-ep-id="${escapeHtml(ep.id)}" title="Remove bookmark" aria-label="Remove bookmark">
+              <button type="button" class="btn-remove-bookmark" data-action="remove-bookmark" data-ep-id="${escapeHtml(ep.id)}" title="Remove bookmark" aria-label="Remove from bookmarks">
                 ${renderBookmarkRibbonSvg(true)}
+                <span class="remove-label">Remove</span>
               </button>
             </div>
-          </div>
 
-          <h3 class="episode-title" style="margin-top: 0.5rem;">${escapeHtml(ep.title)}</h3>
+            <!-- Middle Line: Title -->
+            <h3 class="bookmark-title" title="${escapeHtml(ep.title)}">${escapeHtml(ep.title)}</h3>
 
-          <div class="episode-footer">
-            <button type="button" class="btn-primary" data-action="play-ep-start" data-ep-id="${escapeHtml(ep.id)}">
-              ▶ Play Talk
-            </button>
-            ${isTranscribed ? `
-              <button type="button" class="btn-secondary" data-action="view-transcript" data-ep-id="${escapeHtml(ep.id)}">
-                📜 Transcript
+            <!-- Bottom Line: Playback & Export Actions -->
+            <div class="bookmark-actions-bar">
+              <button type="button" class="btn-primary btn-sm" data-action="play-ep-start" data-ep-id="${escapeHtml(ep.id)}">
+                ▶ Play Talk
               </button>
-              <div class="download-dropdown-wrapper">
-                <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
-                  📥 Download ▾
+              ${isTranscribed ? `
+                <button type="button" class="btn-secondary btn-sm" data-action="view-transcript" data-ep-id="${escapeHtml(ep.id)}">
+                  📜 Transcript
                 </button>
-                <div class="download-dropdown-menu">
-                  <div class="dropdown-menu-header">Export Transcript</div>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="md">
-                    <span class="download-opt-icon">📝</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">Markdown</span>
-                      <span class="download-opt-desc">Formatted notes (.md)</span>
-                    </div>
-                    <span class="download-opt-badge">.md</span>
+                <div class="download-dropdown-wrapper">
+                  <button type="button" class="btn-secondary btn-sm download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
+                    📥 Download ▾
                   </button>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="txt">
-                    <span class="download-opt-icon">📄</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">Plain Text</span>
-                      <span class="download-opt-desc">Clean transcript text (.txt)</span>
-                    </div>
-                    <span class="download-opt-badge">.txt</span>
-                  </button>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="srt">
-                    <span class="download-opt-icon">🎬</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">SubRip Subtitles</span>
-                      <span class="download-opt-desc">For VLC / media players (.srt)</span>
-                    </div>
-                    <span class="download-opt-badge">.srt</span>
-                  </button>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="vtt">
-                    <span class="download-opt-icon">🌐</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">WebVTT Captions</span>
-                      <span class="download-opt-desc">Web caption track (.vtt)</span>
-                    </div>
-                    <span class="download-opt-badge">.vtt</span>
-                  </button>
-                  <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="json">
-                    <span class="download-opt-icon">📊</span>
-                    <div class="download-opt-text">
-                      <span class="download-opt-title">JSON Data</span>
-                      <span class="download-opt-desc">Structured turn array (.json)</span>
-                    </div>
-                    <span class="download-opt-badge">.json</span>
-                  </button>
+                  <div class="download-dropdown-menu">
+                    <div class="dropdown-menu-header">Export Transcript</div>
+                    <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="md">
+                      <span class="download-opt-icon">📝</span>
+                      <div class="download-opt-text">
+                        <span class="download-opt-title">Markdown</span>
+                        <span class="download-opt-desc">Formatted notes (.md)</span>
+                      </div>
+                      <span class="download-opt-badge">.md</span>
+                    </button>
+                    <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="txt">
+                      <span class="download-opt-icon">📄</span>
+                      <div class="download-opt-text">
+                        <span class="download-opt-title">Plain Text</span>
+                        <span class="download-opt-desc">Clean transcript text (.txt)</span>
+                      </div>
+                      <span class="download-opt-badge">.txt</span>
+                    </button>
+                    <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="srt">
+                      <span class="download-opt-icon">🎬</span>
+                      <div class="download-opt-text">
+                        <span class="download-opt-title">SubRip Subtitles</span>
+                        <span class="download-opt-desc">For VLC / media players (.srt)</span>
+                      </div>
+                      <span class="download-opt-badge">.srt</span>
+                    </button>
+                    <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="vtt">
+                      <span class="download-opt-icon">🌐</span>
+                      <div class="download-opt-text">
+                        <span class="download-opt-title">WebVTT Captions</span>
+                        <span class="download-opt-desc">Web caption track (.vtt)</span>
+                      </div>
+                      <span class="download-opt-badge">.vtt</span>
+                    </button>
+                    <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="json">
+                      <span class="download-opt-icon">📊</span>
+                      <div class="download-opt-text">
+                        <span class="download-opt-title">JSON Data</span>
+                        <span class="download-opt-desc">Structured turn array (.json)</span>
+                      </div>
+                      <span class="download-opt-badge">.json</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ` : ''}
-            <button type="button" class="btn-secondary btn-remove-bookmark" data-action="remove-bookmark" data-ep-id="${escapeHtml(ep.id)}" title="Remove from bookmarks">
-              ✕ Remove
-            </button>
-            ${ep.permalink ? `
-              <a href="${getPodbeanUrl(ep.permalink)}" target="_blank" rel="noopener noreferrer" class="link-btn">
-                ↗ Podbean
-              </a>
-            ` : ''}
+              ` : ''}
+              ${ep.permalink ? `
+                <a href="${getPodbeanUrl(ep.permalink)}" target="_blank" rel="noopener noreferrer" class="link-btn btn-sm bookmark-podbean-link">
+                  ↗ Podbean
+                </a>
+              ` : ''}
+            </div>
           </div>
         </div>
       `;
