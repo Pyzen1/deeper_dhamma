@@ -3407,18 +3407,6 @@
   function attachBookmarkCardEvents(container, episodes) {
     attachCardEventListeners(container, episodes);
 
-    // Ensure container has relative positioning for the glowing drop indicator
-    container.style.position = 'relative';
-
-    // Ensure glowing drop indicator element exists in container
-    let indicator = container.querySelector('.bookmark-drop-indicator');
-    if (!indicator) {
-      indicator = document.createElement('div');
-      indicator.className = 'bookmark-drop-indicator';
-      container.appendChild(indicator);
-    }
-    indicator.style.display = 'none';
-
     // Remove bookmark
     container.querySelectorAll('[data-action="remove-bookmark"]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -3428,424 +3416,67 @@
       });
     });
 
-    // Exchange Glide Animation state flag
-    let isExchanging = false;
-
-    function performCardExchange(currentCard, targetCard, epId, direction) {
-      if (isExchanging || !currentCard || !targetCard) return;
-      isExchanging = true;
-
-      // Lock container clicks during physical glide transition
-      container.style.pointerEvents = 'none';
-
-      const currentRect = currentCard.getBoundingClientRect();
-      const targetRect = targetCard.getBoundingClientRect();
-      const deltaY = targetRect.top - currentRect.top;
-
-      // Apply floating exchange glide styling
-      currentCard.classList.add('is-exchanging-active');
-      targetCard.classList.add('is-exchanging-target');
-
-      // Trigger FLIP glide transform past each other
-      currentCard.style.transform = `translateY(${deltaY}px) scale(1.015)`;
-      targetCard.style.transform = `translateY(${-deltaY}px) scale(0.995)`;
-
-      const durationMs = 280;
-
-      setTimeout(() => {
-        // Reset transforms and animation classes
-        currentCard.style.transform = '';
-        targetCard.style.transform = '';
-        currentCard.classList.remove('is-exchanging-active');
-        targetCard.classList.remove('is-exchanging-target');
-        container.style.pointerEvents = '';
-
-        // Persist order in BookmarkStore
-        if (direction === 'up') {
-          BookmarkStore.moveUp(epId);
-        } else {
-          BookmarkStore.moveDown(epId);
-        }
-
-        // Reorder local in-memory episodes array synchronously for instant re-render
-        const currIdx = episodes.findIndex(e => String(e.id) === String(epId));
-        const targetIdx = direction === 'up' ? currIdx - 1 : currIdx + 1;
-        if (currIdx !== -1 && targetIdx >= 0 && targetIdx < episodes.length) {
-          const temp = episodes[currIdx];
-          episodes[currIdx] = episodes[targetIdx];
-          episodes[targetIdx] = temp;
-        }
-
-        // Re-render DOM with updated order
-        renderBookmarksList(episodes);
-
-        // Flash gentle accent highlight on moved card
-        const selector = CSS && CSS.escape ? `.bookmark-card[data-ep-id="${CSS.escape(epId)}"]` : `.bookmark-card[data-ep-id="${epId}"]`;
-        const movedEl = container.querySelector(selector);
-        if (movedEl) {
-          movedEl.classList.add('just-exchanged');
-          setTimeout(() => movedEl.classList.remove('just-exchanged'), 600);
-        }
-
-        isExchanging = false;
-      }, durationMs);
-    }
-
-    // Move Up with exchange glide animation
+    // Move Up with generic physics step exchange
     container.querySelectorAll('[data-action="bookmark-up"]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (isExchanging) return;
-        const epId = btn.dataset.epId;
-        const currentCard = btn.closest('.bookmark-card');
-        if (!currentCard) return;
-        const targetCard = currentCard.previousElementSibling;
-        if (!targetCard || !targetCard.classList.contains('bookmark-card')) return;
-        performCardExchange(currentCard, targetCard, epId, 'up');
+        const card = btn.closest('.bookmark-card');
+        if (card && state.bookmarkPhysics) {
+          state.bookmarkPhysics.stepExchange(card, 'up');
+        }
       });
     });
 
-    // Move Down with exchange glide animation
+    // Move Down with generic physics step exchange
     container.querySelectorAll('[data-action="bookmark-down"]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (isExchanging) return;
-        const epId = btn.dataset.epId;
-        const currentCard = btn.closest('.bookmark-card');
-        if (!currentCard) return;
-        const targetCard = currentCard.nextElementSibling;
-        if (!targetCard || !targetCard.classList.contains('bookmark-card')) return;
-        performCardExchange(currentCard, targetCard, epId, 'down');
+        const card = btn.closest('.bookmark-card');
+        if (card && state.bookmarkPhysics) {
+          state.bookmarkPhysics.stepExchange(card, 'down');
+        }
       });
     });
 
-    // =========================================================================
-    // Pointer-Based Fluid Drag & Drop with Ghost, Glowing Line & FLIP Drop
-    // =========================================================================
-
-    let dragSession = null;
-
-    // Helper to calculate target slot based on pointer Y
-    function getSlotAtY(cards, pointerY) {
-      if (cards.length === 0) return 0;
-      for (let i = 0; i < cards.length; i++) {
-        const rect = cards[i].getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        if (pointerY < midY) {
-          return i;
-        }
-      }
-      return cards.length;
-    }
-
-    // Helper to compute indicator line Y in container coordinate space
-    function getIndicatorTop(cards, slot) {
-      const containerRect = container.getBoundingClientRect();
-      if (cards.length === 0) return 0;
-
-      if (slot === 0) {
-        const firstRect = cards[0].getBoundingClientRect();
-        return (firstRect.top - containerRect.top) - 6;
-      }
-      if (slot >= cards.length) {
-        const lastRect = cards[cards.length - 1].getBoundingClientRect();
-        return (lastRect.bottom - containerRect.top) + 6;
-      }
-
-      const prevRect = cards[slot - 1].getBoundingClientRect();
-      const nextRect = cards[slot].getBoundingClientRect();
-      const midY = (prevRect.bottom + nextRect.top) / 2;
-      return midY - containerRect.top;
-    }
-
-    function initCardPointerDrag(card) {
-      // Prevent browser default HTML5 drag
-      card.addEventListener('dragstart', (e) => e.preventDefault());
-
-      let pressTimer = null;
-      let startX = 0;
-      let startY = 0;
-      let isTracking = false;
-      let hasStartedDrag = false;
-
-      function onPointerDown(e) {
-        if (isExchanging || dragSession) return;
-        // Ignore right clicks or secondary buttons
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        // Ignore clicks on buttons, links, inputs, dropdown menus
-        if (e.target.closest('button, a, input, select, .download-dropdown-menu, .download-dropdown-wrapper')) {
-          return;
-        }
-
-        isTracking = true;
-        hasStartedDrag = false;
-        startX = e.clientX;
-        startY = e.clientY;
-
-        const isHandle = Boolean(e.target.closest('.bookmark-drag-handle'));
-
-        if (e.pointerType === 'touch') {
-          // Touch device: immediate if on drag handle, or 240ms long-press timer if on card body
-          if (isHandle) {
-            startDrag(e);
+    // Decoupled CardPhysics engine integration
+    if (!state.bookmarkPhysics) {
+      state.bookmarkPhysics = new CardPhysics({
+        container,
+        itemSelector: '.bookmark-card',
+        handleSelector: '.bookmark-drag-handle',
+        idAttribute: 'data-ep-id',
+        classes: {
+          ghost: 'is-ghost',
+          floating: 'bookmark-floating-drag-card',
+          indicator: 'bookmark-drop-indicator',
+          activeExchange: 'is-exchanging-active',
+          targetExchange: 'is-exchanging-target',
+          landed: 'just-exchanged',
+        },
+        onExchange: (fromIdx, toIdx, fromId, toId, direction) => {
+          if (direction === 'up') {
+            BookmarkStore.moveUp(fromId);
           } else {
-            pressTimer = setTimeout(() => {
-              if (isTracking && !hasStartedDrag) {
-                if (navigator.vibrate) {
-                  try { navigator.vibrate(30); } catch (_) {}
-                }
-                startDrag(e);
-              }
-            }, 240);
+            BookmarkStore.moveDown(fromId);
           }
-        }
-
-        // Attach global move/up handlers on window for rock-solid drag tracking
-        window.addEventListener('pointermove', onPointerMove, { passive: false });
-        window.addEventListener('pointerup', onPointerUp);
-        window.addEventListener('pointercancel', onPointerCancel);
-      }
-
-      function startDrag(e) {
-        if (hasStartedDrag || dragSession || isExchanging) return;
-        hasStartedDrag = true;
-
-        const epId = card.dataset.epId;
-        const origIdx = parseInt(card.dataset.index, 10);
-        const cardRect = card.getBoundingClientRect();
-        const grabOffsetX = startX - cardRect.left;
-        const grabOffsetY = startY - cardRect.top;
-
-        // 1. Create floating solid drag clone (full opacity, not a ghost)
-        const floatingEl = card.cloneNode(true);
-        floatingEl.classList.remove('is-ghost', 'just-exchanged', 'is-exchanging-active', 'is-exchanging-target');
-        floatingEl.classList.add('bookmark-floating-drag-card', 'bookmark-drag-floating-preview');
-        floatingEl.style.width = `${cardRect.width}px`;
-        floatingEl.style.left = `${cardRect.left}px`;
-        floatingEl.style.top = `${cardRect.top}px`;
-        document.body.appendChild(floatingEl);
-
-        // 2. Mark in-flow card as ghost in place
-        card.classList.add('is-ghost');
-
-        // 3. Setup drag session
-        dragSession = {
-          card,
-          epId,
-          origIdx,
-          floatingEl,
-          grabOffsetX,
-          grabOffsetY,
-          targetSlot: origIdx,
-          cards: Array.from(container.querySelectorAll('.bookmark-card')),
-        };
-
-        // 4. Initial positioning of indicator
-        updateIndicator(e.clientY);
-      }
-
-      function updateIndicator(clientY) {
-        if (!dragSession) return;
-        const slot = getSlotAtY(dragSession.cards, clientY);
-        dragSession.targetSlot = slot;
-
-        const topPos = getIndicatorTop(dragSession.cards, slot);
-        indicator.style.top = `${topPos}px`;
-        indicator.style.display = 'block';
-      }
-
-      function onPointerMove(e) {
-        if (!isTracking) return;
-
-        if (!hasStartedDrag) {
-          const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
-          const isHandle = Boolean(e.target.closest('.bookmark-drag-handle'));
-          const threshold = isHandle ? 3 : 6;
-
-          if (dist > threshold) {
-            // If touch and moved before long-press timer, user is scrolling the page
-            if (e.pointerType === 'touch' && !isHandle) {
-              clearTimeout(pressTimer);
-              pressTimer = null;
-              cleanupTracking();
-              return;
-            }
-            startDrag(e);
+          const temp = episodes[fromIdx];
+          episodes[fromIdx] = episodes[toIdx];
+          episodes[toIdx] = temp;
+        },
+        onReorder: (fromIdx, toIdx, fromId, targetId, placeBefore) => {
+          if (targetId) {
+            BookmarkStore.moveRelativeTo(fromId, targetId, placeBefore);
           }
-        }
-
-        if (hasStartedDrag && dragSession) {
-          e.preventDefault(); // Prevent native scrolling while dragging
-          // Position floating solid card with pointer coordinates
-          const x = e.clientX - dragSession.grabOffsetX;
-          const y = e.clientY - dragSession.grabOffsetY;
-          dragSession.floatingEl.style.left = `${x}px`;
-          dragSession.floatingEl.style.top = `${y}px`;
-
-          // Indicate placement by glowing line without affecting existing cards
-          updateIndicator(e.clientY);
-        }
-      }
-
-      function onPointerUp(e) {
-        clearTimeout(pressTimer);
-        pressTimer = null;
-        if (hasStartedDrag && dragSession) {
-          finishDrag();
-        } else {
-          cleanupTracking();
-        }
-      }
-
-      function onPointerCancel() {
-        clearTimeout(pressTimer);
-        pressTimer = null;
-        if (hasStartedDrag && dragSession) {
-          finishDrag();
-        } else {
-          cleanupTracking();
-        }
-      }
-
-      function cleanupTracking() {
-        isTracking = false;
-        hasStartedDrag = false;
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('pointerup', onPointerUp);
-        window.removeEventListener('pointercancel', onPointerCancel);
-      }
-
-      function finishDrag() {
-        if (!dragSession) return;
-        cleanupTracking();
-
-        const { card, epId, origIdx, floatingEl, targetSlot } = dragSession;
-        dragSession = null;
-        indicator.style.display = 'none';
-
-        // Calculate new array index from targetSlot
-        let newIdx = targetSlot;
-        if (targetSlot > origIdx) {
-          newIdx = targetSlot - 1;
-        }
-
-        // Case A: Released in same place (no reorder)
-        if (newIdx === origIdx) {
-          const currentRect = floatingEl.getBoundingClientRect();
-          const targetRect = card.getBoundingClientRect();
-          const deltaX = targetRect.left - currentRect.left;
-          const deltaY = targetRect.top - currentRect.top;
-
-          floatingEl.style.transition = 'transform 0.28s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.28s ease, border-color 0.28s ease';
-          floatingEl.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(1)`;
-          floatingEl.style.boxShadow = 'var(--shadow-card)';
-          floatingEl.style.borderColor = 'var(--border-subtle)';
-
-          setTimeout(() => {
-            floatingEl.remove();
-            card.classList.remove('is-ghost');
-            card.classList.add('just-exchanged');
-            setTimeout(() => card.classList.remove('just-exchanged'), 600);
-          }, 280);
-          return;
-        }
-
-        // Case B: Reordered! Physical exchange FLIP animation
-        isExchanging = true;
-        container.style.pointerEvents = 'none';
-
-        // 1. Snapshot all cards' FIRST bounding rects
-        const allCards = Array.from(container.querySelectorAll('.bookmark-card'));
-        const firstRects = new Map();
-        allCards.forEach(c => {
-          firstRects.set(c.dataset.epId, c.getBoundingClientRect());
-        });
-        const floatingRect = floatingEl.getBoundingClientRect();
-
-        // 2. Commit reorder to BookmarkStore
-        const targetEpId = episodes[newIdx] ? episodes[newIdx].id : null;
-        if (targetEpId) {
-          const placeBefore = newIdx < origIdx;
-          BookmarkStore.moveRelativeTo(epId, targetEpId, placeBefore);
-        }
-
-        // 3. Reorder local in-memory episodes array synchronously
-        const movedEp = episodes.splice(origIdx, 1)[0];
-        episodes.splice(newIdx, 0, movedEp);
-
-        // 4. Render new DOM layout
-        renderBookmarksList(episodes);
-
-        // 5. Invert all card positions relative to where they just were
-        const newCards = Array.from(container.querySelectorAll('.bookmark-card'));
-        newCards.forEach(c => {
-          const cardId = c.dataset.epId;
-          const lastRect = c.getBoundingClientRect();
-
-          if (cardId === epId) {
-            // Dropped card glides from floatingRect into its new slot!
-            const deltaX = floatingRect.left - lastRect.left;
-            const deltaY = floatingRect.top - lastRect.top;
-            c.classList.add('is-exchanging-active');
-            c.style.transition = 'none';
-            c.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(1.02)`;
-          } else {
-            // Surrounding cards glide up or down to make space / close gap!
-            const firstRect = firstRects.get(cardId);
-            if (firstRect) {
-              const deltaY = firstRect.top - lastRect.top;
-              if (Math.abs(deltaY) > 1) {
-                c.classList.add('is-exchanging-target');
-                c.style.transition = 'none';
-                c.style.transform = `translateY(${deltaY}px)`;
-              }
-            }
-          }
-        });
-
-        // 6. Remove floating clone now that inverted DOM card is at the exact same coordinates
-        floatingEl.remove();
-
-        // 7. Force reflow so invert styles apply before playing transition
-        void container.offsetWidth;
-
-        // 8. Play transition: physical cards move and make space, new card drops into place
-        const durationMs = 320;
-        newCards.forEach(c => {
-          if (c.classList.contains('is-exchanging-active')) {
-            c.style.transition = 'transform 0.32s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.32s ease, border-color 0.32s ease';
-            c.style.transform = '';
-          } else if (c.classList.contains('is-exchanging-target')) {
-            c.style.transition = 'transform 0.32s cubic-bezier(0.25, 1, 0.5, 1)';
-            c.style.transform = '';
-          }
-        });
-
-        // 9. Clean up on transition finish
-        setTimeout(() => {
-          newCards.forEach(c => {
-            c.style.transition = '';
-            c.style.transform = '';
-            c.classList.remove('is-exchanging-active', 'is-exchanging-target');
-          });
-          container.style.pointerEvents = '';
-
-          const droppedCard = container.querySelector(`.bookmark-card[data-ep-id="${CSS && CSS.escape ? CSS.escape(epId) : epId}"]`);
-          if (droppedCard) {
-            droppedCard.classList.add('just-exchanged');
-            setTimeout(() => droppedCard.classList.remove('just-exchanged'), 600);
-          }
-
-          isExchanging = false;
-        }, durationMs);
-      }
-
-      card.addEventListener('pointerdown', onPointerDown);
+          const movedEp = episodes.splice(fromIdx, 1)[0];
+          episodes.splice(toIdx, 0, movedEp);
+        },
+        onRender: () => {
+          renderBookmarksList(episodes);
+        },
+      });
+    } else {
+      state.bookmarkPhysics.attach(container);
     }
-
-    container.querySelectorAll('.bookmark-card').forEach(card => {
-      initCardPointerDrag(card);
-    });
   }
 
   // ==========================================================================

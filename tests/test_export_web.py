@@ -191,6 +191,7 @@ def test_bookmark_feature_and_view_integrity():
     web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
     index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
     app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    card_physics_js = (web_dir / "static" / "card_physics.js").read_text(encoding="utf-8")
     db_worker_js = (web_dir / "static" / "db_worker.js").read_text(encoding="utf-8")
     wasm_client_js = (web_dir / "static" / "adapters" / "wasm_client.js").read_text(encoding="utf-8")
     db_client_js = (web_dir / "static" / "db_client.js").read_text(encoding="utf-8")
@@ -204,6 +205,7 @@ def test_bookmark_feature_and_view_integrity():
     assert 'id="bookmarks-list"' in index_html, "Must have bookmarks-list container"
     assert 'id="transcript-bookmark-btn"' in index_html, "Must have transcript drawer bookmark button"
     assert 'id="btn-player-bookmark"' in index_html, "Must have audio player bar bookmark button"
+    assert 'card_physics.js' in index_html, "Must load decoupled card_physics.js engine"
 
     # 2. Worker & Client APIs for batch fetching by IDs
     assert "handleGetEpisodesByIds" in db_worker_js
@@ -211,7 +213,14 @@ def test_bookmark_feature_and_view_integrity():
     assert "async getEpisodesByIds(ids)" in wasm_client_js
     assert "async getEpisodesByIds(ids)" in db_client_js
 
-    # 3. BookmarkStore & reordering in app.js
+    # 3. Decoupled Generic CardPhysics Engine
+    assert "CardPhysics" in card_physics_js
+    assert "stepExchange(" in card_physics_js
+    assert "_initCard(" in card_physics_js
+    assert "_updateIndicator(" in card_physics_js
+    assert "_finishDrag(" in card_physics_js
+
+    # 4. BookmarkStore & reordering integration in app.js
     assert "BookmarkStore" in app_js
     assert "deeper_dhamma_bookmarks" in app_js
     assert "renderBookmarkRibbonSvg" in app_js
@@ -222,27 +231,25 @@ def test_bookmark_feature_and_view_integrity():
     assert "moveUp(" in app_js
     assert "moveDown(" in app_js
     assert "moveRelativeTo(" in app_js
-    assert "performCardExchange" in app_js
-    assert "initCardPointerDrag" in app_js
+    assert "CardPhysics" in app_js
+    assert "bookmarkPhysics" in app_js
     assert "bookmark-floating-drag-card" in app_js
     assert "bookmark-drop-indicator" in app_js
     assert "is-ghost" in app_js
-    assert "bookmark-drag-floating-preview" in app_js
     assert "bookmark-order-badge" in app_js
     assert "btn-bookmark-icon" in app_js
 
-    # 4. CSS styling
+    # 5. CSS styling (Generic & Bookmark-Specific)
     assert ".btn-bookmark-icon" in style_css
     assert ".bookmark-ribbon-icon" in style_css
     assert ".bookmark-card" in style_css
-    assert ".bookmark-card.is-ghost" in style_css
-    assert ".bookmark-floating-drag-card" in style_css
-    assert ".bookmark-drop-indicator" in style_css
+    assert ".card-is-ghost" in style_css
+    assert ".card-floating-drag" in style_css
+    assert ".card-drop-indicator" in style_css
+    assert ".card-is-exchanging-active" in style_css
+    assert ".card-is-exchanging-target" in style_css
     assert ".bookmark-order-badge" in style_css
-    assert ".bookmark-drag-floating-preview" in style_css
-    assert ".bookmark-card.is-exchanging-active" in style_css
-    assert ".bookmark-card.is-exchanging-target" in style_css
-    assert ".bookmark-drag-handle" in style_css
+    assert ".card-drag-handle" in style_css
     assert ".btn-reorder" in style_css
 
 

@@ -389,6 +389,7 @@ def _is_dist_stale(dist_path: Path) -> bool:
     candidates = [
         VIEWS_SRC_DIR / "index.html",
         STATIC_SRC_DIR / "app.js",
+        STATIC_SRC_DIR / "card_physics.js",
         STATIC_SRC_DIR / "word_sync.js",
         STATIC_SRC_DIR / "style.css",
         STATIC_SRC_DIR / "db_worker.js",
