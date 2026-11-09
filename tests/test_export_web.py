@@ -400,6 +400,12 @@ def test_bookmark_finger_touch_and_physical_exchange_animation():
     # 4. CSS transition rules on cards
     assert "transition: transform" in style_css, "Must declare transition on transform in CSS"
 
+    # 5. Drop-in-place animation mechanics in _finishDrag
+    assert "floatingEl.style.transition =" in card_physics_js, "Must set glide transition on floatingEl before drop"
+    assert "floatingEl.offsetHeight" in card_physics_js, "Must flush layout on floatingEl for drop glide"
+    assert "translate(${deltaX}px, ${deltaY}px)" in card_physics_js, "Must animate floatingEl into destination rect"
+    assert "floatingEl.remove()" in card_physics_js, "Must cleanly remove floating element after drop animation"
+
 
 
 

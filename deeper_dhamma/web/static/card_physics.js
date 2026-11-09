@@ -403,115 +403,126 @@
       if (targetSlot > origIdx) {
         newIdx = targetSlot - 1;
       }
+      newIdx = Math.max(0, Math.min(newIdx, cards.length - 1));
 
-      const { ghost, activeExchange, targetExchange, landed } = this.options.classes;
+      const { ghost, landed } = this.options.classes;
+      const durationMs = this.options.dropDuration || 280;
+      const easing = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
 
-      // Case A: Released in original position
+      this.isExchanging = true;
+      this.container.style.pointerEvents = 'none';
+
+      // Capture floating card's current viewport coordinates at release
+      const floatingRect = floatingEl.getBoundingClientRect();
+
+      // Case A: Released in original slot (no index change)
       if (newIdx === origIdx) {
-        const currentRect = floatingEl.getBoundingClientRect();
-        const targetRect = card.getBoundingClientRect();
-        const deltaX = targetRect.left - currentRect.left;
-        const deltaY = targetRect.top - currentRect.top;
+        const destRect = card.getBoundingClientRect();
+        const deltaX = destRect.left - floatingRect.left;
+        const deltaY = destRect.top - floatingRect.top;
 
-        floatingEl.style.transition = `transform ${this.options.exchangeDuration}ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow ${this.options.exchangeDuration}ms ease, border-color ${this.options.exchangeDuration}ms ease`;
-        floatingEl.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(1)`;
+        floatingEl.style.transition = `transform ${durationMs}ms ${easing}, box-shadow ${durationMs}ms ease, border-color ${durationMs}ms ease`;
+        void floatingEl.offsetHeight;
+
+        floatingEl.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(1) rotate(0deg)`;
         floatingEl.style.boxShadow = 'var(--shadow-card)';
         floatingEl.style.borderColor = 'var(--border-subtle)';
 
         setTimeout(() => {
-          floatingEl.remove();
+          if (floatingEl.parentNode) floatingEl.remove();
           card.classList.remove(ghost);
           card.classList.add(landed);
           setTimeout(() => card.classList.remove(landed), 600);
-        }, this.options.exchangeDuration);
+          this.container.style.pointerEvents = '';
+          this.isExchanging = false;
+        }, durationMs);
         return;
       }
 
-      // Case B: Reordered — execute FLIP multi-card glide
-      this.isExchanging = true;
-      this.container.style.pointerEvents = 'none';
-
-      // 1. First bounding rects
+      // Case B: Reordered to new slot — execute physical drop and multi-card FLIP glide
+      // 1. Snapshot initial positions of all cards before DOM move
       const firstRects = new Map();
       cards.forEach(c => {
         const cId = c.getAttribute(this.options.idAttribute);
         if (cId) firstRects.set(cId, c.getBoundingClientRect());
       });
-      const floatingRect = floatingEl.getBoundingClientRect();
 
-      // 2. Trigger onReorder callback
-      const targetCard = cards[newIdx];
-      const targetId = targetCard ? targetCard.getAttribute(this.options.idAttribute) : null;
-      const placeBefore = newIdx < origIdx;
+      // 2. Temporarily move ghost card in the DOM to target position
+      // so other sibling cards naturally shift and we get the true destination rect
+      const refNode = targetSlot < cards.length ? cards[targetSlot] : null;
+      this.container.insertBefore(card, refNode);
 
-      if (typeof this.options.onReorder === 'function') {
-        this.options.onReorder(origIdx, newIdx, id, targetId, placeBefore);
-      }
+      // 3. Snapshot destination position of the dropped card and new positions of other cards
+      const destRect = card.getBoundingClientRect();
+      const updatedCards = this.getCards();
 
-      // 3. Trigger onRender callback
-      if (typeof this.options.onRender === 'function') {
-        this.options.onRender();
-      }
-
-      // 4. Invert transforms on all cards
-      const newCards = this.getCards();
-      newCards.forEach(c => {
+      // 4. Invert all other cards (FLIP)
+      updatedCards.forEach(c => {
+        if (c === card) return;
         const cId = c.getAttribute(this.options.idAttribute);
-        const lastRect = c.getBoundingClientRect();
-
-        if (cId === id) {
-          const deltaX = floatingRect.left - lastRect.left;
-          const deltaY = floatingRect.top - lastRect.top;
-          c.classList.add(activeExchange);
-          c.style.transition = 'none';
-          c.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(1.02)`;
-        } else {
-          const firstRect = firstRects.get(cId);
-          if (firstRect) {
-            const deltaY = firstRect.top - lastRect.top;
-            if (Math.abs(deltaY) > 1) {
-              c.classList.add(targetExchange);
-              c.style.transition = 'none';
-              c.style.transform = `translateY(${deltaY}px)`;
-            }
+        const firstRect = firstRects.get(cId);
+        if (firstRect) {
+          const lastRect = c.getBoundingClientRect();
+          const deltaY = firstRect.top - lastRect.top;
+          if (Math.abs(deltaY) > 1) {
+            c.style.transition = 'none';
+            c.style.transform = `translateY(${deltaY}px)`;
           }
         }
       });
 
-      // 5. Remove floating clone
-      floatingEl.remove();
+      // 5. Calculate delta for floating card to glide directly into destRect
+      const deltaX = destRect.left - floatingRect.left;
+      const deltaY = destRect.top - floatingRect.top;
 
-      // 6. Force reflow
-      void this.container.offsetWidth;
+      // Force layout flush so inversion is committed
+      void floatingEl.offsetHeight;
+      void this.container.offsetHeight;
 
-      // 7. Play transition
-      const durationMs = this.options.dropDuration;
-      newCards.forEach(c => {
-        if (c.classList.contains(activeExchange)) {
-          c.style.transition = `transform ${durationMs}ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow ${durationMs}ms ease, border-color ${durationMs}ms ease`;
-          c.style.transform = '';
-        } else if (c.classList.contains(targetExchange)) {
-          c.style.transition = `transform ${durationMs}ms cubic-bezier(0.25, 1, 0.5, 1)`;
+      // 6. Animate floating card into destRect
+      floatingEl.style.transition = `transform ${durationMs}ms ${easing}, box-shadow ${durationMs}ms ease, border-color ${durationMs}ms ease`;
+      floatingEl.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(1) rotate(0deg)`;
+      floatingEl.style.boxShadow = 'var(--shadow-card)';
+      floatingEl.style.borderColor = 'var(--border-subtle)';
+
+      // 7. Animate other cards to their new resting positions
+      updatedCards.forEach(c => {
+        if (c !== card && c.style.transform) {
+          c.style.transition = `transform ${durationMs}ms ${easing}`;
           c.style.transform = '';
         }
       });
 
-      // 8. Clean up after transition
+      // 8. On transition completion, commit state and re-render cleanly
       setTimeout(() => {
-        newCards.forEach(c => {
+        if (floatingEl.parentNode) floatingEl.remove();
+        card.classList.remove(ghost);
+
+        updatedCards.forEach(c => {
           c.style.transition = '';
           c.style.transform = '';
-          c.classList.remove(activeExchange, targetExchange);
         });
-        this.container.style.pointerEvents = '';
 
-        const selector = `[${this.options.idAttribute}="${CSS && CSS.escape ? CSS.escape(id) : id}"]`;
-        const droppedEl = this.container.querySelector(selector);
-        if (droppedEl) {
-          droppedEl.classList.add(landed);
-          setTimeout(() => droppedEl.classList.remove(landed), 600);
+        const targetCard = cards[newIdx];
+        const targetId = targetCard ? targetCard.getAttribute(this.options.idAttribute) : null;
+        const placeBefore = newIdx < origIdx;
+
+        if (typeof this.options.onReorder === 'function') {
+          this.options.onReorder(origIdx, newIdx, id, targetId, placeBefore);
         }
 
+        if (typeof this.options.onRender === 'function') {
+          this.options.onRender();
+        }
+
+        const selector = `[${this.options.idAttribute}="${CSS && CSS.escape ? CSS.escape(id) : id}"]`;
+        const landedEl = this.container.querySelector(selector);
+        if (landedEl) {
+          landedEl.classList.add(landed);
+          setTimeout(() => landedEl.classList.remove(landed), 600);
+        }
+
+        this.container.style.pointerEvents = '';
         this.isExchanging = false;
       }, durationMs);
     }
