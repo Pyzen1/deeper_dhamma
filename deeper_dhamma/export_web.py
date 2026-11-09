@@ -262,7 +262,7 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
     out_path.mkdir(parents=True, exist_ok=True)
 
     # Remove stale / leftover test artifacts if present in output_dir
-    for stale_item in ["test_copy.db", "transcripts"]:
+    for stale_item in ["test_copy.db", "transcripts", "ff_profile_test.html"]:
         stale_p = out_path / stale_item
         if stale_p.exists():
             if stale_p.is_dir():
@@ -355,6 +355,11 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
 
     out_index = out_path / "index.html"
     with open(out_index, "w", encoding="utf-8") as f:
+        f.write(rendered_html)
+
+    # 4.1 Pre-render 404.html for seamless GitHub Pages SPA routing fallback
+    out_404 = out_path / "404.html"
+    with open(out_404, "w", encoding="utf-8") as f:
         f.write(rendered_html)
 
     # 5. Pre-render svc_worker.js with version stamp for atomic cache invalidation
@@ -514,3 +519,82 @@ def run_web_preview(host: str = DEFAULT_WEB_HOST, port: str | int = DEFAULT_WEB_
         print("\nStopping preview server...")
     finally:
         server.server_close()
+
+
+def deploy_to_github_pages(dist_dir: Path | str = DIST_DIR, remote: str = "origin", branch: str = "gh-pages") -> None:
+    """
+    Deploys the static site distribution directly to GitHub Pages (gh-pages branch)
+    using git plumbing without checking build artifacts into the main branch.
+    """
+    import subprocess
+
+    dist_path = _resolve_repo_path(dist_dir)
+    if not dist_path.exists() or _is_dist_stale(dist_path):
+        print(f"[*] Rebuilding static distribution in '{dist_path}' before deployment...")
+        export_static_site(dist_path)
+
+    # Ensure CNAME is present
+    cname_path = dist_path / "CNAME"
+    if not cname_path.exists():
+        cname_path.write_text("deeperdhamma.com\n", encoding="utf-8")
+
+    repo_root = PROJECT_ROOT
+    temp_index = repo_root / ".git" / "temp_pages_index"
+    if temp_index.exists():
+        try:
+            temp_index.unlink()
+        except OSError:
+            pass
+
+    print("\n" + "=" * 80)
+    print("BSWA Deeper Dhamma: Deploy to GitHub Pages (deeperdhamma.com)")
+    print("=" * 80)
+    print(f"[*] Distribution Directory: {dist_path}")
+    print(f"[*] Remote Repository:      {remote}")
+    print(f"[*] Target Branch:          {branch}")
+    print(f"[*] Custom Domain (CNAME):  {cname_path.read_text().strip()}")
+    print("-" * 80)
+
+    env = os.environ.copy()
+    env["GIT_WORK_TREE"] = str(dist_path.resolve())
+    env["GIT_INDEX_FILE"] = str(temp_index.resolve())
+
+    try:
+        # 1. Stage all files from dist_path into temp git index
+        subprocess.run(["git", "add", "-A"], cwd=str(repo_root), env=env, check=True)
+
+        # 2. Write tree object
+        tree_sha = subprocess.check_output(
+            ["git", "write-tree"], cwd=str(repo_root), env=env, text=True
+        ).strip()
+
+        # 3. Create commit object
+        today_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        commit_msg = f"Deploy Deeper Dhamma v{int(time.time())} to deeperdhamma.com ({today_str})"
+        commit_sha = subprocess.check_output(
+            ["git", "commit-tree", tree_sha, "-m", commit_msg],
+            cwd=str(repo_root),
+            env=env,
+            text=True,
+        ).strip()
+
+        # 4. Push commit to remote branch
+        print(f"[*] Pushing commit {commit_sha[:8]} to {remote}/{branch}...")
+        subprocess.run(
+            ["git", "push", remote, f"{commit_sha}:refs/heads/{branch}", "--force"],
+            cwd=str(repo_root),
+            check=True,
+        )
+
+        print("-" * 80)
+        print("[✓] Successfully deployed to GitHub Pages!")
+        print("    Live URL:  https://deeperdhamma.com/")
+        print("    Branch:    gh-pages")
+        print("=" * 80 + "\n")
+    finally:
+        if temp_index.exists():
+            try:
+                temp_index.unlink()
+            except OSError:
+                pass
+

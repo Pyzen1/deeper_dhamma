@@ -664,20 +664,25 @@ def cmd_serve(args):
 
 
 def cmd_web(args):
-    """Manages the static web application: compilation, bundling, and local preview."""
+    """Manages the static web application: compilation, bundling, local preview, and deployment."""
     has_build = getattr(args, "build", False)
     has_run = getattr(args, "run", False)
+    has_deploy = getattr(args, "deploy", False)
 
-    if not has_build and not has_run:
+    if not has_build and not has_run and not has_deploy:
         if hasattr(args, "subparser"):
             args.subparser.print_help()
         return
 
     out_dir = getattr(args, "output_dir", None) or DIST_DIR
 
-    if has_build:
+    if has_build or has_deploy:
         from deeper_dhamma.export_web import export_static_site
         export_static_site(output_dir=out_dir)
+
+    if has_deploy:
+        from deeper_dhamma.export_web import deploy_to_github_pages
+        deploy_to_github_pages(dist_dir=out_dir)
 
     if has_run:
         from deeper_dhamma.export_web import run_web_preview
@@ -871,6 +876,11 @@ def main(argv=None):
         "--build", "-b",
         action="store_true",
         help="Compile static site and consolidated SQLite database into dist/",
+    )
+    p_web.add_argument(
+        "--deploy",
+        action="store_true",
+        help="Deploy compiled dist/ bundle directly to GitHub Pages (gh-pages branch)",
     )
     p_web.add_argument(
         "--run", "-r",

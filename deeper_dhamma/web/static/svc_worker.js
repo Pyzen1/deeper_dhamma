@@ -20,6 +20,8 @@ const CACHE_NAME = 'deeper_dhamma_shell_{{db_version}}';
 const CORE_ASSETS = [
   './',
   './index.html',
+  './404.html',
+  './manifest.json',
   './style.css',
   './app.js',
   './word_sync.js',

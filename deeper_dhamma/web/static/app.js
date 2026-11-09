@@ -543,6 +543,11 @@
     document.body.removeChild(textArea);
   }
 
+  function getShareBaseUrl() {
+    const cleanPath = window.location.pathname.replace(/\/index\.html$/, '').replace(/\/404\.html$/, '').replace(/\/$/, '');
+    return `${window.location.origin}${cleanPath}`;
+  }
+
   // ==========================================================================
   // SPA History & Hash Router
   // ==========================================================================
@@ -578,12 +583,18 @@
       }
 
       // 2. Parse Pathname (/talk/pb... or /browse or /lexicon or /documents)
+      // Supports both root deployments (/talk/pb...) and subpath deployments (/repo/talk/pb...)
       if (pathname) {
-        if (pathname.startsWith('talk/')) {
+        const segments = pathname.split('/').filter(Boolean);
+        const talkIdx = segments.indexOf('talk');
+        if (talkIdx !== -1 && segments[talkIdx + 1]) {
           route = 'talk';
-          id = pathname.replace('talk/', '').split('/')[0].trim();
-        } else if (['browse', 'lexicon', 'documents', 'search'].includes(pathname)) {
-          route = pathname;
+          id = segments[talkIdx + 1].trim();
+        } else if (segments.length > 0) {
+          const last = segments[segments.length - 1];
+          if (['browse', 'lexicon', 'documents', 'search'].includes(last)) {
+            route = last;
+          }
         }
       }
 
@@ -1708,7 +1719,7 @@
         if (shareBtn) {
           e.stopPropagation();
           const startSec = Math.floor(parseFloat(shareBtn.dataset.start) || 0);
-          const shareUrl = `${window.location.origin}/#talk/${ep.id}?t=${startSec}`;
+          const shareUrl = `${getShareBaseUrl()}/#talk/${ep.id}?t=${startSec}`;
           copyTextToClipboard(shareUrl, `Moment link at ${formatSeconds(startSec)} copied to clipboard!`);
           return;
         }
@@ -1898,7 +1909,7 @@
             state.historyDepth++;
             window.history.pushState({ route: cleanHash }, '', cleanHash);
           }
-          const shareUrl = `${window.location.origin}/${cleanHash}`;
+          const shareUrl = `${getShareBaseUrl()}/${cleanHash}`;
           copyTextToClipboard(shareUrl, `Lexicon link for "${term}" copied to clipboard!`);
           return;
         }
@@ -3903,7 +3914,7 @@
 
       if (els.drawerShareBtn) {
         els.drawerShareBtn.onclick = () => {
-          let shareUrl = `${window.location.origin}/#talk/${ep.id}`;
+          let shareUrl = `${getShareBaseUrl()}/#talk/${ep.id}`;
           if (els.nativeAudio && !els.nativeAudio.paused && state.currentEpisode && state.currentEpisode.id === ep.id && els.nativeAudio.currentTime > 5) {
             shareUrl += `?t=${Math.floor(els.nativeAudio.currentTime)}`;
           }
