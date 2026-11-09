@@ -370,6 +370,11 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
         sw_dist.write_text(sw_content, encoding="utf-8")
         print(f"[✓] Pre-rendered svc_worker.js with cache version 'deeper_dhamma_shell_{version_int}'")
 
+    # 5.1 Ensure .nojekyll is present to bypass Jekyll build on GitHub Pages
+    nojekyll_dist = out_path / ".nojekyll"
+    if not nojekyll_dist.exists():
+        nojekyll_dist.touch()
+
     print(f"[✓] Pre-rendered index.html with relative asset links")
     print("-" * 80)
     print("[✓] Static Site Build Complete!")
@@ -534,10 +539,14 @@ def deploy_to_github_pages(dist_dir: Path | str = DIST_DIR, remote: str = "origi
         print(f"[*] Rebuilding static distribution in '{dist_path}' before deployment...")
         export_static_site(dist_path)
 
-    # Ensure CNAME is present
+    # Ensure CNAME and .nojekyll are present
     cname_path = dist_path / "CNAME"
     if not cname_path.exists():
         cname_path.write_text("deeperdhamma.com\n", encoding="utf-8")
+
+    nojekyll_path = dist_path / ".nojekyll"
+    if not nojekyll_path.exists():
+        nojekyll_path.touch()
 
     repo_root = PROJECT_ROOT
     temp_index = repo_root / ".git" / "temp_pages_index"

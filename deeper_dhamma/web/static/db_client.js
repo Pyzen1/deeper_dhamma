@@ -104,8 +104,18 @@ class WasmDatabaseClient {
   }
 
   async getEpisodesByIds(ids) {
+    if (!ids || ids.length === 0) return [];
     await this.init();
-    return this.send('get_episodes_by_ids', { ids });
+    try {
+      return await this.send('get_episodes_by_ids', { ids });
+    } catch (err) {
+      if (err && err.message && err.message.includes('Unknown message type')) {
+        console.warn('[WASM Client] Worker lacks get_episodes_by_ids; falling back to individual episode fetches:', err.message);
+        const results = await Promise.all(ids.map((id) => this.getEpisode(id).catch(() => null)));
+        return results.filter(Boolean);
+      }
+      throw err;
+    }
   }
 
   async getAllTerms() {

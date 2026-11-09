@@ -924,7 +924,10 @@
   function registerServiceWorker() {
     if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./svc_worker.js')
+        const swVer = (typeof window !== 'undefined' && window.__DEEPER_DHAMMA_VERSION__)
+          ? `?v=${encodeURIComponent(window.__DEEPER_DHAMMA_VERSION__)}`
+          : '';
+        navigator.serviceWorker.register(`./svc_worker.js${swVer}`)
           .then((reg) => {
             console.log('[ServiceWorker] Registered with scope:', reg.scope);
             if (reg.update) reg.update().catch(() => {});

@@ -54,7 +54,8 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME).then(async (cache) => {
       for (const asset of CORE_ASSETS) {
         try {
-          const res = await fetch(asset);
+          // Force network fetch to bypass browser HTTP cache during precaching
+          const res = await fetch(asset, { cache: 'reload' });
           if (res && res.status === 200) {
             await cache.put(asset, res.clone());
             const clean = asset.replace(/^\.\//, '/');

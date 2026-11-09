@@ -162,6 +162,10 @@ def test_service_worker_dynamic_version_stamping_and_network_first_navigation():
     # 4. Check query-sensitive asset matching
     assert "matchInCache(req)" in sw_dist
     assert "search.includes('v=')" in sw_dist
+    assert "cache: 'reload'" in sw_dist, "svc_worker.js precaching must use cache: 'reload' to bypass HTTP cache"
+
+    # 4.1 Check .nojekyll bypass exists
+    assert (PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / ".nojekyll").exists()
 
     # 5. Check app.js null-safety and no deleted button references
     app_js_path = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "app.js"
@@ -216,6 +220,8 @@ def test_bookmark_feature_and_view_integrity():
     assert "case 'get_episodes_by_ids':" in db_worker_js
     assert "async getEpisodesByIds(ids)" in wasm_client_js
     assert "async getEpisodesByIds(ids)" in db_client_js
+    assert "Unknown message type" in wasm_client_js, "Client must provide backward-compatible fallback for cached workers"
+    assert "Unknown message type" in db_client_js, "Client must provide backward-compatible fallback for cached workers"
 
     # 3. Decoupled Generic CardPhysics Engine
     assert "CardPhysics" in card_physics_js
