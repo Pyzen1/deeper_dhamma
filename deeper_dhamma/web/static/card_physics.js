@@ -74,10 +74,17 @@
     /**
      * Attach or re-attach the physics engine to a container element.
      */
-    attach(container) {
+    attach(container, options = null) {
       if (!container) return;
       this.container = container;
       this.container.style.position = 'relative';
+
+      if (options && typeof options === 'object') {
+        Object.assign(this.options, options);
+      }
+
+      // Clear bound cards cache so freshly rendered DOM nodes are bound
+      this._boundCards.clear();
 
       // Ensure drop indicator exists in container
       const indClass = this.options.classes.indicator;

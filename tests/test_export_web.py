@@ -253,5 +253,113 @@ def test_bookmark_feature_and_view_integrity():
     assert ".btn-reorder" in style_css
 
 
+def test_bookmark_reorder_persistence_and_episodes_sync():
+    """
+    Verifies that removing and adding bookmarks followed by arrow reordering
+    preserves all bookmarks without dropping any items:
+    1. app.js maintains state.bookmarkEpisodes dynamically.
+    2. onExchange and onReorder resequence state.bookmarkEpisodes via BookmarkStore.getAll().
+    3. onRender re-renders from state.bookmarkEpisodes.
+    4. CardPhysics.prototype.attach accepts and merges dynamic options.
+    5. Pure-logic simulation of the exact user scenario:
+       - 4 initial bookmarks
+       - 2 removed
+       - 2 added (total 4)
+       - up/down arrow reorders
+       - asserts length remains exactly 4 and elements are reordered correctly.
+    """
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    card_physics_js = (web_dir / "static" / "card_physics.js").read_text(encoding="utf-8")
+
+    # 1. Verify app.js dynamic state synchronization
+    assert "bookmarkEpisodes:" in app_js, "state must define bookmarkEpisodes"
+    assert "state.bookmarkEpisodes = " in app_js, "Must store episodes on state"
+    assert "BookmarkStore.getAll().map(id => epMap.get(id)).filter(Boolean)" in app_js, (
+        "Must resequence state.bookmarkEpisodes from BookmarkStore.getAll() in onExchange and onReorder"
+    )
+    assert "renderBookmarksList(state.bookmarkEpisodes)" in app_js, (
+        "onRender must render the dynamic state.bookmarkEpisodes"
+    )
+
+    # 2. Verify CardPhysics.prototype.attach options merging and cache reset
+    assert "attach(container, options = null)" in card_physics_js
+    assert "Object.assign(this.options, options)" in card_physics_js
+    assert "this._boundCards.clear()" in card_physics_js
+
+    # 3. Simulate exact user bug scenario:
+    class SimulatedBookmarkStore:
+        def __init__(self):
+            self._ids = []
+            self._set = set()
+
+        def add(self, ep_id: str):
+            if ep_id in self._set:
+                return
+            self._ids.insert(0, ep_id)
+            self._set.add(ep_id)
+
+        def remove(self, ep_id: str):
+            if ep_id not in self._set:
+                return
+            self._ids = [x for x in self._ids if x != ep_id]
+            self._set.remove(ep_id)
+
+        def move_up(self, ep_id: str):
+            idx = self._ids.index(ep_id)
+            if idx > 0:
+                self._ids[idx], self._ids[idx - 1] = self._ids[idx - 1], self._ids[idx]
+                return True
+            return False
+
+        def move_down(self, ep_id: str):
+            idx = self._ids.index(ep_id)
+            if 0 <= idx < len(self._ids) - 1:
+                self._ids[idx], self._ids[idx + 1] = self._ids[idx + 1], self._ids[idx]
+                return True
+            return False
+
+        def get_all(self):
+            return list(self._ids)
+
+    store = SimulatedBookmarkStore()
+
+    # Step 1: User starts with 4 bookmarks
+    for ep in ["talk_1", "talk_2", "talk_3", "talk_4"]:
+        store.add(ep)
+    assert store.get_all() == ["talk_4", "talk_3", "talk_2", "talk_1"]
+
+    # Step 2: User removes 2 bookmarks
+    store.remove("talk_1")
+    store.remove("talk_2")
+    assert store.get_all() == ["talk_4", "talk_3"]
+
+    # Step 3: User adds 2 new bookmarks (now 4 total)
+    store.add("talk_5")
+    store.add("talk_6")
+    assert store.get_all() == ["talk_6", "talk_5", "talk_4", "talk_3"]
+    assert len(store.get_all()) == 4
+
+    # Step 4: User clicks Up arrow on talk_3
+    assert store.move_up("talk_3") is True
+    # Talk 3 swaps with talk 4
+    assert store.get_all() == ["talk_6", "talk_5", "talk_3", "talk_4"]
+    assert len(store.get_all()) == 4, "Must not drop bookmarks on move_up!"
+
+    # Step 5: User clicks Down arrow on talk_5
+    assert store.move_down("talk_5") is True
+    # Talk 5 swaps with talk 3
+    assert store.get_all() == ["talk_6", "talk_3", "talk_5", "talk_4"]
+    assert len(store.get_all()) == 4, "Must not drop bookmarks on move_down!"
+
+    # Step 6: Verify mapping to episode objects
+    episodes_pool = {f"talk_{i}": {"id": f"talk_{i}", "title": f"Title {i}"} for i in range(1, 7)}
+    resequenced = [episodes_pool[ep_id] for ep_id in store.get_all()]
+    assert len(resequenced) == 4
+    assert [e["id"] for e in resequenced] == ["talk_6", "talk_3", "talk_5", "talk_4"]
+
+
 
 

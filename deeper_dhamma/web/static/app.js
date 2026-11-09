@@ -31,6 +31,8 @@
     dateFilterMode: 'year',
     archiveCancelRequested: false,
     isDbReady: false,
+    bookmarkEpisodes: [],
+    bookmarkPhysics: null,
     lexicon: {
       term: '',
       mode: 'core',
@@ -3290,9 +3292,10 @@
 
   function renderBookmarksList(episodes) {
     if (!els.bookmarksList) return;
-    const total = episodes.length;
+    state.bookmarkEpisodes = Array.isArray(episodes) ? [...episodes] : (state.bookmarkEpisodes || []);
+    const total = state.bookmarkEpisodes.length;
 
-    let html = episodes.map((ep, idx) => {
+    let html = state.bookmarkEpisodes.map((ep, idx) => {
       const isTranscribed = Boolean(ep.is_transcribed);
       const durMin = Math.round((ep.duration_sec || 0) / 60);
       const isFirst = idx === 0;
@@ -3405,7 +3408,10 @@
   }
 
   function attachBookmarkCardEvents(container, episodes) {
-    attachCardEventListeners(container, episodes);
+    if (Array.isArray(episodes)) {
+      state.bookmarkEpisodes = [...episodes];
+    }
+    attachCardEventListeners(container, state.bookmarkEpisodes);
 
     // Remove bookmark
     container.querySelectorAll('[data-action="remove-bookmark"]').forEach(btn => {
@@ -3438,6 +3444,31 @@
       });
     });
 
+    // Physics lifecycle callbacks bound dynamically to state.bookmarkEpisodes and BookmarkStore
+    const physicsCallbacks = {
+      onExchange: (fromIdx, toIdx, fromId, toId, direction) => {
+        if (direction === 'up') {
+          BookmarkStore.moveUp(fromId);
+        } else {
+          BookmarkStore.moveDown(fromId);
+        }
+        // Resequence state.bookmarkEpisodes based on BookmarkStore.getAll()
+        const epMap = new Map((state.bookmarkEpisodes || []).map(ep => [String(ep.id), ep]));
+        state.bookmarkEpisodes = BookmarkStore.getAll().map(id => epMap.get(id)).filter(Boolean);
+      },
+      onReorder: (fromIdx, toIdx, fromId, targetId, placeBefore) => {
+        if (targetId) {
+          BookmarkStore.moveRelativeTo(fromId, targetId, placeBefore);
+        }
+        // Resequence state.bookmarkEpisodes based on BookmarkStore.getAll()
+        const epMap = new Map((state.bookmarkEpisodes || []).map(ep => [String(ep.id), ep]));
+        state.bookmarkEpisodes = BookmarkStore.getAll().map(id => epMap.get(id)).filter(Boolean);
+      },
+      onRender: () => {
+        renderBookmarksList(state.bookmarkEpisodes);
+      },
+    };
+
     // Decoupled CardPhysics engine integration
     if (!state.bookmarkPhysics) {
       state.bookmarkPhysics = new CardPhysics({
@@ -3453,29 +3484,10 @@
           targetExchange: 'is-exchanging-target',
           landed: 'just-exchanged',
         },
-        onExchange: (fromIdx, toIdx, fromId, toId, direction) => {
-          if (direction === 'up') {
-            BookmarkStore.moveUp(fromId);
-          } else {
-            BookmarkStore.moveDown(fromId);
-          }
-          const temp = episodes[fromIdx];
-          episodes[fromIdx] = episodes[toIdx];
-          episodes[toIdx] = temp;
-        },
-        onReorder: (fromIdx, toIdx, fromId, targetId, placeBefore) => {
-          if (targetId) {
-            BookmarkStore.moveRelativeTo(fromId, targetId, placeBefore);
-          }
-          const movedEp = episodes.splice(fromIdx, 1)[0];
-          episodes.splice(toIdx, 0, movedEp);
-        },
-        onRender: () => {
-          renderBookmarksList(episodes);
-        },
+        ...physicsCallbacks,
       });
     } else {
-      state.bookmarkPhysics.attach(container);
+      state.bookmarkPhysics.attach(container, physicsCallbacks);
     }
   }
 
