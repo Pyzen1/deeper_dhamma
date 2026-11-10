@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deeper Dhamma — BSWA Study Tool, Pali Lexicon & Audio Archive</title>
+  <meta name="description" content="Interactive study tool and online reference guide for 30+ years of English Theravada Buddhist teachings by Ajahn Brahm, Ajahn Brahmali, Bhante Sujato, and BSWA monastics. Features 6-tier FTS5 search, word-level audio sync, and a 2,447-term comparative Pali lexicon.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://deeperdhamma.com/">
+  <meta property="og:title" content="Deeper Dhamma — BSWA Study Tool, Pali Lexicon & Audio Archive">
+  <meta property="og:description" content="Search transcripts with sub-second word synchronization, stream 3,246 English monastic talks directly from Podbean, and compare 2,447 canonical Pali terms across four teachers.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Deeper Dhamma — BSWA Study Tool & Pali Reference Guide">
+  <meta name="twitter:description" content="Interactive Theravada Buddhist transcript search, synchronized audio reader, and comparative Pali lexicon.">
+  <link rel="canonical" href="https://deeperdhamma.com/">
+  <meta name="theme-color" content="#0b1120">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1120'/%3E%3Ctext x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-size='40' fill='%23f59e0b'%3E%E2%98%B8%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css?v=1794280941">
+  <script>window.__DEEPER_DHAMMA_VERSION__ = "1794280941";</script>
+</head>
+<body class="dark-theme">
+  <!-- Left Navigation Sidebar -->
+  <aside class="app-sidebar" id="app-sidebar">
+    <div class="sidebar-top">
+      <div class="sidebar-brand">
+        <div class="brand-symbol" aria-hidden="true">☸</div>
+        <div class="brand-text">
+          <h1 class="brand-title" id="site-title">Deeper Dhamma</h1>
+          <span class="brand-subtitle">BSWA Audio Archive</span>
+        </div>
+      </div>
+
+      <!-- Navigation Menu -->
+      <nav class="sidebar-nav" id="main-nav-tabs" aria-label="View navigation">
+        <button type="button" class="tab-btn sidebar-nav-item active" id="tab-search-btn" data-tab="search-view">
+          <span class="nav-icon">✨</span>
+          <span class="nav-label">Search</span>
+          <span class="badge" id="search-count-badge">0</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-browse-btn" data-tab="browse-view">
+          <span class="nav-icon">📚</span>
+          <span class="nav-label">Browse Talks</span>
+          <span class="badge" id="browse-count-badge">0</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-bookmarks-btn" data-tab="bookmarks-view">
+          <span class="nav-icon">🔖</span>
+          <span class="nav-label">Bookmarks</span>
+          <span class="badge" id="bookmarks-count-badge">0</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-lexicon-btn" data-tab="lexicon-view">
+          <span class="nav-icon">📖</span>
+          <span class="nav-label">Pali Lexicon</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-documents-btn" data-tab="documents-view">
+          <span class="nav-icon">📜</span>
+          <span class="nav-label">Documents</span>
+          <span class="badge" id="docs-count-badge">4</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-about-btn" data-tab="about-view">
+          <span class="nav-icon">ℹ️</span>
+          <span class="nav-label">About</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-transcript-btn" data-tab="transcript-view" style="display: none;">
+          <span class="nav-icon">📜</span>
+          <span class="nav-label">Transcript</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="stat-card" id="archive-stats-badge">
+        <div class="stat-card-title">Archive Index</div>
+        <div class="stat-card-body" id="stat-episodes">Loading archive...</div>
+      </div>
+      <div class="sidebar-shortcuts-hint">
+        <span><kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> Search</span>
+        <span><kbd>Space</kbd> Play / Pause</span>
+        <span><kbd>J</kbd> / <kbd>L</kbd> &plusmn;15s</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main App Shell (Scrollable Views Area) -->
+  <main class="app-main" id="main-content">
+    <!-- Content Sections -->
+    <section class="views-wrapper" id="views-container">
+      <!-- 1. Search Results View -->
+      <div class="view-panel active" id="search-view">
+        <div class="search-box-wrapper">
+          <div class="search-bar" id="search-bar-container">
+            <span class="search-icon" aria-hidden="true">🔍</span>
+            <input 
+              type="search" 
+              id="search-input" 
+              placeholder="Search teachings, suttas, or questions (e.g. 'five hindrances', 'jhana', 'letting go')..." 
+              autocomplete="off" 
+              spellcheck="false" 
+              aria-label="Search transcripts"
+              autofocus
+            >
+            <button type="button" id="clear-search-btn" class="btn-icon" title="Clear search" aria-label="Clear search" style="display: none;">✕</button>
+            <div class="search-shortcut" id="search-shortcut-hint">
+              <kbd>/</kbd>
+            </div>
+          </div>
+
+          <!-- Filter & Control Bar -->
+          <div class="filter-controls" id="filter-controls">
+            <div class="filter-group">
+              <label class="toggle-pill" id="exact-toggle-label" title="Force exact phrase matching without typo correction or stemming">
+                <input type="checkbox" id="exact-mode-checkbox">
+                <span class="toggle-track"></span>
+                <span class="toggle-text">Exact Phrase Only</span>
+              </label>
+            </div>
+
+            <div class="filter-group select-group">
+              <select id="teacher-filter-select" aria-label="Filter by Monastic Teacher">
+                <option value="">All Monastics</option>
+              </select>
+
+              <!-- Date Mode Toggle: Year vs Custom Range -->
+              <div class="date-filter-group" id="date-filter-group">
+                <div class="date-mode-toggle" id="date-mode-toggle">
+                  <button type="button" class="date-mode-btn active" id="btn-mode-year" data-mode="year" title="Filter by single year">Year</button>
+                  <button type="button" class="date-mode-btn" id="btn-mode-range" data-mode="range" title="Filter by custom date range">Date Range</button>
+                </div>
+
+                <select id="year-filter-select" aria-label="Filter by Year">
+                  <option value="">All Years</option>
+                </select>
+
+                <div class="date-range-inputs" id="date-range-inputs" style="display: none;">
+                  <input type="date" id="start-date-input" aria-label="Start Date" title="Start Date (YYYY-MM-DD)">
+                  <span class="date-sep">to</span>
+                  <input type="date" id="end-date-input" aria-label="End Date" title="End Date (YYYY-MM-DD)">
+                </div>
+              </div>
+
+              <select id="sort-order-select" aria-label="Sort order">
+                <option value="date_desc">Newest First</option>
+                <option value="date_asc">Oldest First</option>
+                <option value="duration_desc">Longest Duration</option>
+                <option value="rank">Best Match (Relevance)</option>
+              </select>
+
+              <button type="button" id="reset-filters-btn" class="btn-secondary btn-reset-filters" title="Reset all filters">✕ Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="results-header" id="search-results-header">
+          <div class="query-meta-group" id="search-meta-bar" style="display: none;">
+            <div class="query-meta" id="query-meta-text">Found results</div>
+            <div class="query-tier-badge" id="query-tier-badge">Tier 1: Exact</div>
+          </div>
+          <div class="search-actions-bar" id="search-actions-bar">
+            <!-- Filtered Archive Download Dropdown -->
+            <div class="download-dropdown-wrapper" id="filtered-archive-dropdown-wrapper" style="display: none;">
+              <button type="button" class="btn-secondary download-dropdown-btn" id="btn-download-filtered-archive" title="Download all matching transcripts into a ZIP archive">
+                📥 Download Filtered Archive (<span id="filtered-archive-count">0</span>) ▾
+              </button>
+              <div class="download-dropdown-menu" id="filtered-archive-menu">
+                <div class="dropdown-menu-header">Export Filtered Results (.zip)</div>
+                <button type="button" class="download-option" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown Archive</span>
+                    <span class="download-opt-desc">Formatted notes with frontmatter & timestamps</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text Archive</span>
+                    <span class="download-opt-desc">Clean transcript text with turn timings</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles Archive</span>
+                    <span class="download-opt-desc">Standard subtitle cues for VLC & media players</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions Archive</span>
+                    <span class="download-opt-desc">Standard web caption track with speaker cues</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data Archive</span>
+                    <span class="download-opt-desc">Structured transcript objects & turns</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Download All Transcripts Archive Dropdown -->
+            <div class="download-dropdown-wrapper" id="all-archive-dropdown-wrapper">
+              <button type="button" class="btn-primary download-dropdown-btn" id="btn-download-all-archive" title="Download all transcribed talks in the library into a ZIP archive">
+                📦 Download All Transcripts ▾
+              </button>
+              <div class="download-dropdown-menu" id="all-archive-menu">
+                <div class="dropdown-menu-header">Export Complete Library (.zip)</div>
+                <button type="button" class="download-option" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown Archive</span>
+                    <span class="download-opt-desc">All transcribed talks in Markdown</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text Archive</span>
+                    <span class="download-opt-desc">All transcribed talks in plain text</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles Archive</span>
+                    <span class="download-opt-desc">All talks formatted for media players</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions Archive</span>
+                    <span class="download-opt-desc">All talks in WebVTT web captions</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data Archive</span>
+                    <span class="download-opt-desc">Full archive as structured JSON files</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Initial Placeholder State -->
+        <div class="empty-state" id="search-empty-state">
+          <div class="empty-icon">🪷</div>
+          <h2>Search 3,246 English Theravada Teachings</h2>
+          <p>Instant zero-copy search across high-accuracy Whisper transcripts. Click any speech segment to stream directly from Podbean at that precise second.</p>
+          <div class="example-chips" id="example-queries">
+            <span>Try searching:</span>
+            <button type="button" class="chip-btn" data-query="five hindrances">five hindrances</button>
+            <button type="button" class="chip-btn" data-query="mindfulness of breathing">mindfulness of breathing</button>
+            <button type="button" class="chip-btn" data-query="anatta non-self">anatta non-self</button>
+            <button type="button" class="chip-btn" data-query="jhana stillness">jhana stillness</button>
+            <button type="button" class="chip-btn" data-query="forgiveness compassion">forgiveness compassion</button>
+          </div>
+        </div>
+
+        <!-- Results List -->
+        <div class="results-list" id="search-results-list" style="display: none;"></div>
+      </div>
+
+      <!-- 2. Browse Episodes View -->
+      <div class="view-panel" id="browse-view">
+        <div class="browse-header">
+          <div class="browse-header-info">
+            <h2>Archive Catalog</h2>
+            <p class="section-desc">Browse talks and retreats. All talks stream directly in the audio player; transcribed talks include word-synced text.</p>
+          </div>
+          <div class="browse-filter-bar">
+            <button type="button" id="browse-transcribed-only-btn" class="btn-toggle-transcribed active" aria-pressed="true" title="Show only talks with full synchronized transcripts (click to browse all 3,246 English audio talks)">
+              <span class="toggle-check-icon" id="browse-transcribed-icon">✓</span>
+              <span id="browse-transcribed-label">Transcribed Only</span>
+            </button>
+            <select id="browse-teacher-filter-select" aria-label="Filter by Monastic Teacher">
+              <option value="">All Monastics</option>
+            </select>
+            <select id="browse-year-filter-select" aria-label="Filter by Year">
+              <option value="">All Years</option>
+            </select>
+          </div>
+        </div>
+        <div class="browse-grid" id="browse-episodes-grid">
+          <div class="loading-spinner">Loading talks...</div>
+        </div>
+        <div class="browse-load-more-wrap" id="browse-load-more-wrap" style="display: none;">
+          <button type="button" class="btn-secondary btn-load-more" id="btn-browse-load-more">
+            + Load More Talks
+          </button>
+        </div>
+      </div>
+
+      <!-- Bookmarks View -->
+      <div class="view-panel" id="bookmarks-view">
+        <div class="bookmarks-header">
+          <div class="bookmarks-header-info">
+            <h2>Bookmarked Talks</h2>
+            <p class="section-desc">Quickly access, organize, and reorder your saved talks for fast offline recall.</p>
+          </div>
+          <div class="bookmarks-actions-bar">
+            <button type="button" class="btn-secondary" id="btn-clear-bookmarks" style="display: none;" title="Remove all saved bookmarks">
+              ✕ Clear All
+            </button>
+          </div>
+        </div>
+
+        <div class="bookmarks-status-bar" id="bookmarks-status-bar" style="display: none;">
+          <span id="bookmarks-status-count">0 saved talks</span>
+          <span class="bookmarks-reorder-hint">Tip: Drag items or use ▲ / ▼ to reorder your bookmarks.</span>
+        </div>
+
+        <div class="bookmarks-list" id="bookmarks-list">
+          <div class="empty-state">
+            <div class="empty-icon">🔖</div>
+            <h2>No Bookmarked Talks Yet</h2>
+            <p>Click the bookmark ribbon icon (🔖) on any talk in Search or Browse to store it locally for fast recall.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Pali Lexicon View -->
+      <div class="view-panel" id="lexicon-view">
+        <div class="lexicon-header">
+          <h2>Buddhism Doctrinal Reference Lexicon</h2>
+          <p class="section-desc">Canonical Pali terminology and pronunciation definitions curated from SuttaCentral and BSWA retreat teachers.</p>
+          <div class="lexicon-search-bar">
+            <input type="search" id="lexicon-search-input" placeholder="Look up Pali or English term (e.g. samadhi, kamma, nibbidā)..." autocomplete="off">
+          </div>
+
+          <!-- Mode Switcher & Sort Controls -->
+          <div class="lexicon-controls-bar">
+            <div class="lexicon-mode-toggle" id="lexicon-mode-toggle">
+              <button type="button" class="lexicon-mode-btn active" id="btn-lexicon-core" data-mode="core" title="Curated core meditation and doctrinal vocabulary">⭐ Standard Core Terms</button>
+              <button type="button" class="lexicon-mode-btn" id="btn-lexicon-all" data-mode="all" title="Browse all canonical Pali terms">📖 Browse All Terms</button>
+            </div>
+
+            <div class="lexicon-controls-right">
+              <button type="button" class="btn-lexicon-sources" id="btn-lex-sources" title="View canonical offline reference documents and integrity hashes">
+                📜 Authority Documents
+              </button>
+              <div class="lexicon-sort-wrapper">
+                <select id="lexicon-sort-select" aria-label="Sort terms">
+                  <option value="pali_asc">Pali (A → Z)</option>
+                  <option value="teacher_first">Teacher Glosses First</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Category Filter Bar -->
+          <div class="lexicon-category-bar" id="lexicon-category-bar">
+            <span class="filter-label">Category:</span>
+            <button type="button" class="cat-pill active" data-cat="all">All</button>
+            <button type="button" class="cat-pill" data-cat="meditation">Meditation</button>
+            <button type="button" class="cat-pill" data-cat="doctrine">Doctrine</button>
+            <button type="button" class="cat-pill" data-cat="sutta_canon">Sutta Canon</button>
+            <button type="button" class="cat-pill" data-cat="vinaya">Vinaya</button>
+            <button type="button" class="cat-pill" data-cat="monastic_life">Monastic Life</button>
+          </div>
+
+          <!-- Alphabet A-Z Bar (for Browse All mode) -->
+          <div class="lexicon-alphabet-bar" id="lexicon-alphabet-bar" style="display: none;">
+            <span class="filter-label">Letter:</span>
+            <button type="button" class="alpha-btn active" data-letter="all">All</button>
+            <button type="button" class="alpha-btn" data-letter="a">A</button>
+            <button type="button" class="alpha-btn" data-letter="b">B</button>
+            <button type="button" class="alpha-btn" data-letter="c">C</button>
+            <button type="button" class="alpha-btn" data-letter="d">D</button>
+            <button type="button" class="alpha-btn" data-letter="e">E</button>
+            <button type="button" class="alpha-btn" data-letter="g">G</button>
+            <button type="button" class="alpha-btn" data-letter="h">H</button>
+            <button type="button" class="alpha-btn" data-letter="i">I</button>
+            <button type="button" class="alpha-btn" data-letter="j">J</button>
+            <button type="button" class="alpha-btn" data-letter="k">K</button>
+            <button type="button" class="alpha-btn" data-letter="m">M</button>
+            <button type="button" class="alpha-btn" data-letter="n">N</button>
+            <button type="button" class="alpha-btn" data-letter="p">P</button>
+            <button type="button" class="alpha-btn" data-letter="r">R</button>
+            <button type="button" class="alpha-btn" data-letter="s">S</button>
+            <button type="button" class="alpha-btn" data-letter="t">T</button>
+            <button type="button" class="alpha-btn" data-letter="u">U</button>
+            <button type="button" class="alpha-btn" data-letter="v">V</button>
+            <button type="button" class="alpha-btn" data-letter="y">Y</button>
+          </div>
+
+          <!-- Status / Count Meta -->
+          <div class="lexicon-meta-bar" id="lexicon-meta-bar">
+            <span id="lexicon-count-text">Loading canonical terms...</span>
+          </div>
+        </div>
+
+        <div class="lexicon-results" id="lexicon-results-list">
+          <div class="loading-spinner">Loading doctrinal terms...</div>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="lexicon-pagination" id="lexicon-pagination" style="display: none;">
+          <div class="page-nav-group">
+            <button type="button" class="btn-page" id="btn-lex-first" title="First Page">« First</button>
+            <button type="button" class="btn-page" id="btn-lex-prev" title="Previous Page">‹ Prev</button>
+            <span class="page-indicator" id="lex-page-indicator">Page 1 of 1</span>
+            <button type="button" class="btn-page" id="btn-lex-next" title="Next Page">Next ›</button>
+            <button type="button" class="btn-page" id="btn-lex-last" title="Last Page">Last »</button>
+          </div>
+          <div class="page-size-group">
+            <label for="lex-limit-select">Show:</label>
+            <select id="lex-limit-select" class="limit-select" title="Items per page">
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Canonical Authority Source Documents View -->
+      <div class="view-panel" id="documents-view">
+        <div class="documents-header">
+          <div class="documents-header-info">
+            <h2>Canonical Authority Source Documents</h2>
+            <p class="section-desc">Offline, bitstream-verified reference texts, glossaries, and Vinaya treatises stored directly in SQLite.</p>
+          </div>
+
+          <!-- Document Selection Tabs Bar -->
+          <div class="doc-tabs-bar" id="doc-tabs-bar">
+            <button type="button" class="doc-tab-btn active" data-doc-id="1" id="doc-tab-btn-1">
+              <span class="doc-tab-icon">📘</span>
+              <span class="doc-tab-text">
+                <span class="doc-tab-name">Bodhi &amp; Sujato Glossary</span>
+                <span class="doc-tab-sub">1,063 Terms Comparative Table</span>
+              </span>
+            </button>
+            <button type="button" class="doc-tab-btn" data-doc-id="2" id="doc-tab-btn-2">
+              <span class="doc-tab-icon">📙</span>
+              <span class="doc-tab-text">
+                <span class="doc-tab-name">Brahmali Vinaya Piṭaka</span>
+                <span class="doc-tab-sub">1,309 Terms Monastic Law Table</span>
+              </span>
+            </button>
+            <button type="button" class="doc-tab-btn" data-doc-id="3" id="doc-tab-btn-3">
+              <span class="doc-tab-icon">🪷</span>
+              <span class="doc-tab-text">
+                <span class="doc-tab-name">The Word of the Buddha</span>
+                <span class="doc-tab-sub">55 Terms Ajahn Brahm 2024 PDF</span>
+              </span>
+            </button>
+            <button type="button" class="doc-tab-btn" data-doc-id="4" id="doc-tab-btn-4">
+              <span class="doc-tab-icon">🏛️</span>
+              <span class="doc-tab-text">
+                <span class="doc-tab-name">SuttaCentral Tipiṭaka Canon</span>
+                <span class="doc-tab-sub">219 Nikāya &amp; Sutta Titles</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Document Content Container -->
+        <div class="document-display-card" id="document-display-card">
+          <div class="document-meta-header" id="document-meta-header">
+            <div class="doc-meta-main">
+              <h3 class="doc-meta-title" id="doc-active-title">Loading document...</h3>
+              <div class="doc-meta-byline" id="doc-active-byline"></div>
+            </div>
+            <div class="doc-meta-actions" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <a href="#" target="_blank" rel="noopener noreferrer" class="btn-secondary" id="doc-active-mirror-link" title="Download or inspect the raw upstream archive file (JSON/HTML/PDF) used to compile this database">
+                📦 Raw Archive File ↗
+              </a>
+              <a href="#" target="_blank" rel="noopener noreferrer" class="btn-primary" id="doc-active-remote-link">
+                Open Canonical Source ↗
+              </a>
+            </div>
+          </div>
+
+          <div class="doc-meta-chips" id="doc-meta-chips">
+            <span class="meta-chip" id="doc-chip-retrieved">📅 Retrieved: -</span>
+            <span class="meta-chip" id="doc-chip-format">📄 Format: -</span>
+            <span class="meta-chip" id="doc-chip-size">💾 Size: -</span>
+            <span class="meta-chip meta-chip-sha" id="doc-chip-sha" title="Full SHA-256 Checksum">🔒 SHA-256: -</span>
+          </div>
+
+          <!-- In-Document Search / Filter Input -->
+          <div class="doc-search-wrapper" id="doc-search-wrapper">
+            <span class="doc-search-icon">🔍</span>
+            <input type="search" id="doc-filter-input" placeholder="Search / filter entries in this document (e.g. 'samadhi', 'craving', 'patimokkha')..." autocomplete="off">
+            <button type="button" id="clear-doc-filter-btn" class="btn-icon" style="display: none;" title="Clear filter">✕</button>
+            <span class="doc-filter-count" id="doc-filter-count"></span>
+          </div>
+
+          <!-- Rendered Content Body -->
+          <div class="doc-rendered-body" id="doc-rendered-body">
+            <div class="loading-spinner">Loading canonical document...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- About Deeper Dhamma View -->
+      <div class="view-panel" id="about-view">
+        <div class="about-container">
+          <!-- Hero Header -->
+          <div class="about-hero">
+            <div class="about-hero-badge">☸ Theravada Buddhist Audio Archive &amp; Study Platform</div>
+            <h2 class="about-hero-title">Deeper Dhamma</h2>
+            <p class="about-hero-lead">
+              An open, interactive research portal and study companion bridging 30+ years of oral Buddhist teachings with sub-second word-level audio synchronization, 6-tier FTS5 search, and canonical Pali lexicon references.
+            </p>
+            <div class="about-hero-chips">
+              <span class="about-chip"><span class="chip-icon">🪷</span> 3,246 English Monastic Talks</span>
+              <span class="about-chip"><span class="chip-icon">⏱️</span> 1994 – Present Audio Heritage</span>
+              <span class="about-chip"><span class="chip-icon">📖</span> 2,447 Pali Lexicon Terms</span>
+              <span class="about-chip"><span class="chip-icon">⚡</span> Sub-5ms Client-Side Search</span>
+              <span class="about-chip"><span class="chip-icon">🔒</span> Privacy-Focused (Anonymous Diagnostics Only)</span>
+            </div>
+          </div>
+
+          <!-- Section 1: The Mission & Historical Audio Heritage -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">🏛️</span>
+              <div>
+                <h3 class="about-section-title">The Audio Heritage &amp; Mission</h3>
+                <p class="about-section-subtitle">Preserving and opening access to thirty years of oral Dhamma</p>
+              </div>
+            </div>
+            <div class="about-card about-prose-card">
+              <p>
+                Founded in 1973 in Perth, the <strong>Buddhist Society of Western Australia (BSWA)</strong> has grown into one of the world's most vibrant centers for early Buddhist monastic training, meditation retreats, and public Dhamma teachings. Over three decades, the monastics of Bodhinyana Monastery, Dhammasara Nuns Monastery, and the Armadale Meditation Centre have offered thousands of Friday evening public talks, weekend Sutta study workshops, and 9-day meditation retreats at Jhana Grove.
+              </p>
+              <p>
+                Historically recorded onto analog cassettes, digital mini-discs, and MP3 files—and later distributed via the <em>Deeper Dhamma</em> podcast feed on Podbean—these teachings represent an irreplaceable treasure of practical meditation instruction, sutta analysis, and compassionate monastic wisdom.
+              </p>
+              <p>
+                <strong>Curated English Archive:</strong> The Deeper Dhamma collection indexes <strong>3,246 English-language monastic recordings</strong> spanning over thirty years. Non-English talks (such as Sinhala, Thai, Chinese, and Vietnamese translations) and duplicate defunct feeds have been excluded to guarantee that search indexes, transcripts, and word alignments remain 100% focused on English oral Dhamma teachings.
+              </p>
+              <p>
+                <strong>The Deeper Dhamma Solution:</strong> This platform transforms the entire audio archive into an instant, searchable, studyable knowledge base. Audio streams 1:1 bit-for-bit from official Podbean servers, while every spoken word is mapped in real time to high-precision transcripts, canonical dictionaries, and authoritative source texts.
+              </p>
+            </div>
+          </section>
+
+          <!-- Section 2: Dāna, Acknowledgments & Heritage -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">🤝</span>
+              <div>
+                <h3 class="about-section-title">Dāna, Acknowledgments &amp; Heritage</h3>
+                <p class="about-section-subtitle">Honoring the ancient tradition of freely sharing the Dhamma</p>
+              </div>
+            </div>
+            <div class="about-card about-dana-card">
+              <div class="dana-symbol">☸</div>
+              <div class="dana-content">
+                <h4 class="dana-title">The Principle of Dāna (Free Offering)</h4>
+                <p class="dana-lead">
+                  <em>"Sabbadānaṃ dhammadānaṃ jināti"</em> — The gift of Dhamma excels all gifts. (Dhp 354)
+                </p>
+                <p>
+                  In accordance with the monastic Vinaya and the living Buddhist tradition of generosity (<em>dāna</em>), the Dhamma teachings are priceless and freely accessible to everyone without paywalls, subscriptions, or advertisements. To help cover ongoing infrastructure costs, maintenance, and continuous open-source software development, voluntary donations (<em>dāna</em>) are gratefully welcomed to support the upkeep and future enhancement of this platform.
+                </p>
+                <!-- Site Upkeep Support Banner (Pending Ko-fi setup)
+                <div class="dana-support-banner" id="dana-support-banner">
+                  <span class="support-banner-icon">💛</span>
+                  <div class="support-banner-content">
+                    <strong>Support Site Upkeep &amp; Ongoing Maintenance</strong>
+                    <p>
+                      Voluntary contributions directly help cover infrastructure costs, technical maintenance, and ongoing feature development.
+                    </p>
+                  </div>
+                  <a href="#donate" class="btn-donate-support btn-donate-site" id="btn-donate-site" title="Support site upkeep, infrastructure costs, and technical development">
+                    💛 Support Site Upkeep
+                  </a>
+                </div>
+                -->
+                <div class="dana-links-grid">
+                  <div class="dana-link-card dana-bswa-card">
+                    <div class="dana-card-main">
+                      <span class="dana-link-icon">🏛️</span>
+                      <div>
+                        <strong>Buddhist Society of Western Australia (BSWA)</strong>
+                        <span>Support the monastic Sangha, Bodhinyana, and Dhammasara</span>
+                      </div>
+                    </div>
+                    <a href="https://bswa.org/support-us/" target="_blank" rel="noopener noreferrer" class="btn-donate-support btn-donate-bswa" id="btn-donate-bswa" title="Donate directly to the Buddhist Society of Western Australia">
+                      🏛️ Donate to BSWA.org ↗
+                    </a>
+                  </div>
+                  <div class="dana-link-card dana-sc-card">
+                    <div class="dana-card-main">
+                      <span class="dana-link-icon">📜</span>
+                      <div>
+                        <strong>SuttaCentral</strong>
+                        <span>Early Buddhist texts, Pali translations, parallels, and dictionary lookup</span>
+                      </div>
+                    </div>
+                    <a href="https://suttacentral.net/donate-now?lang=en" target="_blank" rel="noopener noreferrer" class="btn-donate-support btn-donate-sc" id="btn-donate-sc" title="Donate directly to SuttaCentral">
+                      📜 Donate to SuttaCentral ↗
+                    </a>
+                  </div>
+                  <a href="https://podcast.bswa.org/" target="_blank" rel="noopener noreferrer" class="dana-link-card">
+                    <span class="dana-link-icon">🎙️</span>
+                    <div>
+                      <strong>BSWA Deeper Dhamma Podcast</strong>
+                      <span>Official Podbean audio host for BSWA historical retreats and talks &rarr;</span>
+                    </div>
+                  </a>
+                </div>
+                <p class="dana-closing">
+                  May all practitioners who use this tool deepen in wisdom, tranquility, and compassion.<br>
+                  <em>Sabbe sattā sukhi hontu — May all beings be well and peaceful.</em>
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 3: Core Study Features -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">✨</span>
+              <div>
+                <h3 class="about-section-title">Core Features &amp; Study Tools</h3>
+                <p class="about-section-subtitle">Designed for deep contemplation, research, and seamless listening</p>
+              </div>
+            </div>
+            <div class="about-features-grid">
+              <div class="about-feature-card">
+                <div class="feature-card-icon">⚡</div>
+                <h4 class="feature-card-title">Sub-Second Word Synchronization</h4>
+                <p class="feature-card-text">
+                  Listen while you read. As audio streams from Podbean, each spoken word is dynamically highlighted in real time. Click on any sentence, timestamp, or word to immediately seek playback to that exact syllable.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">Track (Teleprompter)</span>
+                  <span class="meta-tag">On (Highlight Only)</span>
+                  <span class="meta-tag">Off (Static Text)</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">🔍</div>
+                <h4 class="feature-card-title">6-Tier Zero-Latency Full-Text Search</h4>
+                <p class="feature-card-text">
+                  Powered by SQLite FTS5 running directly in your browser. Searches hundreds of thousands of speech turns in under 5 milliseconds. Features exact phrase matching, proximity queries, diacritic folding (e.g. <em>jhana</em> matches <em>jhāna</em>), and typo-tolerant prefix search.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">&lt; 5ms Latency</span>
+                  <span class="meta-tag">Teacher &amp; Date Filters</span>
+                  <span class="meta-tag">Exact Phrase Mode</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">📖</div>
+                <h4 class="feature-card-title">Live Pali Lexicon Companion</h4>
+                <p class="feature-card-text">
+                  A curated database of 2,447+ canonical Pali terms and doctrinal definitions. During audio playback, a real-time rolling companion window tracks spoken concepts and displays definitions, etymology, and Sutta citations alongside the transcript.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">Bodhi &amp; Sujato Concordance</span>
+                  <span class="meta-tag">Brahm &amp; Brahmali Glosses</span>
+                  <span class="meta-tag">Live Spoken Tracking</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">📜</div>
+                <h4 class="feature-card-title">Canonical Authority Documents</h4>
+                <p class="feature-card-text">
+                  Direct access to offline reference documents: the Bodhi &amp; Sujato Comparative Glossary (1,063 terms), Brahmali Vinaya Piṭaka (1,309 monastic law terms), The Word of the Buddha (Ajahn Brahm 2024 glossary), and Tipiṭaka Nikāya titles with full SHA-256 bitstream checksums.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">Offline SQLite DB</span>
+                  <span class="meta-tag">SHA-256 Verified</span>
+                  <span class="meta-tag">Raw Upstream Mirrors</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">🔖</div>
+                <h4 class="feature-card-title">Local Bookmarks &amp; Fluid Card Physics</h4>
+                <p class="feature-card-text">
+                  Save talks to your personal study list with a single click. Enjoy tactile drag-and-drop card physics with FLIP animations or quick ▲ / ▼ controls to arrange talks into custom playlists. Stored 100% locally in your browser.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">Zero Server Bloat</span>
+                  <span class="meta-tag">Drag &amp; Drop Physics</span>
+                  <span class="meta-tag">Persistent Storage</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">📦</div>
+                <h4 class="feature-card-title">Lossless Multi-Format Exports</h4>
+                <p class="feature-card-text">
+                  Download transcripts on demand for single talks, filtered search queries, or the complete library. Formats include Markdown (.md) with frontmatter, Plain Text (.txt), SubRip subtitles (.srt) for VLC/media players, WebVTT (.vtt), and structured JSON (.json).
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">ZIP Archive Generator</span>
+                  <span class="meta-tag">5 Standard Formats</span>
+                  <span class="meta-tag">Client-Side Compression</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 4: Technical Architecture & Privacy -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">⚙️</span>
+              <div>
+                <h3 class="about-section-title">Technical Architecture &amp; Data Integrity</h3>
+                <p class="about-section-subtitle">How Deeper Dhamma achieves speed, privacy, and acoustic fidelity</p>
+              </div>
+            </div>
+            <div class="about-arch-grid">
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Client-Side WASM</span>
+                  <h4 class="arch-title">100% Serverless &amp; Privacy-Focused</h4>
+                </div>
+                <p class="arch-desc">
+                  The entire database, full-text index, and query engine run directly in your web browser using official SQLite compiled to WebAssembly (WASM). Operating inside a dedicated Web Worker with Origin Private File System (OPFS) and IndexedDB caching, searches complete with zero server round-trips.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ Privacy-focused: collects only anonymous usage telemetry and error diagnostics strictly for site improvements</li>
+                  <li>✓ No third-party ad networks, tracking pixels, or monetization of personal data</li>
+                  <li>✓ No account registration, passwords, or paywalls</li>
+                  <li>✓ Progressive Web App (PWA) offline shell caching via Service Worker</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">CUDA Float16 ASR</span>
+                  <h4 class="arch-title">High-Accuracy Speech-to-Text</h4>
+                </div>
+                <p class="arch-desc">
+                  Transcriptions are generated using <code>faster-whisper-large-v3</code> in float16 precision on NVIDIA CUDA, configured for sequential transcription (<code>batch_size=1</code>) with tuned Silero Voice Activity Detection (VAD).
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ 100% speech capture with zero dropped words or boundary truncation</li>
+                  <li>✓ Preserves quiet monastic speech, gentle laughs, and meditative pauses</li>
+                  <li>✓ Dynamic teacher prompt steering conditioned on canonical Pali vocabulary</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">ECAPA-TDNN</span>
+                  <h4 class="arch-title">Era-Aware Voiceprints &amp; Diarization</h4>
+                </div>
+                <p class="arch-desc">
+                  Speaker diarization utilizes 192-dimensional SpeechBrain ECAPA-TDNN embeddings cataloging monastics across historical eras (1994–2003, 2004–2014, 2015–present).
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ Distinguishes primary teachers, retreat coordinators, and audience Q&amp;A</li>
+                  <li>✓ Hysteresis smoothing eliminates false speaker flips on solo monologues</li>
+                  <li>✓ Splits dialogue exchanges at natural conversational pauses (&ge; 0.45s)</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Pristine Bitstream</span>
+                  <h4 class="arch-title">Bitstream Parity &amp; Seek Calibration</h4>
+                </div>
+                <p class="arch-desc">
+                  Audio is streamed 1:1 bit-for-bit from Podbean's official CDN without re-encoding or container modification.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ VBR header seek calibration eliminates cross-browser audio drift</li>
+                  <li>✓ Pinpoint seek accuracy in Chrome, Firefox, Safari, and iOS WebKit</li>
+                  <li>✓ Anti-drift terminology normalization guarantees canonical Pali spelling</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 5: Monastic Teachers Featured -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">🪷</span>
+              <div>
+                <h3 class="about-section-title">Monastic Teachers Featured</h3>
+                <p class="about-section-subtitle">Centuries of Theravada Forest Tradition lineage preserved in voice</p>
+              </div>
+            </div>
+            <div class="about-teachers-grid">
+              <div class="about-teacher-card">
+                <div class="teacher-avatar">☸</div>
+                <div class="teacher-content">
+                  <h4 class="teacher-name">Ajahn Brahm (Ajahn Brahmavamso)</h4>
+                  <span class="teacher-role">Abbot of Bodhinyana Monastery &bull; Spiritual Director of the BSWA</span>
+                  <p class="teacher-bio">
+                    Born in London, Ajahn Brahm studied theoretical physics at Cambridge University before ordaining in Thailand at age 23 under the renowned meditation master Venerable Ajahn Chah of the Thai Forest Tradition. For over forty years, he has guided Bodhinyana Monastery in Serpentine, WA. World-renowned for his lucid, deeply practical teachings on meditation, the four jhānas, unconditional forgiveness, and joyful letting go, his talks are characterized by profound wisdom, accessibility, and delightful humor.
+                  </p>
+                </div>
+              </div>
+
+              <div class="about-teacher-card">
+                <div class="teacher-avatar">📜</div>
+                <div class="teacher-content">
+                  <h4 class="teacher-name">Ajahn Brahmali</h4>
+                  <span class="teacher-role">Senior Resident Monk &bull; Pali &amp; Vinaya Scholar</span>
+                  <p class="teacher-bio">
+                    Born in Norway, Ajahn Brahmali ordained in 1996 under Venerable Ajahn Chah and Ajahn Brahm. A resident teacher at Bodhinyana Monastery, he is one of the world's foremost scholars and English translators of the Vinaya Piṭaka (the Buddhist Monastic Code), completed for SuttaCentral. He regularly teaches comprehensive Sutta courses, Pali language workshops, and meditation retreats, making ancient canonical texts vivid and deeply relevant for contemporary practitioners.
+                  </p>
+                </div>
+              </div>
+
+              <div class="about-teacher-card">
+                <div class="teacher-avatar">🏛️</div>
+                <div class="teacher-content">
+                  <h4 class="teacher-name">Bhante Sujato</h4>
+                  <span class="teacher-role">Co-Founder of SuttaCentral &bull; Early Buddhist Texts Scholar</span>
+                  <p class="teacher-bio">
+                    Ordained in 1994 in Thailand under the Thai Forest Tradition, Bhante Sujato is former Abbot of Santi Forest Monastery and co-founder of SuttaCentral. He is celebrated for his historic complete English translation of the four Pali Nikāyas (Dīgha, Majjhima, Saṃyutta, and Aṅguttara), rendering canonical scriptures into plain, clear, gender-inclusive English freely available in the public domain worldwide.
+                  </p>
+                </div>
+              </div>
+
+              <div class="about-teacher-card">
+                <div class="teacher-avatar">🪷</div>
+                <div class="teacher-content">
+                  <h4 class="teacher-name">Ayya Vayama &amp; BSWA Sangha</h4>
+                  <span class="teacher-role">Pioneer Theravada Bhikkhunī &bull; Monastic Sangha</span>
+                  <p class="teacher-bio">
+                    Ayya Vayama (1952–2021) was an Australian Buddhist nun who was instrumental in founding Dhammasara Nuns Monastery in Gidgegannup, WA—the first forest monastery for women in the Southern Hemisphere. Her talks, along with teachings by visiting monastics and Sangha members across 30 years, are preserved here for future generations.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 6: Keyboard Shortcuts & Tips -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">⌨️</span>
+              <div>
+                <h3 class="about-section-title">Keyboard Shortcuts &amp; Navigation</h3>
+                <p class="about-section-subtitle">Quick controls for seamless desktop and mobile study</p>
+              </div>
+            </div>
+            <div class="about-card">
+              <div class="shortcuts-grid">
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd></div>
+                  <div class="shortcut-desc">Focus Search input from anywhere in the app</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>Space</kbd></div>
+                  <div class="shortcut-desc">Toggle Play / Pause for the active audio talk</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>J</kbd> / <kbd>L</kbd></div>
+                  <div class="shortcut-desc">Skip backward or forward 15 seconds (media keys)</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>Esc</kbd></div>
+                  <div class="shortcut-desc">Clear search query or dismiss active modal dialogs</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>Click Word</kbd></div>
+                  <div class="shortcut-desc">Click any word or timestamp to seek audio to that exact moment</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>Tap Pali Term</kbd></div>
+                  <div class="shortcut-desc">Inspect canonical definition and translation in Lexicon Companion</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 7: Build & Diagnostic Info -->
+          <section class="about-section">
+            <div class="about-card about-diagnostics-card">
+              <div class="diagnostics-header">
+                <div>
+                  <h4 class="diagnostics-title">Application Environment &amp; Cache Status</h4>
+                  <p class="diagnostics-sub">Client-side runtime information and OPFS storage controls</p>
+                </div>
+                <button type="button" class="btn-secondary" id="btn-about-reset-cache" onclick="if(window.resetDeeperDhammaCache){window.resetDeeperDhammaCache();}else{location.reload();}">
+                  🔄 Reset Local Cache
+                </button>
+              </div>
+              <div class="diagnostics-grid">
+                <div class="diag-item">
+                  <span class="diag-label">Application Version</span>
+                  <span class="diag-val" id="about-app-version">v1794280941</span>
+                </div>
+                <div class="diag-item">
+                  <span class="diag-label">SQLite Engine</span>
+                  <span class="diag-val">SQLite 3.46.1 WASM (Official)</span>
+                </div>
+                <div class="diag-item">
+                  <span class="diag-label">Search Provider</span>
+                  <span class="diag-val">FTS5 (BM25 + Prefix Folding)</span>
+                </div>
+                <div class="diag-item">
+                  <span class="diag-label">Audio CDN</span>
+                  <span class="diag-val">Podbean Streaming CDN (1:1 Bitstream)</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- 5. Transcript Reader View -->
+      <div class="view-panel" id="transcript-view">
+        <div class="transcript-view-header">
+          <div class="transcript-top-bar">
+            <button type="button" class="btn-back" id="transcript-back-btn" title="Return to previous view">
+              ← Back
+            </button>
+            <div class="transcript-meta-badges">
+              <span class="drawer-tag" id="drawer-date-tag">Date</span>
+              <span class="drawer-meta" id="drawer-meta-info">Teacher • Duration</span>
+            </div>
+          </div>
+          <h2 class="transcript-title" id="drawer-episode-title">Episode Title</h2>
+          <div class="transcript-actions-row">
+            <button type="button" class="btn-primary" id="transcript-play-btn" title="Play talk from beginning">
+              ▶ Play Talk
+            </button>
+            <button type="button" class="btn-secondary btn-bookmark-action" id="transcript-bookmark-btn" title="Bookmark talk">
+              <span class="bookmark-icon-wrap" id="transcript-bookmark-icon">
+                <svg class="bookmark-ribbon-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+              </span>
+              <span class="bookmark-label" id="transcript-bookmark-label">Bookmark</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Sticky Transcript Toolbar -->
+        <div class="transcript-sticky-toolbar" id="transcript-sticky-toolbar">
+          <div class="toolbar-sync-group">
+            <div class="word-sync-control" id="word-sync-control" role="group" aria-label="Word Synchronization Mode">
+              <span class="sync-control-label">Word Sync:</span>
+              <div class="segmented-control" id="segmented-word-sync-control">
+                <button type="button" class="seg-btn" data-mode="off" title="Disable synchronized word highlighting">Off</button>
+                <button type="button" class="seg-btn" data-mode="on" title="Highlight words as audio plays (manual scrolling)">On</button>
+                <button type="button" class="seg-btn active" data-mode="track" title="Highlight words and scroll to top when off screen">Track</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="toolbar-actions-group">
+            <div class="download-dropdown-wrapper" id="single-talk-dropdown-wrapper">
+              <button type="button" class="btn-secondary download-dropdown-btn" id="drawer-download-btn" title="Download transcript in selected format">
+                📥 Download Transcript ▾
+              </button>
+              <div class="download-dropdown-menu" id="drawer-download-menu">
+                <div class="dropdown-menu-header">Export Talk Transcript</div>
+                <button type="button" class="download-option" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown</span>
+                    <span class="download-opt-desc">Notes with frontmatter & timestamps</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text</span>
+                    <span class="download-opt-desc">Clean transcript text with turn timings</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles</span>
+                    <span class="download-opt-desc">For VLC, MPV & media players</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions</span>
+                    <span class="download-opt-desc">Standard web caption cues</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data</span>
+                    <span class="download-opt-desc">Raw structured episode & turn array</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
+            <a href="#" target="_blank" rel="noopener noreferrer" class="btn-secondary" id="drawer-podbean-link" title="Open episode on Deeper Dhamma Podbean">
+              ↗ Podbean Page
+            </a>
+            <button type="button" class="btn-secondary" id="drawer-share-btn" title="Copy shareable link to this talk">
+              🔗 Share Talk
+            </button>
+          </div>
+        </div>
+
+        <div class="transcript-layout-container" id="transcript-layout-container">
+          <div class="transcript-reader-container" id="drawer-turns-container">
+            <div class="loading-spinner">Loading transcript...</div>
+          </div>
+
+          <!-- Pali Lexicon Companion (Desktop Sidebar + Mobile Bottom Sheet) -->
+          <aside class="transcript-lexicon-companion" id="transcript-lexicon-companion" aria-label="Pali Lexicon Live Companion">
+            <!-- Mobile Mini Ticker Bar (Docked directly above player bar) -->
+            <div class="lex-mobile-ticker" id="lex-mobile-ticker">
+              <div class="lex-ticker-info" id="lex-ticker-trigger" role="button" tabindex="0" title="Click to expand terms window">
+                <span class="lex-ticker-icon" aria-hidden="true">📖</span>
+                <div class="lex-ticker-text-group">
+                  <div class="lex-ticker-headline">
+                    <span class="lex-ticker-tag">Current Term:</span>
+                    <strong class="lex-ticker-term" id="mobile-ticker-term">—</strong>
+                  </div>
+                  <span class="lex-ticker-def" id="mobile-ticker-def">Pali definitions appear here as spoken</span>
+                </div>
+              </div>
+              <button type="button" class="btn-toggle-lex-sheet" id="btn-toggle-lex-sheet" aria-expanded="false" title="Expand terms window">
+                <span class="sheet-count-pill" id="mobile-sheet-count">0</span>
+                <span class="sheet-arrow-icon" id="sheet-arrow-icon">▲</span>
+              </button>
+            </div>
+
+            <!-- Companion Header -->
+            <div class="lex-companion-header" id="lex-companion-header">
+              <div class="lex-companion-title-group">
+                <span class="lex-companion-icon" aria-hidden="true">📖</span>
+                <h3 class="lex-companion-title">Pali Lexicon</h3>
+                <span class="lex-stack-badge" id="lex-stack-badge">0 terms</span>
+              </div>
+              <div class="lex-companion-header-actions">
+                <button type="button" class="btn-clear-lex-stack" id="btn-clear-lex-stack" title="Jump to current active term">Active</button>
+                <button type="button" class="btn-close-lex-sheet" id="btn-close-lex-sheet" title="Collapse panel" aria-label="Collapse panel">▼</button>
+              </div>
+            </div>
+
+            <!-- Scrollable List of Definitions (Chronological Rolling 5-Term Window) -->
+            <div class="lexicon-stack-container" id="transcript-lexicon-stack">
+              <div class="lex-stack-empty" id="lex-stack-empty">
+                <div class="empty-icon">🪷</div>
+                <h4>Lexicon Companion</h4>
+                <p>Pali and Buddhist doctrinal terms spoken in this talk appear chronologically here.</p>
+                <p class="empty-hint">Click any term in this list to seek audio to that word, or tap highlighted terms in the transcript.</p>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Sticky Bottom Audio Player Bar (Always Visible) -->
+  <footer class="audio-player-bar" id="audio-player-bar">
+    <div class="player-container">
+      <!-- Track Information -->
+      <div class="track-info">
+        <div class="track-icon-wrapper" aria-hidden="true">
+          <div class="track-pulse"></div>
+          <span class="track-icon">
+            <svg class="fluent-icon fluent-mic" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M17.2889 2H14.7289C12.1789 2 10.0989 4.07 10.0989 6.63V8.12H14.8589C15.2789 8.12 15.6089 8.46 15.6089 8.87C15.6089 9.27999 15.2789 9.62 14.8589 9.62H10.0989V11.3101H14.8589C15.2789 11.3101 15.6089 11.6401 15.6089 12.0601C15.6089 12.4701 15.2789 12.8101 14.8589 12.8101H10.0989V14.49H14.8589C15.2789 14.49 15.6089 14.83 15.6089 15.24C15.6089 15.65 15.2789 15.99 14.8589 15.99H10.0989V17.37C10.0989 19.93 12.1689 22 14.7289 22H17.2889C19.8489 22 21.9189 19.93 21.9189 17.37V6.63C21.9189 4.07 19.8389 2 17.2889 2ZM21.9188 8.12V9.62H17.1588C16.7388 9.62 16.4088 9.27999 16.4088 8.87C16.4088 8.46 16.7388 8.12 17.1588 8.12H21.9188ZM17.1588 11.3101H21.9188V12.8101H17.1588C16.7388 12.8101 16.4088 12.4701 16.4088 12.0601C16.4088 11.6401 16.7388 11.3101 17.1588 11.3101ZM21.9188 14.49V15.99H17.1588C16.7388 15.99 16.4088 15.65 16.4088 15.24C16.4088 14.83 16.7388 14.49 17.1588 14.49H21.9188Z" fill="currentColor"/>
+              <path d="M23.9189 12.88C24.4712 12.88 24.9189 13.3277 24.9189 13.88V18.17C24.9189 21.9419 21.8618 24.9994 18.0901 25H18.0889L13.8289 25.01C10.0655 25.01 7.00891 21.9512 7.00891 18.18V13.89C7.00891 13.3377 7.45663 12.89 8.00891 12.89C8.5612 12.89 9.00891 13.3377 9.00891 13.89V18.18C9.00891 20.8485 11.1717 23.0094 13.8278 23.01H13.8289L18.0889 23C20.7566 23 22.9189 20.8377 22.9189 18.17V13.88C22.9189 13.3277 23.3666 12.88 23.9189 12.88Z" fill="currentColor"/>
+              <path d="M11.2889 26H13.819V25.01H18.209V26H20.7289C21.6589 26 22.5089 26.51 22.9389 27.32L23.9289 29.14C24.1388 29.53 23.8588 30 23.4188 30H8.58885C8.14885 30 7.86885 29.53 8.07885 29.14L9.06885 27.32C9.50885 26.51 10.3689 26 11.2889 26Z" fill="currentColor"/>
+            </svg>
+          </span>
+        </div>
+        <div class="track-details">
+          <div class="track-title" id="player-track-title">Ready to Play</div>
+          <div class="track-meta">
+            <span class="track-speaker" id="player-track-speaker">Select a talk or segment to begin</span>
+            <span class="bullet-sep">•</span>
+            <span class="track-stream-badge">Podbean CDN</span>
+          </div>
+        </div>
+        <button type="button" class="btn-bookmark-icon btn-player-bookmark" id="btn-player-bookmark" title="Bookmark current talk" aria-label="Bookmark current talk" style="display: none;">
+          <svg class="bookmark-ribbon-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+        </button>
+        <button type="button" class="btn-player-transcript" id="btn-player-transcript" title="View transcript for actively playing talk" aria-label="View transcript for actively playing talk" style="display: none;">
+          <span class="btn-player-transcript-icon">📜</span>
+          <span class="btn-player-transcript-label">Transcript</span>
+        </button>
+      </div>
+
+      <!-- Player Center Controls -->
+      <div class="player-controls">
+        <div class="control-buttons">
+          <button type="button" class="btn-ctl btn-ctl-track" id="btn-prev-track" title="Previous Talk" aria-label="Previous Talk">
+            <svg class="fluent-icon fluent-skip-back" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path class="fluent-symbol" d="M17 9.68977V15.0378L23.3066 8.9692C23.9419 8.35788 25 8.80811 25 9.68977V22.3102C25 23.1919 23.9419 23.6421 23.3066 23.0308L17 16.9622V22.3102C17 23.1919 15.9419 23.6421 15.3066 23.0308L9 16.9623V22.5C9 22.7761 8.77614 23 8.5 23H7.5C7.22386 23 7 22.7761 7 22.5V9.5C7 9.22386 7.22386 9 7.5 9H8.5C8.77614 9 9 9.22386 9 9.5V15.0378L15.3066 8.9692C15.9419 8.35788 17 8.80811 17 9.68977Z" fill="currentColor"/>
+              <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
+            </svg>
+          </button>
+
+          <button type="button" class="btn-ctl btn-ctl-seek" id="btn-skip-back" title="Rewind 15 seconds" aria-label="Rewind 15 seconds">
+            <svg class="fluent-icon fluent-rewind" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path class="fluent-symbol" d="M15 15.0378V9.68977C15 8.80811 13.9419 8.35788 13.3066 8.9692L6.74885 15.2794C6.34001 15.6728 6.34001 16.3272 6.74885 16.7206L13.3066 23.0308C13.9419 23.6421 15 23.1919 15 22.3102V16.9622L21.3066 23.0308C21.9419 23.6421 23 23.1919 23 22.3102V9.68977C23 8.80811 21.9419 8.35788 21.3066 8.9692L15 15.0378Z" fill="currentColor"/>
+              <path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/>
+            </svg>
+          </button>
+
+          <button type="button" class="btn-ctl-main" id="btn-play-pause" title="Play or Pause (Space)" aria-label="Play or Pause">
+            <svg class="fluent-icon fluent-play" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path class="fluent-symbol" d="M23.5 16.866C24.1667 16.4811 24.1667 15.5189 23.5 15.134L11.5 8.20577C10.8333 7.82087 10 8.302 10 9.0718L10 22.9282C10 23.698 10.8333 24.1791 11.5 23.7942L23.5 16.866Z" fill="currentColor"/>
+              <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
+            </svg>
+          </button>
+
+          <button type="button" class="btn-ctl btn-ctl-seek" id="btn-skip-fwd" title="Skip forward 15 seconds" aria-label="Skip forward 15 seconds">
+            <svg class="fluent-icon fluent-fast-forward" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path class="fluent-symbol" d="M17 15.0377L10.6934 8.9692C10.0581 8.35788 9 8.80811 9 9.68977L9 22.3102C9 23.1919 10.0581 23.6421 10.6934 23.0308L17 16.9622V22.3102C17 23.1919 18.0581 23.6421 18.6934 23.0308L25.2512 16.7206C25.66 16.3272 25.66 15.6728 25.2512 15.2794L18.6934 8.9692C18.0581 8.35788 17 8.80811 17 9.68977V15.0377Z" fill="currentColor"/>
+              <path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/>
+            </svg>
+          </button>
+
+          <button type="button" class="btn-ctl btn-ctl-track" id="btn-next-track" title="Next Talk" aria-label="Next Talk">
+            <svg class="fluent-icon fluent-skip-fwd" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path class="fluent-symbol" d="M9.69338 8.9692L16 15.0378V9.68977C16 8.80811 17.0581 8.35788 17.6934 8.9692L24 15.0377V9.5C24 9.22386 24.2239 9 24.5 9H25.5C25.7761 9 26 9.22386 26 9.5V22.5C26 22.7761 25.7761 23 25.5 23H24.5C24.2239 23 24 22.7761 24 22.5V16.9622L17.6934 23.0308C17.0581 23.6421 16 23.1919 16 22.3102V16.9622L9.69338 23.0308C9.05807 23.6421 8 23.1919 8 22.3102L8 9.68977C8 8.80811 9.05807 8.35788 9.69338 8.9692Z" fill="currentColor"/>
+              <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="scrubber-row">
+          <span class="time-label" id="time-current">0:00</span>
+          <input type="range" id="audio-scrubber" min="0" max="100" value="0" step="0.1" aria-label="Audio progress scrubber">
+          <span class="time-label" id="time-total">0:00</span>
+        </div>
+      </div>
+
+      <!-- Right Audio Extras -->
+      <div class="player-extras">
+        <div class="speed-selector">
+          <button type="button" class="speed-btn active" data-speed="1.0">1.0x</button>
+          <button type="button" class="speed-btn" data-speed="1.25">1.25x</button>
+          <button type="button" class="speed-btn" data-speed="1.5">1.5x</button>
+          <button type="button" class="speed-btn" data-speed="1.75">1.75x</button>
+        </div>
+        <div class="volume-control">
+          <button type="button" class="vol-btn" id="vol-toggle-btn" title="Mute audio" aria-label="Mute or unmute">
+            <span class="vol-icon" id="vol-icon">
+              <svg class="fluent-icon fluent-speaker-high" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M7.99756 23.001L16.6106 26.8308C17.7343 27.3704 19.0356 26.551 19.0356 25.3044V19.0768C20.6809 19.0289 21.9999 17.6801 21.9999 16.0232C21.9999 14.3663 20.6809 13.0175 19.0356 12.9696V6.49639C19.0356 5.25508 17.1704 4.70337 16.0474 5.23141L8.01223 9.0124V9H3.80282C2.80707 9 2 9.84705 2 10.8921V21.1079C2 22.153 2.80707 23 3.80282 23L7.99756 23.001ZM17.0356 7.03194V24.831L9.99756 21.7015L9.99758 10.2885L16.8909 7.04485L16.8926 7.04443C16.9011 7.04219 16.9385 7.03229 17.0069 7.03165C17.0165 7.03156 17.0261 7.03166 17.0356 7.03194Z" fill="currentColor"/>
+                <path d="M24.11 11.0695C23.9694 10.9151 23.8237 10.7676 23.6725 10.6276C23.035 10.0376 22 10.4914 22 11.3601V11.3876C22 11.6595 22.1181 11.9164 22.3175 12.1007C23.3031 13.0139 23.9212 14.3189 23.9212 15.7682C23.9212 17.2176 23.3037 18.5226 22.3175 19.4357C22.1119 19.6257 22 19.8964 22 20.1764C22 21.047 23.0369 21.4976 23.6756 20.9057C23.7419 20.8445 23.8069 20.782 23.8706 20.7176C25.2437 19.3445 25.9762 17.5014 25.9175 15.5514C25.8681 13.8932 25.2256 12.2976 24.11 11.0695Z" fill="currentColor"/>
+                <path d="M23.5063 7.97456C23.195 7.79455 23 7.46518 23 7.1058C23 6.3333 23.8369 5.85705 24.5056 6.24455C27.79 8.14705 30 11.6989 30 15.7683C30 19.8371 27.7906 23.3896 24.505 25.2921C23.8363 25.6796 22.9994 25.2027 22.9994 24.4302C22.9994 24.0714 23.1931 23.7427 23.5038 23.5627C24.1756 23.1739 24.8006 22.6952 25.3638 22.1321C27.0863 20.4096 28.0244 18.1121 27.9994 15.6721C27.9763 13.4202 27.1031 11.2471 25.56 9.60643C24.9475 8.95518 24.2556 8.40893 23.5063 7.97456Z" fill="currentColor"/>
+              </svg>
+            </span>
+          </button>
+          <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1" aria-label="Volume slider">
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden Native Audio Engine -->
+    <audio id="native-audio" preload="none"></audio>
+  </footer>
+
+  <!-- Archive Compilation Progress Modal -->
+  <div class="archive-modal-backdrop" id="archive-progress-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="archive-modal-title">
+    <div class="archive-modal-card">
+      <div class="archive-modal-header">
+        <div class="archive-modal-icon">📦</div>
+        <div class="archive-modal-headings">
+          <h3 class="archive-modal-title" id="archive-modal-title">Compiling Transcript Archive</h3>
+          <p class="archive-modal-subtitle" id="archive-modal-subtitle">Packaging transcripts into ZIP...</p>
+        </div>
+      </div>
+      <div class="archive-progress-wrapper">
+        <div class="archive-progress-track">
+          <div class="archive-progress-bar" id="archive-progress-bar" style="width: 0%;"></div>
+        </div>
+        <div class="archive-progress-labels">
+          <span class="archive-progress-percent" id="archive-progress-percent">0%</span>
+          <span class="archive-progress-count" id="archive-progress-count">0 of 0</span>
+        </div>
+      </div>
+      <div class="archive-modal-current-item" id="archive-modal-current-item">Preparing archive...</div>
+      <div class="archive-modal-actions">
+        <button type="button" class="btn-secondary" id="archive-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./db_client.js?v=1794280941"></script>
+  <script src="./word_sync.js?v=1794280941"></script>
+  <script src="./card_physics.js?v=1794280941"></script>
+  <script src="./app.js?v=1794280941"></script>
+</body>
+</html>
