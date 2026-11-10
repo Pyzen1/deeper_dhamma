@@ -195,6 +195,12 @@
     docFilterCount: document.getElementById('doc-filter-count'),
     docRenderedBody: document.getElementById('doc-rendered-body'),
 
+    // About View Elements
+    tabAboutBtn: document.getElementById('tab-about-btn'),
+    aboutView: document.getElementById('about-view'),
+    aboutAppVersion: document.getElementById('about-app-version'),
+    btnAboutResetCache: document.getElementById('btn-about-reset-cache'),
+
     // Transcript View Elements
     transcriptBackBtn: document.getElementById('transcript-back-btn'),
     transcriptPlayBtn: document.getElementById('transcript-play-btn'),
@@ -796,7 +802,7 @@
           id = segments[talkIdx + 1].trim();
         } else if (segments.length > 0) {
           const last = segments[segments.length - 1];
-          if (['browse', 'lexicon', 'documents', 'search'].includes(last)) {
+          if (['browse', 'lexicon', 'documents', 'search', 'bookmarks', 'about'].includes(last)) {
             route = last;
           }
         }
@@ -815,7 +821,7 @@
         if (cleanPath.startsWith('talk/')) {
           route = 'talk';
           id = cleanPath.replace('talk/', '').trim();
-        } else if (['browse', 'lexicon', 'documents', 'search'].includes(cleanPath)) {
+        } else if (['browse', 'lexicon', 'documents', 'search', 'bookmarks', 'about'].includes(cleanPath)) {
           route = cleanPath;
         } else if (cleanPath) {
           route = cleanPath;
@@ -893,6 +899,10 @@
             state.documents.filterQuery = params.q || params.filter || params.term || '';
           }
           switchTab('documents-view', { skipHistory: true });
+          break;
+
+        case 'about':
+          switchTab('about-view', { skipHistory: true });
           break;
 
         case 'search':
@@ -1791,6 +1801,9 @@
     if (els.tabDocsBtn) {
       els.tabDocsBtn.addEventListener('click', () => switchTab('documents-view'));
     }
+    if (els.tabAboutBtn) {
+      els.tabAboutBtn.addEventListener('click', () => switchTab('about-view'));
+    }
     if (els.tabTranscriptBtn) {
       els.tabTranscriptBtn.addEventListener('click', () => switchTab('transcript-view'));
     }
@@ -2266,7 +2279,7 @@
       });
     }
 
-    // Global Keyboard Shortcuts
+    // Global Keyboard Shortcuts (designed to avoid browser navigation & text-selection conflicts)
     window.addEventListener('keydown', (e) => {
       // 'Escape' clears doc filter or returns to previous view
       if (e.key === 'Escape') {
@@ -2284,16 +2297,60 @@
           return;
         }
       }
-      // '/' to focus search
-      if (e.key === '/' && document.activeElement !== els.searchInput && document.activeElement !== els.lexiconInput && document.activeElement !== els.docFilterInput) {
+
+      // Check whether user is currently typing in an input, textarea, select, or contenteditable element
+      const activeEl = document.activeElement;
+      const isInputFocused = activeEl && (
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeEl.tagName) ||
+        activeEl.isContentEditable
+      );
+
+      // 'Ctrl+K' or 'Cmd+K' to focus search from anywhere
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        els.searchInput.focus();
-        els.searchInput.select();
+        if (els.searchInput) {
+          els.searchInput.focus();
+          els.searchInput.select();
+        }
+        return;
       }
+
+      // '/' to focus search when not typing in an input
+      if (e.key === '/' && !isInputFocused) {
+        e.preventDefault();
+        if (els.searchInput) {
+          els.searchInput.focus();
+          els.searchInput.select();
+        }
+        return;
+      }
+
       // Space toggles audio (when not typing in an input)
-      if (e.code === 'Space' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
+      if (e.code === 'Space' && !isInputFocused) {
         e.preventDefault();
         togglePlayPause();
+        return;
+      }
+
+      // 'J' (rewind 15s) and 'L' (skip forward 15s)
+      // Standard media controls; avoids browser navigation (Alt+Arrows) and text selection (Shift+Arrows)
+      if (!isInputFocused && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.key.toLowerCase() === 'j') {
+          e.preventDefault();
+          if (els.nativeAudio && els.nativeAudio.src) {
+            const curPhys = window.WordSync ? window.WordSync.getPhysicalTime(els.nativeAudio.currentTime) : els.nativeAudio.currentTime;
+            safeSeek(curPhys - 15);
+          }
+          return;
+        }
+        if (e.key.toLowerCase() === 'l') {
+          e.preventDefault();
+          if (els.nativeAudio && els.nativeAudio.src) {
+            const curPhys = window.WordSync ? window.WordSync.getPhysicalTime(els.nativeAudio.currentTime) : els.nativeAudio.currentTime;
+            safeSeek(curPhys + 15);
+          }
+          return;
+        }
       }
     });
   }
@@ -2318,6 +2375,11 @@
     if (viewId === 'documents-view') {
       loadDocumentInView(state.documents.activeDocId, state.documents.filterQuery, { skipHistory: options.skipHistory });
     }
+    if (viewId === 'about-view') {
+      if (els.aboutAppVersion && window.__DEEPER_DHAMMA_VERSION__) {
+        els.aboutAppVersion.textContent = `v${window.__DEEPER_DHAMMA_VERSION__}`;
+      }
+    }
     if (viewId === 'transcript-view') {
       updateHeaderPlayButton();
       const isViewingPlaying = state.playingEpisode && state.currentEpisode && (state.playingEpisode.id === state.currentEpisode.id);
@@ -2340,6 +2402,7 @@
         'bookmarks-view': 'bookmarks',
         'lexicon-view': state.lexicon.term ? `lexicon?term=${encodeURIComponent(state.lexicon.term)}` : 'lexicon',
         'documents-view': docRoute,
+        'about-view': 'about',
         'transcript-view': state.currentEpisode ? `talk/${state.currentEpisode.id}` : 'search',
       };
       const targetRoute = tabToRouteMap[viewId];

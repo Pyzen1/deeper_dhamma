@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Deeper Dhamma — BSWA Study Tool, Pali Lexicon & Audio Archive</title>
-  <meta name="description" content="Interactive study tool and online reference guide for 30+ years of Theravada Buddhist teachings by Ajahn Brahm, Ajahn Brahmali, Bhante Sujato, and BSWA monastics. Features 6-tier FTS5 search, word-level audio sync, and a 2,447-term comparative Pali lexicon.">
+  <meta name="description" content="Interactive study tool and online reference guide for 30+ years of English Theravada Buddhist teachings by Ajahn Brahm, Ajahn Brahmali, Bhante Sujato, and BSWA monastics. Features 6-tier FTS5 search, word-level audio sync, and a 2,447-term comparative Pali lexicon.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://deeperdhamma.com/">
   <meta property="og:title" content="Deeper Dhamma — BSWA Study Tool, Pali Lexicon & Audio Archive">
-  <meta property="og:description" content="Search transcripts with sub-second word synchronization, stream 3,247 monastic talks directly from Podbean, and compare 2,447 canonical Pali terms across four teachers.">
+  <meta property="og:description" content="Search transcripts with sub-second word synchronization, stream 3,246 English monastic talks directly from Podbean, and compare 2,447 canonical Pali terms across four teachers.">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Deeper Dhamma — BSWA Study Tool & Pali Reference Guide">
   <meta name="twitter:description" content="Interactive Theravada Buddhist transcript search, synchronized audio reader, and comparative Pali lexicon.">
@@ -60,6 +60,10 @@
           <span class="nav-label">Documents</span>
           <span class="badge" id="docs-count-badge">4</span>
         </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-about-btn" data-tab="about-view">
+          <span class="nav-icon">ℹ️</span>
+          <span class="nav-label">About</span>
+        </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-transcript-btn" data-tab="transcript-view" style="display: none;">
           <span class="nav-icon">📜</span>
           <span class="nav-label">Transcript</span>
@@ -73,8 +77,9 @@
         <div class="stat-card-body" id="stat-episodes">Loading archive...</div>
       </div>
       <div class="sidebar-shortcuts-hint">
-        <span><kbd>/</kbd> Quick Search</span>
+        <span><kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> Search</span>
         <span><kbd>Space</kbd> Play / Pause</span>
+        <span><kbd>J</kbd> / <kbd>L</kbd> &plusmn;15s</span>
       </div>
     </div>
   </aside>
@@ -259,7 +264,7 @@
         <!-- Initial Placeholder State -->
         <div class="empty-state" id="search-empty-state">
           <div class="empty-icon">🪷</div>
-          <h2>Search 30+ Years of Theravada Teachings</h2>
+          <h2>Search 3,246 English Theravada Teachings</h2>
           <p>Instant zero-copy search across high-accuracy Whisper transcripts. Click any speech segment to stream directly from Podbean at that precise second.</p>
           <div class="example-chips" id="example-queries">
             <span>Try searching:</span>
@@ -283,7 +288,7 @@
             <p class="section-desc">Browse talks and retreats. All talks stream directly in the audio player; transcribed talks include word-synced text.</p>
           </div>
           <div class="browse-filter-bar">
-            <button type="button" id="browse-transcribed-only-btn" class="btn-toggle-transcribed active" aria-pressed="true" title="Show only talks with full synchronized transcripts (click to browse all 3,247 audio talks)">
+            <button type="button" id="browse-transcribed-only-btn" class="btn-toggle-transcribed active" aria-pressed="true" title="Show only talks with full synchronized transcripts (click to browse all 3,246 English audio talks)">
               <span class="toggle-check-icon" id="browse-transcribed-icon">✓</span>
               <span id="browse-transcribed-label">Transcribed Only</span>
             </button>
@@ -505,6 +510,417 @@
           <div class="doc-rendered-body" id="doc-rendered-body">
             <div class="loading-spinner">Loading canonical document...</div>
           </div>
+        </div>
+      </div>
+
+      <!-- About Deeper Dhamma View -->
+      <div class="view-panel" id="about-view">
+        <div class="about-container">
+          <!-- Hero Header -->
+          <div class="about-hero">
+            <div class="about-hero-badge">☸ Theravada Buddhist Audio Archive &amp; Study Platform</div>
+            <h2 class="about-hero-title">Deeper Dhamma</h2>
+            <p class="about-hero-lead">
+              An open, interactive research portal and study companion bridging 30+ years of oral Buddhist teachings with sub-second word-level audio synchronization, 6-tier FTS5 search, and canonical Pali lexicon references.
+            </p>
+            <div class="about-hero-chips">
+              <span class="about-chip"><span class="chip-icon">🪷</span> 3,246 English Monastic Talks</span>
+              <span class="about-chip"><span class="chip-icon">⏱️</span> 1994 – Present Audio Heritage</span>
+              <span class="about-chip"><span class="chip-icon">📖</span> 2,447 Pali Lexicon Terms</span>
+              <span class="about-chip"><span class="chip-icon">⚡</span> Sub-5ms Client-Side Search</span>
+              <span class="about-chip"><span class="chip-icon">🔒</span> Privacy-Focused (Anonymous Diagnostics Only)</span>
+            </div>
+          </div>
+
+          <!-- Section 1: The Mission & Historical Audio Heritage -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">🏛️</span>
+              <div>
+                <h3 class="about-section-title">The Audio Heritage &amp; Mission</h3>
+                <p class="about-section-subtitle">Preserving and opening access to thirty years of oral Dhamma</p>
+              </div>
+            </div>
+            <div class="about-card about-prose-card">
+              <p>
+                Founded in 1973 in Perth, the <strong>Buddhist Society of Western Australia (BSWA)</strong> has grown into one of the world's most vibrant centers for early Buddhist monastic training, meditation retreats, and public Dhamma teachings. Over three decades, the monastics of Bodhinyana Monastery, Dhammasara Nuns Monastery, and the Armadale Meditation Centre have offered thousands of Friday evening public talks, weekend Sutta study workshops, and 9-day meditation retreats at Jhana Grove.
+              </p>
+              <p>
+                Historically recorded onto analog cassettes, digital mini-discs, and MP3 files—and later distributed via the <em>Deeper Dhamma</em> podcast feed on Podbean—these teachings represent an irreplaceable treasure of practical meditation instruction, sutta analysis, and compassionate monastic wisdom.
+              </p>
+              <p>
+                <strong>Curated English Archive:</strong> The Deeper Dhamma collection indexes <strong>3,246 English-language monastic recordings</strong> spanning over thirty years. Non-English talks (such as Sinhala, Thai, Chinese, and Vietnamese translations) and duplicate defunct feeds have been excluded to guarantee that search indexes, transcripts, and word alignments remain 100% focused on English oral Dhamma teachings.
+              </p>
+              <p>
+                <strong>The Deeper Dhamma Solution:</strong> This platform transforms the entire audio archive into an instant, searchable, studyable knowledge base. Audio streams 1:1 bit-for-bit from official Podbean servers, while every spoken word is mapped in real time to high-precision transcripts, canonical dictionaries, and authoritative source texts.
+              </p>
+            </div>
+          </section>
+
+          <!-- Section 2: Dāna, Acknowledgments & Heritage -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">🤝</span>
+              <div>
+                <h3 class="about-section-title">Dāna, Acknowledgments &amp; Heritage</h3>
+                <p class="about-section-subtitle">Honoring the ancient tradition of freely sharing the Dhamma</p>
+              </div>
+            </div>
+            <div class="about-card about-dana-card">
+              <div class="dana-symbol">☸</div>
+              <div class="dana-content">
+                <h4 class="dana-title">The Principle of Dāna (Free Offering)</h4>
+                <p class="dana-lead">
+                  <em>"Sabbadānaṃ dhammadānaṃ jināti"</em> — The gift of Dhamma excels all gifts. (Dhp 354)
+                </p>
+                <p>
+                  In accordance with the monastic Vinaya and the living Buddhist tradition of generosity (<em>dāna</em>), the Dhamma teachings are priceless and freely accessible to everyone without paywalls, subscriptions, or advertisements. To help cover ongoing infrastructure costs, maintenance, and continuous open-source software development, voluntary donations (<em>dāna</em>) are gratefully welcomed to support the upkeep and future enhancement of this platform.
+                </p>
+                <!-- Site Upkeep Support Banner (Pending Ko-fi setup)
+                <div class="dana-support-banner" id="dana-support-banner">
+                  <span class="support-banner-icon">💛</span>
+                  <div class="support-banner-content">
+                    <strong>Support Site Upkeep &amp; Ongoing Maintenance</strong>
+                    <p>
+                      Voluntary contributions directly help cover infrastructure costs, technical maintenance, and ongoing feature development.
+                    </p>
+                  </div>
+                  <a href="#donate" class="btn-donate-support btn-donate-site" id="btn-donate-site" title="Support site upkeep, infrastructure costs, and technical development">
+                    💛 Support Site Upkeep
+                  </a>
+                </div>
+                -->
+                <div class="dana-links-grid">
+                  <div class="dana-link-card dana-bswa-card">
+                    <div class="dana-card-main">
+                      <span class="dana-link-icon">🏛️</span>
+                      <div>
+                        <strong>Buddhist Society of Western Australia (BSWA)</strong>
+                        <span>Support the monastic Sangha, Bodhinyana, and Dhammasara</span>
+                      </div>
+                    </div>
+                    <a href="https://bswa.org/support-us/" target="_blank" rel="noopener noreferrer" class="btn-donate-support btn-donate-bswa" id="btn-donate-bswa" title="Donate directly to the Buddhist Society of Western Australia">
+                      🏛️ Donate to BSWA.org ↗
+                    </a>
+                  </div>
+                  <div class="dana-link-card dana-sc-card">
+                    <div class="dana-card-main">
+                      <span class="dana-link-icon">📜</span>
+                      <div>
+                        <strong>SuttaCentral</strong>
+                        <span>Early Buddhist texts, Pali translations, parallels, and dictionary lookup</span>
+                      </div>
+                    </div>
+                    <a href="https://suttacentral.net/donate-now?lang=en" target="_blank" rel="noopener noreferrer" class="btn-donate-support btn-donate-sc" id="btn-donate-sc" title="Donate directly to SuttaCentral">
+                      📜 Donate to SuttaCentral ↗
+                    </a>
+                  </div>
+                  <a href="https://podcast.bswa.org/" target="_blank" rel="noopener noreferrer" class="dana-link-card">
+                    <span class="dana-link-icon">🎙️</span>
+                    <div>
+                      <strong>BSWA Deeper Dhamma Podcast</strong>
+                      <span>Official Podbean audio host for BSWA historical retreats and talks &rarr;</span>
+                    </div>
+                  </a>
+                </div>
+                <p class="dana-closing">
+                  May all practitioners who use this tool deepen in wisdom, tranquility, and compassion.<br>
+                  <em>Sabbe sattā sukhi hontu — May all beings be well and peaceful.</em>
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 3: Core Study Features -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">✨</span>
+              <div>
+                <h3 class="about-section-title">Core Features &amp; Study Tools</h3>
+                <p class="about-section-subtitle">Designed for deep contemplation, research, and seamless listening</p>
+              </div>
+            </div>
+            <div class="about-features-grid">
+              <div class="about-feature-card">
+                <div class="feature-card-icon">⚡</div>
+                <h4 class="feature-card-title">Sub-Second Word Synchronization</h4>
+                <p class="feature-card-text">
+                  Listen while you read. As audio streams from Podbean, each spoken word is dynamically highlighted in real time. Click on any sentence, timestamp, or word to immediately seek playback to that exact syllable.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">Track (Teleprompter)</span>
+                  <span class="meta-tag">On (Highlight Only)</span>
+                  <span class="meta-tag">Off (Static Text)</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">🔍</div>
+                <h4 class="feature-card-title">6-Tier Zero-Latency Full-Text Search</h4>
+                <p class="feature-card-text">
+                  Powered by SQLite FTS5 running directly in your browser. Searches hundreds of thousands of speech turns in under 5 milliseconds. Features exact phrase matching, proximity queries, diacritic folding (e.g. <em>jhana</em> matches <em>jhāna</em>), and typo-tolerant prefix search.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">&lt; 5ms Latency</span>
+                  <span class="meta-tag">Teacher &amp; Date Filters</span>
+                  <span class="meta-tag">Exact Phrase Mode</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">📖</div>
+                <h4 class="feature-card-title">Live Pali Lexicon Companion</h4>
+                <p class="feature-card-text">
+                  A curated database of 2,447+ canonical Pali terms and doctrinal definitions. During audio playback, a real-time rolling companion window tracks spoken concepts and displays definitions, etymology, and Sutta citations alongside the transcript.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">Bodhi &amp; Sujato Concordance</span>
+                  <span class="meta-tag">Brahm &amp; Brahmali Glosses</span>
+                  <span class="meta-tag">Live Spoken Tracking</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">📜</div>
+                <h4 class="feature-card-title">Canonical Authority Documents</h4>
+                <p class="feature-card-text">
+                  Direct access to offline reference documents: the Bodhi &amp; Sujato Comparative Glossary (1,063 terms), Brahmali Vinaya Piṭaka (1,309 monastic law terms), The Word of the Buddha (Ajahn Brahm 2024 glossary), and Tipiṭaka Nikāya titles with full SHA-256 bitstream checksums.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">Offline SQLite DB</span>
+                  <span class="meta-tag">SHA-256 Verified</span>
+                  <span class="meta-tag">Raw Upstream Mirrors</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">🔖</div>
+                <h4 class="feature-card-title">Local Bookmarks &amp; Fluid Card Physics</h4>
+                <p class="feature-card-text">
+                  Save talks to your personal study list with a single click. Enjoy tactile drag-and-drop card physics with FLIP animations or quick ▲ / ▼ controls to arrange talks into custom playlists. Stored 100% locally in your browser.
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">Zero Server Bloat</span>
+                  <span class="meta-tag">Drag &amp; Drop Physics</span>
+                  <span class="meta-tag">Persistent Storage</span>
+                </div>
+              </div>
+
+              <div class="about-feature-card">
+                <div class="feature-card-icon">📦</div>
+                <h4 class="feature-card-title">Lossless Multi-Format Exports</h4>
+                <p class="feature-card-text">
+                  Download transcripts on demand for single talks, filtered search queries, or the complete library. Formats include Markdown (.md) with frontmatter, Plain Text (.txt), SubRip subtitles (.srt) for VLC/media players, WebVTT (.vtt), and structured JSON (.json).
+                </p>
+                <div class="feature-card-meta">
+                  <span class="meta-tag">ZIP Archive Generator</span>
+                  <span class="meta-tag">5 Standard Formats</span>
+                  <span class="meta-tag">Client-Side Compression</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 4: Technical Architecture & Privacy -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">⚙️</span>
+              <div>
+                <h3 class="about-section-title">Technical Architecture &amp; Data Integrity</h3>
+                <p class="about-section-subtitle">How Deeper Dhamma achieves speed, privacy, and acoustic fidelity</p>
+              </div>
+            </div>
+            <div class="about-arch-grid">
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Client-Side WASM</span>
+                  <h4 class="arch-title">100% Serverless &amp; Privacy-Focused</h4>
+                </div>
+                <p class="arch-desc">
+                  The entire database, full-text index, and query engine run directly in your web browser using official SQLite compiled to WebAssembly (WASM). Operating inside a dedicated Web Worker with Origin Private File System (OPFS) and IndexedDB caching, searches complete with zero server round-trips.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ Privacy-focused: collects only anonymous usage telemetry and error diagnostics strictly for site improvements</li>
+                  <li>✓ No third-party ad networks, tracking pixels, or monetization of personal data</li>
+                  <li>✓ No account registration, passwords, or paywalls</li>
+                  <li>✓ Progressive Web App (PWA) offline shell caching via Service Worker</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">CUDA Float16 ASR</span>
+                  <h4 class="arch-title">High-Accuracy Speech-to-Text</h4>
+                </div>
+                <p class="arch-desc">
+                  Transcriptions are generated using <code>faster-whisper-large-v3</code> in float16 precision on NVIDIA CUDA, configured for sequential transcription (<code>batch_size=1</code>) with tuned Silero Voice Activity Detection (VAD).
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ 100% speech capture with zero dropped words or boundary truncation</li>
+                  <li>✓ Preserves quiet monastic speech, gentle laughs, and meditative pauses</li>
+                  <li>✓ Dynamic teacher prompt steering conditioned on canonical Pali vocabulary</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">ECAPA-TDNN</span>
+                  <h4 class="arch-title">Era-Aware Voiceprints &amp; Diarization</h4>
+                </div>
+                <p class="arch-desc">
+                  Speaker diarization utilizes 192-dimensional SpeechBrain ECAPA-TDNN embeddings cataloging monastics across historical eras (1994–2003, 2004–2014, 2015–present).
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ Distinguishes primary teachers, retreat coordinators, and audience Q&amp;A</li>
+                  <li>✓ Hysteresis smoothing eliminates false speaker flips on solo monologues</li>
+                  <li>✓ Splits dialogue exchanges at natural conversational pauses (&ge; 0.45s)</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Pristine Bitstream</span>
+                  <h4 class="arch-title">Bitstream Parity &amp; Seek Calibration</h4>
+                </div>
+                <p class="arch-desc">
+                  Audio is streamed 1:1 bit-for-bit from Podbean's official CDN without re-encoding or container modification.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ VBR header seek calibration eliminates cross-browser audio drift</li>
+                  <li>✓ Pinpoint seek accuracy in Chrome, Firefox, Safari, and iOS WebKit</li>
+                  <li>✓ Anti-drift terminology normalization guarantees canonical Pali spelling</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 5: Monastic Teachers Featured -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">🪷</span>
+              <div>
+                <h3 class="about-section-title">Monastic Teachers Featured</h3>
+                <p class="about-section-subtitle">Centuries of Theravada Forest Tradition lineage preserved in voice</p>
+              </div>
+            </div>
+            <div class="about-teachers-grid">
+              <div class="about-teacher-card">
+                <div class="teacher-avatar">☸</div>
+                <div class="teacher-content">
+                  <h4 class="teacher-name">Ajahn Brahm (Ajahn Brahmavamso)</h4>
+                  <span class="teacher-role">Abbot of Bodhinyana Monastery &bull; Spiritual Director of the BSWA</span>
+                  <p class="teacher-bio">
+                    Born in London, Ajahn Brahm studied theoretical physics at Cambridge University before ordaining in Thailand at age 23 under the renowned meditation master Venerable Ajahn Chah of the Thai Forest Tradition. For over forty years, he has guided Bodhinyana Monastery in Serpentine, WA. World-renowned for his lucid, deeply practical teachings on meditation, the four jhānas, unconditional forgiveness, and joyful letting go, his talks are characterized by profound wisdom, accessibility, and delightful humor.
+                  </p>
+                </div>
+              </div>
+
+              <div class="about-teacher-card">
+                <div class="teacher-avatar">📜</div>
+                <div class="teacher-content">
+                  <h4 class="teacher-name">Ajahn Brahmali</h4>
+                  <span class="teacher-role">Senior Resident Monk &bull; Pali &amp; Vinaya Scholar</span>
+                  <p class="teacher-bio">
+                    Born in Norway, Ajahn Brahmali ordained in 1996 under Venerable Ajahn Chah and Ajahn Brahm. A resident teacher at Bodhinyana Monastery, he is one of the world's foremost scholars and English translators of the Vinaya Piṭaka (the Buddhist Monastic Code), completed for SuttaCentral. He regularly teaches comprehensive Sutta courses, Pali language workshops, and meditation retreats, making ancient canonical texts vivid and deeply relevant for contemporary practitioners.
+                  </p>
+                </div>
+              </div>
+
+              <div class="about-teacher-card">
+                <div class="teacher-avatar">🏛️</div>
+                <div class="teacher-content">
+                  <h4 class="teacher-name">Bhante Sujato</h4>
+                  <span class="teacher-role">Co-Founder of SuttaCentral &bull; Early Buddhist Texts Scholar</span>
+                  <p class="teacher-bio">
+                    Ordained in 1994 in Thailand under the Thai Forest Tradition, Bhante Sujato is former Abbot of Santi Forest Monastery and co-founder of SuttaCentral. He is celebrated for his historic complete English translation of the four Pali Nikāyas (Dīgha, Majjhima, Saṃyutta, and Aṅguttara), rendering canonical scriptures into plain, clear, gender-inclusive English freely available in the public domain worldwide.
+                  </p>
+                </div>
+              </div>
+
+              <div class="about-teacher-card">
+                <div class="teacher-avatar">🪷</div>
+                <div class="teacher-content">
+                  <h4 class="teacher-name">Ayya Vayama &amp; BSWA Sangha</h4>
+                  <span class="teacher-role">Pioneer Theravada Bhikkhunī &bull; Monastic Sangha</span>
+                  <p class="teacher-bio">
+                    Ayya Vayama (1952–2021) was an Australian Buddhist nun who was instrumental in founding Dhammasara Nuns Monastery in Gidgegannup, WA—the first forest monastery for women in the Southern Hemisphere. Her talks, along with teachings by visiting monastics and Sangha members across 30 years, are preserved here for future generations.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 6: Keyboard Shortcuts & Tips -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">⌨️</span>
+              <div>
+                <h3 class="about-section-title">Keyboard Shortcuts &amp; Navigation</h3>
+                <p class="about-section-subtitle">Quick controls for seamless desktop and mobile study</p>
+              </div>
+            </div>
+            <div class="about-card">
+              <div class="shortcuts-grid">
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd></div>
+                  <div class="shortcut-desc">Focus Search input from anywhere in the app</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>Space</kbd></div>
+                  <div class="shortcut-desc">Toggle Play / Pause for the active audio talk</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>J</kbd> / <kbd>L</kbd></div>
+                  <div class="shortcut-desc">Skip backward or forward 15 seconds (media keys)</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>Esc</kbd></div>
+                  <div class="shortcut-desc">Clear search query or dismiss active modal dialogs</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>Click Word</kbd></div>
+                  <div class="shortcut-desc">Click any word or timestamp to seek audio to that exact moment</div>
+                </div>
+                <div class="shortcut-item">
+                  <div class="shortcut-keys"><kbd>Tap Pali Term</kbd></div>
+                  <div class="shortcut-desc">Inspect canonical definition and translation in Lexicon Companion</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 7: Build & Diagnostic Info -->
+          <section class="about-section">
+            <div class="about-card about-diagnostics-card">
+              <div class="diagnostics-header">
+                <div>
+                  <h4 class="diagnostics-title">Application Environment &amp; Cache Status</h4>
+                  <p class="diagnostics-sub">Client-side runtime information and OPFS storage controls</p>
+                </div>
+                <button type="button" class="btn-secondary" id="btn-about-reset-cache" onclick="if(window.resetDeeperDhammaCache){window.resetDeeperDhammaCache();}else{location.reload();}">
+                  🔄 Reset Local Cache
+                </button>
+              </div>
+              <div class="diagnostics-grid">
+                <div class="diag-item">
+                  <span class="diag-label">Application Version</span>
+                  <span class="diag-val" id="about-app-version">v{{db_version}}</span>
+                </div>
+                <div class="diag-item">
+                  <span class="diag-label">SQLite Engine</span>
+                  <span class="diag-val">SQLite 3.46.1 WASM (Official)</span>
+                </div>
+                <div class="diag-item">
+                  <span class="diag-label">Search Provider</span>
+                  <span class="diag-val">FTS5 (BM25 + Prefix Folding)</span>
+                </div>
+                <div class="diag-item">
+                  <span class="diag-label">Audio CDN</span>
+                  <span class="diag-val">Podbean Streaming CDN (1:1 Bitstream)</span>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
 

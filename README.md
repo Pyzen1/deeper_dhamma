@@ -2,6 +2,16 @@
 
 Consolidated application for the Buddhist Society of Western Australia (BSWA) **Deeper Dhamma** audio archive (30+ years of Theravada Buddhist teachings, retreats, and monastic Q&A sessions).
 
+## Support &amp; Dāna (Donations)
+
+In accordance with the monastic Vinaya and the living Buddhist tradition of generosity (*dāna*), the Dhamma teachings are priceless and freely accessible to everyone without paywalls, subscriptions, or advertisements.
+
+<!--
+- 💛 **Support Site Upkeep &amp; Development**: Voluntary contributions directly help cover ongoing infrastructure costs, technical maintenance, and continued open-source feature development for this study tool.
+-->
+- 🏛️ **Donate to BSWA.org**: Donate directly to the [Buddhist Society of Western Australia (BSWA)](https://bswa.org/support-us/) to support the monastic Sangha, Bodhinyana Monastery, Dhammasara Nuns Monastery, and retreat facilities.
+- 📜 **Donate to SuttaCentral**: Support [SuttaCentral](https://suttacentral.net/donate-now?lang=en) in making early Buddhist texts and translations freely available worldwide.
+
 ## Architecture & Features
 
 - **Centralized Database Storage (`databases/`)**: 

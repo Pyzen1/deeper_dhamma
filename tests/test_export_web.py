@@ -413,6 +413,94 @@ def test_bookmark_finger_touch_and_physical_exchange_animation():
     assert "floatingEl.remove()" in card_physics_js, "Must cleanly remove floating element after drop animation"
 
 
+def test_about_view_and_navigation_integrity():
+    """
+    Verifies that the About page and view navigation are properly integrated:
+    1. index.html contains tab-about-btn, data-tab="about-view", and #about-view.
+    2. #about-view contains detailed sections: historical audio heritage, features,
+       technical architecture, monastic teachers, shortcuts, and dāna acknowledgments.
+    3. app.js caches tabAboutBtn and aboutView, registers click listener, supports 'about' route
+       in parseLocation and handleRoute, and maps 'about-view' to 'about' in switchTab.
+    4. style.css includes responsive styles for .about-container, .about-hero, .about-features-grid,
+       .about-arch-grid, .about-teachers-grid, .shortcuts-grid, and .about-dana-card.
+    """
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
+    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+
+    # 1. Navigation & DOM elements in index.html
+    assert 'id="tab-about-btn"' in index_html, "Must have about nav tab button"
+    assert 'data-tab="about-view"' in index_html, "Must point to about-view"
+    assert 'id="about-view"' in index_html, "Must have about-view panel"
+    assert 'about-hero' in index_html, "Must have hero section"
+    assert 'about-features-grid' in index_html, "Must have features grid"
+    assert 'about-arch-grid' in index_html, "Must have technical architecture grid"
+    assert 'about-teachers-grid' in index_html, "Must have teachers grid"
+    assert 'shortcuts-grid' in index_html, "Must have shortcuts grid"
+    assert 'about-dana-card' in index_html, "Must have dana card"
+
+    # 2. Key content items in index.html
+    assert "Ajahn Brahm" in index_html, "Must mention Ajahn Brahm"
+    assert "Ajahn Brahmali" in index_html, "Must mention Ajahn Brahmali"
+    assert "Bhante Sujato" in index_html, "Must mention Bhante Sujato"
+    assert "faster-whisper-large-v3" in index_html, "Must explain ASR model"
+    assert "ECAPA-TDNN" in index_html, "Must explain diarization"
+    assert "Buddhist Society of Western Australia" in index_html, "Must reference BSWA"
+
+    # 3. Router and tab handling in app.js
+    assert "tabAboutBtn: document.getElementById('tab-about-btn')" in app_js, "Must cache tabAboutBtn"
+    assert "aboutView: document.getElementById('about-view')" in app_js, "Must cache aboutView"
+    assert "els.tabAboutBtn.addEventListener('click', () => switchTab('about-view'))" in app_js, "Must register about click listener"
+    assert "case 'about':" in app_js, "Must handle about route in handleRoute"
+    assert "'about-view': 'about'" in app_js, "Must map about-view to about route in switchTab"
+
+    # 4. Styling in style.css
+    assert ".about-container" in style_css, "Must have .about-container in CSS"
+    assert ".about-hero" in style_css, "Must have .about-hero in CSS"
+    assert ".about-features-grid" in style_css, "Must have .about-features-grid in CSS"
+    assert ".about-arch-grid" in style_css, "Must have .about-arch-grid in CSS"
+    assert ".about-teachers-grid" in style_css, "Must have .about-teachers-grid in CSS"
+    assert ".about-dana-card" in style_css, "Must have .about-dana-card in CSS"
+
+    # 5. English talks count, Bhante Sujato naming, and telemetry/privacy adjustments
+    assert "3,246 English" in index_html, "Must specify 3,246 English talks"
+    assert "(Ajahn Sujato)" not in index_html, "Must remove '(Ajahn Sujato)' side parens"
+    assert "anonymous usage" in index_html, "Must state collection of anonymous usage statistics"
+    assert "Zero tracking, zero telemetry" not in index_html, "Must remove strict no-telemetry note"
+
+    # 6. Non-conflicting keyboard shortcuts
+    assert "safeSeek(curPhys - 15)" in app_js, "Must support J/L media seek in app.js"
+    assert "Shift" not in index_html.split("shortcuts-grid")[1].split("about-diagnostics-card")[0], "Must not use Shift+Arrow shortcuts that conflict with text selection"
+
+    # 7. Voluntary donations and site upkeep support
+    assert "dana-support-banner" in index_html, "Must have donation support banner in index.html"
+    assert "<!-- Site Upkeep Support Banner" in index_html, "Site upkeep banner should be commented out pending Ko-fi setup"
+    assert "-->" in index_html.split('id="btn-donate-site"')[1].split("dana-links-grid")[0], "Site upkeep banner should be enclosed in HTML comments"
+    assert "upkeep" in index_html.lower(), "Must mention donations for site upkeep"
+    assert "infrastructure costs" in index_html.lower(), "Must mention generic infrastructure costs"
+    assert "audio streaming" not in index_html.split("about-dana-card")[1].split("about-features-grid")[0], "Must not claim audio streaming costs"
+    assert "btn-donate-site" in index_html, "Must have site upkeep donation button"
+    assert "btn-donate-bswa" in index_html, "Must have BSWA donation button"
+    assert "dana-bswa-card" in index_html, "Must have dana-bswa-card in index.html"
+    assert "btn-donate-bswa" in index_html.split("dana-bswa-card")[1].split("dana-sc-card")[0], "Must place BSWA donation button inside the BSWA dana card"
+    assert ".dana-support-banner" in style_css, "Must style donation support banner in style.css"
+    assert ".dana-bswa-card" in style_css, "Must style dana-bswa-card in style.css"
+
+    # 8. SuttaCentral donation button and Dāna section relocation
+    assert "btn-donate-sc" in index_html, "Must have SuttaCentral donation button"
+    assert "https://suttacentral.net/donate-now?lang=en" in index_html, "Must have exact SuttaCentral donation URL"
+    assert "btn-donate-sc" in index_html.split("dana-sc-card")[1].split("podcast.bswa.org")[0], "Must place SuttaCentral donation button inside the SuttaCentral dana card"
+    assert ".dana-sc-card" in style_css, "Must style dana-sc-card in style.css"
+    assert ".btn-donate-sc" in style_css, "Must style btn-donate-sc in style.css"
+    assert index_html.find("The Audio Heritage &amp; Mission") < index_html.find("about-dana-card") < index_html.find("about-features-grid"), "Dana card must appear after intro mission and before features grid"
+
+
+
+
+
 
 
 
