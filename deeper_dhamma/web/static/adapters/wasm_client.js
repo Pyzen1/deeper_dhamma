@@ -33,7 +33,14 @@ class WasmDatabaseClient {
           : '';
         this.worker = new Worker(`./db_worker.js${versionQuery}`);
         this.worker.onmessage = (e) => {
-          const { id, success, data, error } = e.data || {};
+          const { id, success, data, error, type } = e.data || {};
+          if (type === 'db_hot_swapped') {
+            console.log('[WASM Client] Database hot-swapped seamlessly in background:', data);
+            if (typeof this.onHotSwap === 'function') {
+              this.onHotSwap(data);
+            }
+            return;
+          }
           if (this.pending.has(id)) {
             const { resolve: res, reject: rej } = this.pending.get(id);
             this.pending.delete(id);

@@ -30,7 +30,6 @@ const CORE_ASSETS = [
   './db_worker.js',
   './sqlite3.js',
   './sqlite3.wasm',
-  './dhamma_web.db',
   './icons/fluent_play.svg',
   './icons/fluent_pause.svg',
   './icons/fluent_play_pause.svg',
@@ -155,22 +154,29 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Server Version Checks & Probes (EXCEPTIONS to cache)
-  // Range probes (bytes=0-99) and API stats explicitly check live server status.
+  // 2. Server Version Checks & Database Fetches (EXCEPTIONS to cache)
+  // Range probes (bytes=0-99), database downloads (.db), and API stats explicitly check live server status.
   const isRangeProbe = req.headers.get('Range') === 'bytes=0-99';
-  const isServerProbe = isRangeProbe || url.pathname.startsWith('/api/');
+  const isDbFetch = url.pathname.endsWith('.db') || url.pathname.includes('dhamma_web.db');
+  const isServerProbe = isRangeProbe || isDbFetch || url.pathname.startsWith('/api/');
 
   if (isServerProbe) {
+    const isFullDb = isDbFetch && !isRangeProbe;
+    const timeoutMs = isFullDb ? 15000 : 400;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 300) : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     event.respondWith(
       fetch(req, { signal: controller ? controller.signal : undefined })
         .then((res) => {
           if (timeoutId) clearTimeout(timeoutId);
           return res;
         })
-        .catch(() => {
+        .catch(async () => {
           if (timeoutId) clearTimeout(timeoutId);
+          if (isFullDb) {
+            const cached = await matchInCache(req);
+            if (cached) return cached;
+          }
           // Return 503 when server is down so caller (e.g. db_worker.js)
           // gracefully activates its IndexedDB offline fallback.
           return new Response('Server offline', {

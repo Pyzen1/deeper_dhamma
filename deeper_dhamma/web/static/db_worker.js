@@ -71,7 +71,7 @@ async function fetchRemoteVersion(dbUrl) {
   try {
     const url = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 350) : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 400) : null;
     const res = await fetch(url, {
       method: 'GET',
       headers: { Range: 'bytes=0-99' },
@@ -79,18 +79,166 @@ async function fetchRemoteVersion(dbUrl) {
       signal: controller ? controller.signal : undefined,
     });
     if (timeoutId) clearTimeout(timeoutId);
+    let totalBytes = 0;
+    const cr = res.headers && res.headers.get('Content-Range');
+    if (cr && cr.includes('/')) {
+      totalBytes = parseInt(cr.split('/')[1], 10) || 0;
+    } else if (res.headers && res.headers.get('Content-Length')) {
+      totalBytes = parseInt(res.headers.get('Content-Length'), 10) || 0;
+    }
     if (res.status === 206 || res.status === 200) {
       const headerBuf = await res.arrayBuffer();
       if (headerBuf.byteLength >= 64) {
         const view = new DataView(headerBuf);
         const version = view.getUint32(60, false); // big-endian
-        return { version, fullBuffer: res.status === 200 ? headerBuf : null };
+        return { version, totalBytes, fullBuffer: res.status === 200 ? headerBuf : null };
       }
     }
   } catch (err) {
     // Expected when offline or local server stopped
   }
-  return { version: 0, fullBuffer: null };
+  return { version: 0, totalBytes: 0, fullBuffer: null };
+}
+
+let isUpdatingInBackground = false;
+
+function deserializeAndAttachDb(buffer, version) {
+  const uint8Array = new Uint8Array(buffer);
+  const pBuffer = sqlite3.wasm.allocFromTypedArray(uint8Array);
+  const newDb = new sqlite3.oo1.DB();
+  const rc = sqlite3.capi.sqlite3_deserialize(
+    newDb.pointer,
+    'main',
+    pBuffer,
+    uint8Array.byteLength,
+    uint8Array.byteLength,
+    sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+  );
+
+  if (rc !== 0) {
+    try { newDb.close(); } catch (_) {}
+    throw new Error(`sqlite3_deserialize failed with code ${rc}`);
+  }
+
+  const oldDb = db;
+  db = newDb;
+  if (oldDb) {
+    try { oldDb.close(); } catch (e) { console.warn('[DB Worker] Error closing previous DB:', e); }
+  }
+
+  currentDbVersion = version;
+  setTimeout(ensureVocabCache, 50);
+  return uint8Array.byteLength;
+}
+
+async function checkAndUpdateInBackground(dbUrl, activeCached) {
+  if (isUpdatingInBackground) return;
+  isUpdatingInBackground = true;
+
+  try {
+    // 1. Probe remote version and content size via fast Range probe
+    const { version: remoteVersion, totalBytes: remoteTotalBytes, fullBuffer: probeBuffer } = await fetchRemoteVersion(dbUrl);
+    if (!remoteVersion || remoteVersion === 0) {
+      // Remote server unavailable or offline - keep active cached DB without disruption
+      return;
+    }
+
+    const isVersionDifferent = remoteVersion !== activeCached.version;
+    const isSizeDifferent = remoteTotalBytes > 0 && Math.abs(activeCached.buffer.byteLength - remoteTotalBytes) > 1024;
+
+    if (!isVersionDifferent && !isSizeDifferent) {
+      // Cache is strictly current; no update needed
+      return;
+    }
+
+    console.log(`[DB Worker] Background update detected: cached v${activeCached.version} (${activeCached.buffer.byteLength}B) vs remote v${remoteVersion} (${remoteTotalBytes}B). Downloading atomically...`);
+
+    // 2. Download new database in the background (active DB remains 100% functional)
+    let newBuffer = null;
+    if (probeBuffer && probeBuffer.byteLength > 100000) {
+      newBuffer = probeBuffer;
+    } else {
+      const fetchUrl = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+      const res = await fetch(fetchUrl, { cache: 'no-store' });
+      if (!res.ok) {
+        console.warn(`[DB Worker] Background download failed (HTTP ${res.status}). Retaining active cached DB.`);
+        return;
+      }
+      newBuffer = await res.arrayBuffer();
+    }
+
+    // 3. ATOMIC INTEGRITY VALIDATION
+    // If the download was interrupted, corrupt, or truncated: ABORT cleanly without modifying cache or active DB!
+    if (!newBuffer || newBuffer.byteLength < 64) {
+      console.warn('[DB Worker] Background download incomplete or truncated. Retaining active cached DB.');
+      return;
+    }
+
+    const magic = new Uint8Array(newBuffer.slice(0, 16));
+    const magicStr = String.fromCharCode(...magic);
+    if (!magicStr.startsWith('SQLite format 3')) {
+      console.warn('[DB Worker] Downloaded payload failed SQLite magic header validation. Retaining active cached DB.');
+      return;
+    }
+
+    const view = new DataView(newBuffer);
+    const bufferVersion = view.getUint32(60, false);
+    const newVersion = bufferVersion || remoteVersion;
+
+    // Verify candidate DB can deserialize and execute basic sanity query
+    const uint8Array = new Uint8Array(newBuffer);
+    const pTest = sqlite3.wasm.allocFromTypedArray(uint8Array);
+    const candidateDb = new sqlite3.oo1.DB();
+    const testRc = sqlite3.capi.sqlite3_deserialize(
+      candidateDb.pointer,
+      'main',
+      pTest,
+      uint8Array.byteLength,
+      uint8Array.byteLength,
+      sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+    );
+
+    if (testRc !== 0) {
+      try { candidateDb.close(); } catch (_) {}
+      console.warn(`[DB Worker] Candidate DB failed deserialization (code ${testRc}). Retaining active cached DB.`);
+      return;
+    }
+
+    try {
+      candidateDb.exec({ sql: 'SELECT COUNT(*) FROM episodes;', rowMode: 'array' });
+    } catch (queryErr) {
+      try { candidateDb.close(); } catch (_) {}
+      console.warn('[DB Worker] Candidate DB failed sanity query. Retaining active cached DB:', queryErr);
+      return;
+    }
+
+    // 4. ATOMIC PERSISTENCE: Now and only now update IndexedDB
+    await setCachedDatabase('dhamma_web', newVersion, newBuffer);
+
+    // 5. SEAMLESS HOT-SWAP: Replace running DB instance with validated candidateDb
+    const oldDb = db;
+    db = candidateDb;
+    if (oldDb) {
+      try { oldDb.close(); } catch (e) { console.warn('[DB Worker] Error closing superseded DB:', e); }
+    }
+    currentDbVersion = newVersion;
+    setTimeout(ensureVocabCache, 50);
+
+    console.log(`[DB Worker] Database hot-swapped seamlessly in background: v${newVersion} (${uint8Array.byteLength} bytes).`);
+
+    // 6. NOTIFY CLIENT FOR ZERO-REFRESH UI UPDATE
+    self.postMessage({
+      type: 'db_hot_swapped',
+      data: {
+        version: newVersion,
+        size: uint8Array.byteLength,
+      },
+    });
+  } catch (err) {
+    console.warn('[DB Worker] Background update encountered unexpected error. Retaining active cached DB:', err);
+  } finally {
+    isUpdatingInBackground = false;
+  }
 }
 
 async function initDatabase(dbUrl = 'dhamma_web.db') {
@@ -102,107 +250,66 @@ async function initDatabase(dbUrl = 'dhamma_web.db') {
     });
   }
 
-  // 2. Check remote version header via Range probe
-  const { version: remoteVersion, fullBuffer: probeBuffer } = await fetchRemoteVersion(dbUrl);
+  // 2. Check IndexedDB for existing cached snapshot
   const cached = await getCachedDatabase('dhamma_web');
+  const hasValidCache = cached && cached.buffer && cached.buffer.byteLength >= 64;
+
+  if (hasValidCache) {
+    // ATOMIC FAST STARTUP: Mount existing cached DB immediately so UI is 100% interactive (0ms wait)
+    try {
+      const bytesMounted = deserializeAndAttachDb(cached.buffer, cached.version || 0);
+      console.log(`[DB Worker] Fast startup: Using cached database (v${currentDbVersion}) from IndexedDB (${bytesMounted} bytes).`);
+
+      // Spawn non-blocking background check for atomic updates
+      setTimeout(() => {
+        checkAndUpdateInBackground(dbUrl, cached).catch((err) => {
+          console.warn('[DB Worker] Background update check failed gracefully:', err);
+        });
+      }, 100);
+
+      return { version: currentDbVersion, cached: true, size: bytesMounted };
+    } catch (cacheErr) {
+      console.warn('[DB Worker] Cached database corrupted or failed to mount, falling back to full download:', cacheErr);
+      // Fall through to initial download
+    }
+  }
+
+  // 3. First-time load or corrupted cache fallback: synchronous initial download
+  console.log(`[DB Worker] No valid cached snapshot found. Performing initial download from ${dbUrl}...`);
+  const { version: remoteVersion, fullBuffer: probeBuffer } = await fetchRemoteVersion(dbUrl);
 
   let dbBuffer = null;
-  let isFromCache = false;
-
   if (probeBuffer && probeBuffer.byteLength > 100000) {
-    // The Range probe fetched the full database in one go (e.g. file:/// or static server returning HTTP 200)
-    console.log(`[DB Worker] Using full buffer directly from probe (${probeBuffer.byteLength} bytes).`);
     dbBuffer = probeBuffer;
-    currentDbVersion = remoteVersion;
-    if (!cached || cached.version !== remoteVersion) {
-      await setCachedDatabase('dhamma_web', currentDbVersion, dbBuffer);
-    }
-  } else if (cached && cached.version && remoteVersion && cached.version === remoteVersion && cached.buffer) {
-    // Cache is strictly up-to-date!
-    console.log(`[DB Worker] Using cached database (v${cached.version}) from IndexedDB.`);
-    dbBuffer = cached.buffer;
-    currentDbVersion = cached.version;
-    isFromCache = true;
-  } else if (cached && cached.buffer && (!remoteVersion || remoteVersion === 0)) {
-    // Offline fallback: probe failed or offline mode, but IndexedDB snapshot exists
-    console.log(`[DB Worker] Offline fallback: Using cached database (v${cached.version}) from IndexedDB.`);
-    dbBuffer = cached.buffer;
-    currentDbVersion = cached.version || 0;
-    isFromCache = true;
   } else {
-    // Need full download
-    console.log(`[DB Worker] Downloading updated database from ${dbUrl} (cached v${cached ? cached.version : 'none'} vs remote v${remoteVersion})...`);
-    if (probeBuffer && probeBuffer.byteLength > 1000) {
-      dbBuffer = probeBuffer;
-    } else {
-      const fetchUrl = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
-      try {
-        const res = await fetch(fetchUrl, { cache: 'no-store' });
-        if (!res.ok) {
-          if (cached && cached.buffer) {
-            console.warn(`[DB Worker] Fetch failed (${res.status}), falling back to cached snapshot.`);
-            dbBuffer = cached.buffer;
-            currentDbVersion = cached.version || 0;
-            isFromCache = true;
-          } else {
-            throw new Error(`Failed to fetch database from ${dbUrl} (status ${res.status})`);
-          }
-        } else {
-          dbBuffer = await res.arrayBuffer();
-        }
-      } catch (fetchErr) {
-        if (cached && cached.buffer) {
-          console.warn(`[DB Worker] Network error (${fetchErr.message}), falling back to cached snapshot.`);
-          dbBuffer = cached.buffer;
-          currentDbVersion = cached.version || 0;
-          isFromCache = true;
-        } else {
-          throw fetchErr;
-        }
-      }
+    const fetchUrl = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+    const res = await fetch(fetchUrl, { cache: 'no-store' });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch database from ${dbUrl} (HTTP ${res.status})`);
     }
-
-    if (!isFromCache) {
-      // Extract version if remote header probe was 0
-      if (!remoteVersion && dbBuffer.byteLength >= 64) {
-        const view = new DataView(dbBuffer);
-        currentDbVersion = view.getUint32(60, false);
-      } else {
-        currentDbVersion = remoteVersion;
-      }
-
-      // Save to IndexedDB
-      await setCachedDatabase('dhamma_web', currentDbVersion, dbBuffer);
-    }
+    dbBuffer = await res.arrayBuffer();
   }
 
-  // 3. Deserialize buffer into in-memory SQLite connection
-  const uint8Array = new Uint8Array(dbBuffer);
-  const pBuffer = sqlite3.wasm.allocFromTypedArray(uint8Array);
-  
-  if (db) {
-    try { db.close(); } catch (_) {}
+  if (!dbBuffer || dbBuffer.byteLength < 64) {
+    throw new Error(`Downloaded database buffer invalid (${dbBuffer ? dbBuffer.byteLength : 0} bytes)`);
   }
 
-  db = new sqlite3.oo1.DB();
-  const rc = sqlite3.capi.sqlite3_deserialize(
-    db.pointer,
-    'main',
-    pBuffer,
-    uint8Array.byteLength,
-    uint8Array.byteLength,
-    sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
-  );
-
-  if (rc !== 0) {
-    throw new Error(`sqlite3_deserialize failed with code ${rc}`);
+  const magic = new Uint8Array(dbBuffer.slice(0, 16));
+  const magicStr = String.fromCharCode(...magic);
+  if (!magicStr.startsWith('SQLite format 3')) {
+    throw new Error('Downloaded payload is not a valid SQLite database.');
   }
 
-  // Warm vocabulary cache asynchronously in background so ready event is instant
-  setTimeout(ensureVocabCache, 50);
+  let bufferVersion = 0;
+  const view = new DataView(dbBuffer);
+  bufferVersion = view.getUint32(60, false);
+  const versionToStore = remoteVersion || bufferVersion || 1;
 
-  console.log(`[DB Worker] Database ready: v${currentDbVersion}, ${uint8Array.byteLength} bytes.`);
-  return { version: currentDbVersion, cached: isFromCache, size: uint8Array.byteLength };
+  const bytesMounted = deserializeAndAttachDb(dbBuffer, versionToStore);
+  await setCachedDatabase('dhamma_web', versionToStore, dbBuffer);
+  console.log(`[DB Worker] Initial database ready and cached: v${versionToStore} (${bytesMounted} bytes).`);
+
+  return { version: versionToStore, cached: false, size: bytesMounted };
 }
 
 // ============================================================================

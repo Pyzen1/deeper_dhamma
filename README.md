@@ -62,6 +62,12 @@ In accordance with the monastic Vinaya and the living Buddhist tradition of gene
     - Pre-rendered Service Worker (`svc_worker.js`) stamped with dynamic Unix build version (`deeper_dhamma_shell_{timestamp}`), automatically rotating caches and purging obsolete assets across builds.
     - Online Network-First navigation with 1.2s timeout fallback ensures browser refreshes (`Ctrl+R` / `F5`) always serve the freshest application shell while guaranteeing 100% offline PWA resilience.
     - Defensive DOM null guards across all drawer elements and in-app 1-click OPFS cache recovery button (`window.resetDeeperDhammaCache()`).
+  - **Atomic Background Database Hot-Swap & Zero-Disruption Sync**:
+    - **Instant Startup**: Immediately deserializes and mounts cached IndexedDB snapshot so UI loads with 0ms latency.
+    - **Background Probing & Size Verification**: Range probes compare both version header and total byte length (`Content-Range`), invalidating poisoned or stale caches automatically.
+    - **Atomic Integrity Verification Gate**: Downloads candidate database in the background without affecting the running session; validates SQLite magic header and test-deserializes in an isolated instance before touching IndexedDB.
+    - **In-Memory Hot-Swap**: Atomically replaces active SQLite connection (`db = candidateDb`) and dispatches `db_hot_swapped` event, allowing `app.js` to update talk counts, statistics, and search results seamlessly without a browser refresh.
+    - **Fail-Safe Offline Retention**: If background downloads drop or fail, the active cached database remains 100% operational with zero user disruption.
   - **Local Bookmarks & Fluid Card Reordering Physics**:
     - Fast recall bookmarks stored locally with zero metadata bloat (persists only talk IDs in `localStorage`, querying SQLite on-demand with resilient fallback).
     - Dedicated Bookmarks tab (`#bookmarks-view`) with unread badge counter, dynamic reordering, and talk playback controls.

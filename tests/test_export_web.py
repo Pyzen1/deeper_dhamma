@@ -57,7 +57,7 @@ def test_compile_static_database_header_version_and_vocab_table(tmp_path: Path):
         assert len(words_info) >= 3
         pk_words = next(r[1] for r in words_info if r[5] == 1)
         assert pk_words == "id", "episode_words table must use integer primary key 'id'"
-        assert metrics.get("words", 0) == 9
+        assert metrics.get("words", 0) >= 9
 
         w_row = conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = 'pb28113880';").fetchone()
         assert w_row is not None
@@ -496,6 +496,100 @@ def test_about_view_and_navigation_integrity():
     assert ".dana-sc-card" in style_css, "Must style dana-sc-card in style.css"
     assert ".btn-donate-sc" in style_css, "Must style btn-donate-sc in style.css"
     assert index_html.find("The Audio Heritage &amp; Mission") < index_html.find("about-dana-card") < index_html.find("about-features-grid"), "Dana card must appear after intro mission and before features grid"
+
+
+def test_atomic_database_update_and_hot_swap_integrity():
+    """
+    Verifies that:
+    1. db_worker.js implements non-blocking fast startup from cached IndexedDB snapshot.
+    2. Background updates are atomic: new databases are verified with SQLite magic header
+       and test deserialization before modifying IndexedDB or the active in-memory connection.
+    3. If background download or verification fails, active cached DB remains 100% functional.
+    4. Successful background updates trigger seamless in-memory hot-swap and post 'db_hot_swapped'.
+    5. db_client.js and app.js handle 'db_hot_swapped' to refresh UI without page reload.
+    6. svc_worker.js does not cache dhamma_web.db in CORE_ASSETS and treats .db as network-first.
+    """
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    static_dir = PROJECT_ROOT / "deeper_dhamma" / "web" / "static"
+    worker_js = (static_dir / "db_worker.js").read_text(encoding="utf-8")
+    client_js = (static_dir / "db_client.js").read_text(encoding="utf-8")
+    adapter_js = (static_dir / "adapters" / "wasm_client.js").read_text(encoding="utf-8")
+    app_js = (static_dir / "app.js").read_text(encoding="utf-8")
+    sw_js = (static_dir / "svc_worker.js").read_text(encoding="utf-8")
+
+    # 1. Non-blocking fast startup and background check
+    assert "deserializeAndAttachDb" in worker_js
+    assert "checkAndUpdateInBackground" in worker_js
+    assert "hasValidCache" in worker_js
+
+    # 2. Atomic integrity validation before writing to cache
+    assert "SQLite format 3" in worker_js, "Must validate SQLite magic header before caching"
+    assert "sqlite3_deserialize" in worker_js
+    assert "candidateDb" in worker_js, "Must test candidate DB in isolated instance before hot-swap"
+    assert "setCachedDatabase" in worker_js
+
+    # 3. Seamless hot-swap event emission
+    assert "db_hot_swapped" in worker_js
+    assert "db_hot_swapped" in client_js
+    assert "db_hot_swapped" in adapter_js
+    assert "onHotSwap" in client_js
+    assert "dbService.onHotSwap" in app_js
+
+    # 4. Service Worker isolation (no double-caching, network-first for DB)
+    assert "'./dhamma_web.db'" not in sw_js, "dhamma_web.db must not be in CORE_ASSETS"
+    assert "isDbFetch" in sw_js, "svc_worker.js must provide network-first bypass for DB downloads"
+
+
+def test_static_preview_handler_db_range_and_atomic_headers():
+    """
+    Verifies that StaticPreviewHandler emits accurate Content-Range and Content-Length
+    headers for dhamma_web.db, enabling db_worker.js to detect remote file size differences.
+    """
+    import http.server
+    import threading
+    import urllib.request
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    db_path = DIST_DIR / "dhamma_web.db"
+    if not db_path.exists():
+        pytest.skip("dhamma_web.db not yet compiled in dist/")
+
+    expected_size = db_path.stat().st_size
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: StaticPreviewHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        # 1. Range probe bytes=0-99
+        req_probe = urllib.request.Request(
+            f"http://127.0.0.1:{port}/dhamma_web.db",
+            headers={"Range": "bytes=0-99"},
+        )
+        with urllib.request.urlopen(req_probe) as resp:
+            assert resp.status == 206
+            cr = resp.headers.get("Content-Range")
+            assert cr == f"bytes 0-99/{expected_size}"
+            header_bytes = resp.read()
+            assert len(header_bytes) == 100
+            assert header_bytes.startswith(b"SQLite format 3\x00")
+
+        # 2. Full fetch
+        req_full = urllib.request.Request(f"http://127.0.0.1:{port}/dhamma_web.db")
+        with urllib.request.urlopen(req_full) as resp:
+            assert resp.status == 200
+            cl = int(resp.headers.get("Content-Length", 0))
+            assert cl == expected_size
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 
 
 

@@ -964,6 +964,20 @@
     try {
       await dbService.init();
       state.isDbReady = true;
+
+      // Seamless background hot-swap listener
+      dbService.onHotSwap = (data) => {
+        console.log(`[App] Database hot-swapped seamlessly in background: v${data.version} (${data.size} bytes).`);
+        loadArchiveStats();
+        if (state.activeTab === 'browse-view') {
+          loadBrowseCatalog({ append: false });
+        } else if (state.activeTab === 'search-view' && els.searchInput && els.searchInput.value.trim()) {
+          executeSearch(els.searchInput.value.trim());
+        } else if (state.activeTab === 'bookmarks-view') {
+          loadBookmarksView();
+        }
+      };
+
       await Promise.all([
         loadArchiveStats(),
         loadBrowseCatalog(),
