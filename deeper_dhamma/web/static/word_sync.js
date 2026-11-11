@@ -155,6 +155,7 @@
           }
           if (plain.includes(' ')) {
             registerKey(plain.replace(/\s+/g, ''), t);
+            registerKey(plain.replace(/\s+/g, '-'), t);
           }
         }
         if (t.pali_diacritic) {
@@ -162,6 +163,9 @@
           registerKey(dia, t);
           if (dia.includes('-')) {
             registerKey(dia.replace(/-/g, ' '), t);
+          }
+          if (dia.includes(' ')) {
+            registerKey(dia.replace(/\s+/g, '-'), t);
           }
         }
         let variants = t.phonetic_variants;
@@ -918,6 +922,8 @@
 
     /**
      * Maps global words into turn buckets matching each segment's start/end window.
+     * Enforces monotonic cursor progression and per-turn token counts so adjacent turns
+     * separated by < 0.60s never duplicate or steal boundary words.
      */
     indexWordsByTurn: function (segments) {
       this.turnWordMap = {};
@@ -927,15 +933,27 @@
         const turnIdx = seg.turn_index !== undefined ? Number(seg.turn_index) : idx;
         const segSt = parseFloat(seg.start_sec || 0);
         const segEn = parseFloat(seg.end_sec || 0);
+        const nextSegSt =
+          idx + 1 < segments.length ? parseFloat(segments[idx + 1].start_sec || Infinity) : Infinity;
+        const expectedTokens =
+          typeof seg.text === 'string' && seg.text.trim()
+            ? seg.text.trim().split(/\s+/).length
+            : 0;
         const turnWords = [];
 
-        // Advance cursor to words within this turn window
+        // Advance cursor to words within this turn window without backing up into prior turns
         while (wordCursor < this.words.length && this.words[wordCursor].s < segSt - 0.25) {
           wordCursor++;
         }
 
         let tempIdx = wordCursor;
         while (tempIdx < this.words.length && this.words[tempIdx].s <= segEn + 0.35) {
+          if (expectedTokens > 0 && turnWords.length >= expectedTokens) {
+            break;
+          }
+          if (expectedTokens === 0 && this.words[tempIdx].s >= nextSegSt - 0.02) {
+            break;
+          }
           const w = this.words[tempIdx];
           w.turnIdx = turnIdx;
           w.wordIdxInTurn = turnWords.length;
@@ -943,6 +961,7 @@
           tempIdx++;
         }
 
+        wordCursor = tempIdx;
         this.turnWordMap[turnIdx] = turnWords;
       });
     },

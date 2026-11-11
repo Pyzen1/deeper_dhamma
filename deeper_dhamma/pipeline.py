@@ -164,6 +164,9 @@ class TranscriptionPipeline:
             logger.info(f"    Loading {process_dur:.1f}s audio at 16kHz mono into RAM...")
             waveform_16k, _ = load_audio_segment(audio_path, start_sec=0.0, end_sec=process_dur, target_sr=16000)
             audio_np = waveform_16k.squeeze(0).numpy()
+            if len(audio_np) > 0:
+                actual_decoded_dur = round(float(len(audio_np)) / 16000.0, 3)
+                process_dur = actual_decoded_dur if not max_duration_sec else min(actual_decoded_dur, max_duration_sec)
 
             # 2. Fast Acoustic Pre-Profiling (in-memory slice evaluation)
             logger.info(f"    Running fast acoustic pre-profiling across {process_dur:.1f}s...")

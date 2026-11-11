@@ -284,31 +284,71 @@ class Transcriber:
             pbar.__enter__()
 
         segments = []
+        hallucination_phrases = {
+            "satsang with mooji",
+            "subtitles by the amara.org community",
+            "thank you for watching",
+            "thanks for watching",
+        }
         try:
             for s in segments_gen:
+                clean_text = s.text.strip()
+                if not clean_text:
+                    continue
+                norm_check = " ".join(clean_text.lower().strip(".!?,;: ").split())
+                if norm_check in hallucination_phrases:
+                    logger.info(f"Skipping Whisper trailing silence hallucination at {s.start:.2f}s: '{clean_text}'")
+                    continue
+
                 words = []
                 if getattr(s, "words", None):
                     for w in s.words:
-                        words.append({
-                            "word": w.word,
-                            "start": round(w.start, 3),
-                            "end": round(w.end, 3),
-                            "prob": round(float(getattr(w, "probability", 1.0)), 3),
-                        })
-                clean_text = s.text.strip()
+                        raw_w = getattr(w, "word", "")
+                        w_start = round(float(w.start), 3)
+                        w_end = round(float(w.end), 3)
+                        w_prob = round(float(getattr(w, "probability", 1.0)), 3)
+                        # Coalesce sub-word continuation tokens lacking a leading space
+                        # (e.g. hyphenated compounds 'citta' + '-viveka,', percentages '100' + '%',
+                        # decimals '6' + '.15', or apostrophes 'O' + "'Day") so every entry in
+                        # `words` maps 1:1 to a whitespace-delimited token in `s.text`.
+                        if words and raw_w and not raw_w[0].isspace() and not words[-1]["word"][-1:].isspace():
+                            words[-1]["word"] = words[-1]["word"] + raw_w
+                            words[-1]["end"] = max(words[-1]["end"], w_end)
+                            words[-1]["prob"] = round(min(words[-1]["prob"], w_prob), 3)
+                        else:
+                            words.append({
+                                "word": raw_w,
+                                "start": w_start,
+                                "end": w_end,
+                                "prob": w_prob,
+                            })
+
+                # Guard against faster-whisper's add_word_timestamps lead-in boundary bug where
+                # an unpunctuated first word (e.g. "This" before "evening") is anchored onto a
+                # pre-speech rustle/breath several seconds before actual speech onset.
+                if len(words) >= 2:
+                    lead_gap = words[1]["start"] - words[0]["end"]
+                    w0_tok = words[0]["word"].strip()
+                    if lead_gap >= 2.5 and w0_tok and w0_tok[-1] not in ".?!,:;":
+                        dur0 = min(max(0.25, words[0]["end"] - words[0]["start"]), 0.60)
+                        words[0]["end"] = round(words[1]["start"], 3)
+                        words[0]["start"] = round(max(0.0, words[1]["start"] - dur0), 3)
+
+                seg_start = words[0]["start"] if words else round(s.start, 3)
+                seg_end = max(round(s.end, 3), words[-1]["end"]) if words else round(s.end, 3)
                 segments.append({
-                    "start": round(s.start, 3),
-                    "end": round(s.end, 3),
+                    "start": seg_start,
+                    "end": seg_end,
                     "text": clean_text,
                     "avg_logprob": round(float(getattr(s, "avg_logprob", 0.0)), 4),
                     "no_speech_prob": round(float(getattr(s, "no_speech_prob", 0.0)), 4),
                     "words": words,
                 })
                 if pbar is not None:
-                    pbar.update(current_sec=float(s.end), text=clean_text)
+                    pbar.update(current_sec=float(seg_end), text=clean_text)
                 if progress_callback is not None:
                     try:
-                        progress_callback(float(s.end), total_dur_sec, clean_text)
+                        progress_callback(float(seg_end), total_dur_sec, clean_text)
                     except Exception:
                         pass
         finally:

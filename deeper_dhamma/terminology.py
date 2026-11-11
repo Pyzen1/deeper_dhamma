@@ -99,7 +99,7 @@ class TerminologyEditor:
             corrected, changes = self.edit_text(orig_text, surrounding_context=surrounding)
             seg["text"] = corrected
 
-            if changes and seg.get("words"):
+            if seg.get("words"):
                 seg["words"] = self._sync_word_timings(seg["words"], corrected, orig_text=orig_text)
 
             for change in changes:
@@ -119,20 +119,48 @@ class TerminologyEditor:
         return segments, total_changelog
 
     @staticmethod
+    def _coalesce_subword_timings(words: List[Dict]) -> List[Dict]:
+        """
+        Merges any sub-word continuation entries in `words` that do not begin with
+        a leading space (e.g. hyphenated compounds like 'citta' + '-viveka,') into
+        their preceding word entry so `words` aligns 1:1 with whitespace tokens.
+        """
+        if not words:
+            return []
+        merged: List[Dict] = []
+        for idx, w in enumerate(words):
+            raw_w = str(w.get("word", ""))
+            if idx > 0 and raw_w and not raw_w[0].isspace() and not str(merged[-1].get("word", ""))[-1:].isspace():
+                prev = merged[-1]
+                merged[-1] = {
+                    **prev,
+                    "word": str(prev.get("word", "")) + raw_w,
+                    "end": max(float(prev["end"]), float(w["end"])),
+                    "prob": round(min(float(prev.get("prob", 1.0)), float(w.get("prob", 1.0))), 3),
+                }
+            else:
+                merged.append(dict(w))
+        return merged
+
+    @staticmethod
     def _sync_word_timings(
         words: List[Dict],
         corrected_text: str,
         orig_text: Optional[str] = None,
     ) -> List[Dict]:
         """
-        Reconciles the word timing list (`words`) when a multi-word phonetic slip
-        (e.g. 'Yonis Omanis Ikara' -> 'yoniso manasikara' or 'party mocker' -> 'patimokkha')
-        reduces the whitespace token count in `corrected_text`.
+        Reconciles the word timing list (`words`) when sub-word punctuation splits or
+        multi-word phonetic slips (e.g. 'Yonis Omanis Ikara' -> 'yoniso manasikara'
+        or 'party mocker' -> 'patimokkha') alter the whitespace token count in `corrected_text`.
         """
         import difflib
 
+        if not words:
+            return words
+
+        words = TerminologyEditor._coalesce_subword_timings(words)
         target_tokens = corrected_text.split()
-        if not words or len(words) == len(target_tokens):
+        if len(words) == len(target_tokens):
             return words
 
         orig_tokens = orig_text.split() if orig_text else [w.get("word", "").strip() for w in words]

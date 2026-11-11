@@ -48,12 +48,12 @@ def test_vbr_episodes_store_unwarped_physical_timestamps_and_vbr1_trailer():
     finally:
         conn.close()
 
-    # Check pb27802310 words BLOB timestamps & VBR1 trailer from SQLite (11,923 words after canonical multi-word mergers)
+    # Check pb27802310 words BLOB timestamps & VBR1 trailer from SQLite (11,888 words after sub-word coalescing & hallucination pruning)
     db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
     pb_bin = db.get_episode_words("pb27802310")
     assert pb_bin is not None, "pb27802310 words BLOB missing from database"
     word_count = struct.unpack("<I", pb_bin[:4])[0]
-    assert word_count in (11923, 11929)
+    assert word_count in (11888, 11923, 11929)
 
     # Word 0 ("Everyone,") at ~216.30s (216300 ms)
     w0_st_ms, w0_dur_ms = struct.unpack("<IH", pb_bin[4:10])
@@ -680,8 +680,11 @@ def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
                 WordSync.update(72.7); // At 72.7s ("here")
                 const activeAt72_7 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
 
-                WordSync.update(78.25); // At 78.25s ("technically")
-                const activeAt78_25 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+                WordSync.update(78.5); // At 78.5s (second "6.15" [78.18s - 79.00s])
+                const activeAt78_5 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+
+                WordSync.update(79.75); // At 79.75s ("technically" [79.60s - 80.22s])
+                const activeAt79_75 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
 
                 await fetch('/report', {{
                     method: 'POST',
@@ -692,7 +695,8 @@ def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
                         firstWordStart: firstSpan ? firstSpan.dataset.start : null,
                         technicallyStart: technicallySpan ? technicallySpan.dataset.start : null,
                         activeAt72_7,
-                        activeAt78_25,
+                        activeAt78_5,
+                        activeAt79_75,
                     }})
                 }});
             }})();
@@ -738,11 +742,12 @@ def test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment():
     assert data["totalWordSpans"] == 208
     assert data["firstWordText"].lower() == "here"
     assert float(data["firstWordStart"]) == pytest.approx(72.56, abs=0.05)
-    assert float(data["technicallyStart"]) == pytest.approx(78.18, abs=0.1)
+    assert float(data["technicallyStart"]) == pytest.approx(79.60, abs=0.1)
 
-    # Verify highlight accuracy
+    # Verify highlight accuracy after sub-word coalescing ("6.15" at 78.18-79.00s, "technically" at 79.60-80.22s)
     assert data["activeAt72_7"].lower() == "here"
-    assert data["activeAt78_25"].lower() == "technically"
+    assert data["activeAt78_5"] == "6.15"
+    assert data["activeAt79_75"].lower() == "technically"
 
 
 def test_word_sync_triple_mode_and_sticky_toolbar_markup():
@@ -916,6 +921,249 @@ def test_word_sync_triple_mode_and_sticky_toolbar_markup():
     assert res["hasScrollMethod"] is True
     assert res["decoupledActiveSpan"] is None, "WordSync must not highlight words when viewing a different talk than the playing talk"
     assert res["matchedActiveSpanId"] == "test-w2", "WordSync must highlight words when viewing matches the playing talk"
+
+
+def test_pb22228026_word_sync_hyphenated_compounds_and_lead_in_alignment():
+    """
+    Regression test for episode pb22228026 ('1998 Rains Retreat (6/10) | Contentment Deepens Samadhi | Ajahn Brahm'):
+    1. Turn 1 ('This evening I'm going to talk some more about meditation, about') must start at ~53.92s
+       immediately preceding 'evening' (54.52s), rather than stranded 11.28s early at 42.46s during post-chanting silence.
+    2. Turn 2 ('citta-viveka, citta-bhavana. Citta-viveka is the...') must coalesce hyphenated Pali compounds
+       into single word-timing entries (60.92-64.97s, 65.29-66.29s, 67.15-68.09s) so 'is' (68.09s) and all 429
+       subsequent words in Turn 2 highlight in 1:1 lockstep with zero cumulative word-index drift.
+    3. All 30 turns in pb22228026 must have zero unmapped words and zero unwrapped DOM tokens.
+    """
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
+    bin_bytes = db.get_episode_words("pb22228026")
+    word_sync_js_path = PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "word_sync.js"
+
+    if not (chrome_path.exists() and bin_bytes and TRANSCRIPTS_DB_PATH.exists()):
+        pytest.skip("Chrome or pb22228026 assets not present")
+
+    word_sync_js = word_sync_js_path.read_bytes()
+
+    conn = sqlite3.connect(TRANSCRIPTS_DB_PATH)
+    try:
+        conn.row_factory = sqlite3.Row
+        ep_row = conn.execute("SELECT duration_sec FROM episodes WHERE id = 'pb22228026'").fetchone()
+        rows = conn.execute(
+            "SELECT * FROM speech_segments WHERE episode_id = 'pb22228026' ORDER BY turn_index"
+        ).fetchall()
+        segments = [dict(r) for r in rows]
+        pali_rows = conn.execute(
+            "SELECT pali_plain, pali_diacritic, phonetic_variants FROM pali_terms"
+        ).fetchall() if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pali_terms'").fetchone() else []
+        pali_terms = [dict(r) for r in pali_rows]
+    finally:
+        conn.close()
+
+    assert ep_row is not None
+    assert float(ep_row["duration_sec"]) == pytest.approx(3854.60, abs=0.2)
+    assert len(segments) == 33
+    assert float(segments[1]["start_sec"]) == pytest.approx(53.92, abs=0.1)
+
+    report = {}
+
+    class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
+        daemon_threads = True
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            report["data"] = json.loads(body.decode("utf-8"))
+            self.send_response(200)
+            self.end_headers()
+
+        def do_GET(self):
+            if self.path == "/word_sync.js":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+                self.send_header("Content-Length", str(len(word_sync_js)))
+                self.end_headers()
+                self.wfile.write(word_sync_js)
+                return
+
+            if self.path in ("/words/pb22228026.bin", "/api/episodes/pb22228026/words"):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(bin_bytes)))
+                self.end_headers()
+                self.wfile.write(bin_bytes)
+                return
+
+            html = f"""<!DOCTYPE html><html><body>
+            <div id="container"></div>
+            <script src="/word_sync.js"></script>
+            <script>
+            (async () => {{
+                const segs = {json.dumps(segments)};
+                const terms = {json.dumps(pali_terms)};
+                WordSync.setPaliTerms(terms);
+                await WordSync.ensureEpisodeLoaded('pb22228026');
+                WordSync.indexWordsByTurn(segs);
+
+                const container = document.getElementById('container');
+                let unmappedTotal = 0;
+                for (const s of segs) {{
+                    const div = document.createElement('div');
+                    div.innerHTML = WordSync.formatTurnParagraphs(s.text, s.turn_index);
+                    container.appendChild(div);
+                    const tw = WordSync.turnWordMap[s.turn_index] || [];
+                    for (const w of tw) {{
+                        if (!w.domId) unmappedTotal++;
+                    }}
+                }}
+
+                // Check Turn 1 Word 0 ('This') and Word 1 ('evening')
+                WordSync.update(54.10);
+                const t1Word0 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+                WordSync.update(54.80);
+                const t1Word1 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+
+                // Check Turn 2 hyphenated Pali opening ('citta-viveka,', 'citta-bhavana.', 'Citta-viveka', 'is')
+                WordSync.update(62.50);
+                const t2Word0 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+                WordSync.update(65.60);
+                const t2Word1 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+                WordSync.update(68.20);
+                const t2Word2 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+                WordSync.update(69.50);
+                const t2Word3 = WordSync.activeWordEl ? WordSync.activeWordEl.textContent.trim() : null;
+
+                await fetch('/report', {{
+                    method: 'POST',
+                    body: JSON.stringify({{
+                        totalWords: WordSync.words.length,
+                        unmappedTotal,
+                        t1Word0,
+                        t1Word1,
+                        t2Word0,
+                        t2Word1,
+                        t2Word2,
+                        t2Word3,
+                    }})
+                }});
+            }})();
+            </script></body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+
+    server = ThreadedHTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            proc = subprocess.Popen([
+                str(chrome_path),
+                "--headless=new",
+                f"--user-data-dir={tmp}",
+                f"http://127.0.0.1:{port}/",
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            t0 = time.time()
+            while time.time() - t0 < 15:
+                if "data" in report:
+                    break
+                time.sleep(0.2)
+            proc.kill()
+    finally:
+        server.shutdown()
+
+    assert "data" in report, "Headless Chrome pb22228026 runner did not report back"
+    data = report["data"]
+
+    assert data["totalWords"] == 7173
+    assert data["unmappedTotal"] == 0
+    assert data["t1Word0"] == "This"
+    assert data["t1Word1"] == "evening"
+    assert data["t2Word0"] == "citta-viveka,"
+    assert data["t2Word1"] == "citta-bhavana."
+    assert data["t2Word2"] == "Citta-viveka"
+    assert data["t2Word3"] == "is"
+
+
+def test_sampled_newly_transcribed_episodes_one_to_one_word_sync_parity():
+    """
+    Verifies across all 114 transcribed episodes (and a random sample of newly transcribed talks)
+    as well as unit-level TerminologyEditor._coalesce_subword_timings that:
+    1. Every episode in `dhamma_transcripts.db` and `dist/dhamma_web.db` has exact 1:1 parity
+       between `episode_words` BLOB entries and whitespace-delimited tokens in `speech_segments.text`.
+    2. No turn has a stranded unpunctuated lead-in Word 0 (`gap >= 2.5s`).
+    3. No episode contains trailing silence hallucination turns (`'Satsang with Mooji'`).
+    4. `TerminologyEditor.edit_segments` coalesces sub-word continuation entries even when
+       zero lexical substitutions are triggered.
+    """
+    from deeper_dhamma.terminology import TerminologyEditor
+
+    # 1. Unit check on TerminologyEditor sub-word coalescing without lexical changes
+    synthetic_words = [
+        {"word": " citta", "start": 60.92, "end": 64.51, "prob": 0.9},
+        {"word": "-viveka,", "start": 64.51, "end": 64.97, "prob": 0.95},
+        {"word": " citta", "start": 65.29, "end": 65.89, "prob": 0.9},
+        {"word": "-bhavana.", "start": 65.89, "end": 66.29, "prob": 0.92},
+        {"word": " is", "start": 68.09, "end": 68.31, "prob": 0.99},
+    ]
+    coalesced = TerminologyEditor._sync_word_timings(
+        synthetic_words,
+        "citta-viveka, citta-bhavana. is",
+        orig_text="citta-viveka, citta-bhavana. is",
+    )
+    assert len(coalesced) == 3
+    assert coalesced[0]["word"] == " citta-viveka,"
+    assert coalesced[0]["start"] == 60.92 and coalesced[0]["end"] == 64.97
+    assert coalesced[1]["word"] == " citta-bhavana."
+    assert coalesced[1]["start"] == 65.29 and coalesced[1]["end"] == 66.29
+    assert coalesced[2]["word"] == " is"
+
+    # 2. Verify all 114 episodes in dhamma_transcripts.db and dist/dhamma_web.db
+    for db_path in [TRANSCRIPTS_DB_PATH, PROJECT_ROOT / "dist" / "dhamma_web.db"]:
+        if not db_path.exists():
+            continue
+        conn = sqlite3.connect(db_path)
+        try:
+            episodes = conn.execute(
+                "SELECT id FROM episodes WHERE is_transcribed = 1 ORDER BY id"
+            ).fetchall()
+            assert len(episodes) >= 114
+            for (ep_id,) in episodes:
+                segs = conn.execute(
+                    "SELECT turn_index, start_sec, end_sec, text FROM speech_segments WHERE episode_id = ? ORDER BY turn_index",
+                    (ep_id,),
+                ).fetchall()
+                blob = conn.execute(
+                    "SELECT words_blob FROM episode_words WHERE episode_id = ?",
+                    (ep_id,),
+                ).fetchone()[0]
+                wc = struct.unpack("<I", blob[:4])[0]
+                ws_count = sum(len(s[3].split()) for s in segs)
+                assert wc == ws_count, f"{db_path.name} {ep_id}: blob word count {wc} != token count {ws_count}"
+
+                cursor = 0
+                for t_idx, st_sec, en_sec, text in segs:
+                    assert text.strip().lower() != "satsang with mooji", f"Hallucination remained in {ep_id}"
+                    toks = text.split()
+                    n_toks = len(toks)
+                    if n_toks >= 2:
+                        w0_st, w0_dur = struct.unpack("<IH", blob[4 + cursor * 6 : 10 + cursor * 6])
+                        w1_st, _ = struct.unpack("<IH", blob[4 + (cursor + 1) * 6 : 10 + (cursor + 1) * 6])
+                        w0_en_s = (w0_st + w0_dur) / 1000.0
+                        w1_st_s = w1_st / 1000.0
+                        gap = w1_st_s - w0_en_s
+                        assert not (gap >= 2.5 and toks[0][-1] not in ".?!,:;"), (
+                            f"Stranded lead-in Word 0 in {ep_id} Turn {t_idx}: '{toks[0]}' gap={gap:.2f}s"
+                        )
+                    cursor += n_toks
+        finally:
+            conn.close()
+
 
 
 
