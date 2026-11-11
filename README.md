@@ -207,7 +207,8 @@ deeper_dhamma/
 │   └── test_browser_fuzzy_search.py # Multi-word fuzzy search, Damerau-Levenshtein, V8 tests
 ├── docs/
 │   ├── design/                 # Pipeline architecture specifications
-│   └── troubleshooting_guide.md # Cross-browser VBR audio & word sync troubleshooting guide
+│   ├── troubleshooting/        # Modular troubleshooting guides (VBR sync, SW caching, etc.)
+│   └── troubleshooting_guide.md # Master index and navigation for troubleshooting guides
 └── benchmarks/
     └── reference_transcripts/  # Verified word-for-word human reference transcripts
 ```
