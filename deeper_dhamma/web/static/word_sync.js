@@ -18,7 +18,7 @@
  *     advances `audio.currentTime` at `1.000s` per `1.000s` of physical speech. Tracking
  *     `physTime = audio.currentTime + seekOffset` eliminates intra-turn VBR bitrate drift.
  * 
- * See `docs/troubleshooting_guide.md` for full mathematical and architectural details.
+ * See `docs/troubleshooting/vbr_audio_sync.md` for full mathematical and architectural details.
  */
 
 (function () {

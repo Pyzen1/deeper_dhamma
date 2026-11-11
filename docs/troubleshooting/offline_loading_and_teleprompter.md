@@ -132,3 +132,4 @@ To respect user agency during playback:
 - Listening to passive `wheel` and `touchmove` events records `WordSync._userInteractedAt = performance.now()`.
 - The teleprompter loop automatically pauses auto-scrolling for 2.5 seconds upon user interaction, allowing the reader to freely inspect preceding or subsequent turns without fighting the scroll engine.
 - Clicking any transcript word span immediately resets the interaction cooldown (`_userInteractedAt = 0`) and centers playback smoothly on the clicked word.
+

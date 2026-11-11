@@ -27,3 +27,4 @@ Welcome to the Deeper Dhamma troubleshooting documentation. This index maps symp
    Playback timing always adheres to the 1:1 decoded 44.1 kHz PCM stream clock. VBR offsets are handled purely at seek time via binary `VBR1` trailer metadata and client-side header neutralization.
 3. **Atomic Background Updates**:
    Database refreshes execute non-blocking checks in the background, validating candidate database binaries in isolated worker instances before hot-swapping in-memory connections with zero interruption to active reading.
+

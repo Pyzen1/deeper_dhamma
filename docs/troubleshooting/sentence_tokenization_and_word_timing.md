@@ -70,3 +70,4 @@ Run the automated test verifying deterministic sentence splitting and word align
 ```powershell
 pytest tests/test_cross_browser_word_sync.py -k "test_pb10641521_turn_sentence_splitting_and_word_highlight_alignment"
 ```
+

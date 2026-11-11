@@ -161,3 +161,4 @@ pytest tests/test_downloader_parity.py tests/test_sync_repair.py
 # 2. Ingest verification across entire 3,251-episode scope
 python main.py sync --all
 ```
+

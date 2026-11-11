@@ -8,7 +8,7 @@ word timestamps with HTML5 `<audio>` streaming across both Mozilla Firefox
 (Gecko `MP3TrackDemuxer`) and Chromium (FFmpeg `mp3dec`) with zero backend
 server dependencies.
 
-See `docs/troubleshooting_guide.md` for full root-cause analysis and diagrams.
+See `docs/troubleshooting/vbr_audio_sync.md` for full root-cause analysis and diagrams.
 
 Key Mechanisms & Invariants:
 1. Canonical Physical Timestamps:

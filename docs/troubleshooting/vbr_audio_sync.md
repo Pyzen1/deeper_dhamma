@@ -124,3 +124,4 @@ For CBR episodes, the binary blob contains only the header and word array (`4 + 
 | `+16` | `uint8[100]` | `toc` | Raw 100-byte `Xing` TOC array (used to compute `xingSeekTimes`) |
 | `+116` | `uint32` | `sample_count` | Number of packet sample points `M` (~2s stride across full file) |
 | `+120` | `uint32[2*M]` | `samples` | `M` pairs of `(uint32 pcm_ms, uint32 audio_byte_offset)` |
+

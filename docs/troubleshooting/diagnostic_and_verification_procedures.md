@@ -43,3 +43,4 @@ If a browser tab has cached old OPFS or IndexedDB database state:
 | **Headless Cross-Browser Word Sync** | `pytest tests/test_cross_browser_word_sync.py -v` |
 | **Service Worker & Atomic DB Hot-Swap** | `pytest tests/test_export_web.py -k "test_service_worker or test_atomic"` |
 | **Downloader & Parity Checks** | `pytest tests/test_downloader_parity.py tests/test_sync_repair.py` |
+
