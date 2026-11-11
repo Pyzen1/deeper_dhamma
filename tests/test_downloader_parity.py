@@ -53,3 +53,15 @@ def test_verify_remote_parity_missing_file(tmp_path: Path):
     valid, reason, _ = downloader.verify_remote_parity(missing, "https://mcdn.podbean.com/test.mp3")
     assert valid is False
     assert "does not exist" in reason.lower() or "missing" in reason.lower()
+
+
+def test_downloader_aria2c_fallback_and_paths_present():
+    """
+    Verifies that run_sync defines paths['home'] to resolve absolute download directories,
+    and includes fallback handling for aria2c failures (such as Windows MAX_PATH limits).
+    """
+    src = inspect.getsource(downloader.run_sync)
+    assert '"paths": {"home": str(target_dir)}' in src
+    assert "aria2c failed" in src
+    assert "native_opts" in src
+

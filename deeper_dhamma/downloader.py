@@ -823,6 +823,8 @@ def run_sync(
                         if dest_f.exists() and dest_f.stat().st_size > 1024 * 1024:
                             return "spurious 'elapsed' error auto-resolved (audio file intact)"
                         return "spurious 'elapsed' error reset for retry"
+                    if "aria2c exited with code 16" in err_msg or "code 16" in err_msg:
+                        return "aria2c path length error reset for native retry"
                     return False
 
                 can_proceed, reason = tdb.check_preflight(
@@ -848,6 +850,7 @@ def run_sync(
                 "windowsfilenames": True,
                 "retries": 10,
                 "fragment_retries": 10,
+                "paths": {"home": str(target_dir)},
                 "outtmpl": "%(custom_year)s/%(custom_series)s/%(custom_filename)s.%(ext)s",
                 "quiet": False,
                 "no_warnings": True,
@@ -902,6 +905,52 @@ def run_sync(
                 sys.exit(130)
             except Exception as e:
                 ydl_adapter.clear_active_progress()
+                err_str = str(e)
+
+                # Fallback to native yt-dlp downloader if aria2c fails (e.g. Windows MAX_PATH limits, network/exit errors)
+                if "aria2c exited with code" in err_str or "aria2c" in err_str.lower():
+                    l.warning(f"   [!] aria2c failed ({e}). Retrying with native downloader...")
+                    for remnant in (dest_mp3, dest_m4a, dest_jpg):
+                        if remnant.exists() and remnant.stat().st_size == 0:
+                            try:
+                                remnant.unlink()
+                            except OSError:
+                                pass
+                    for p in dest_folder.glob(f"{ep['filename']}.*"):
+                        if p.suffix.lower() in (".temp", ".part", ".ytdl", ".aria2") or ".temp." in p.name:
+                            try:
+                                p.unlink()
+                            except OSError:
+                                pass
+
+                    native_opts = dict(ydl_opts)
+                    native_opts.pop("downloader", None)
+                    native_opts.pop("downloader_args", None)
+                    native_opts.pop("external_downloader", None)
+                    native_opts.pop("external_downloader_args", None)
+                    try:
+                        ydl_native = yt_dlp.YoutubeDL(native_opts)
+                        ydl_native.add_post_processor(CatalogEpisodePP(ydl_native, ep), when="pre_process")
+                        ret = ydl_native.download([ep["media_url"]])
+                        ydl_adapter.clear_active_progress()
+                        if ret == 0:
+                            elapsed = time.time() - t0
+                            success_count += 1
+                            if tdb:
+                                tdb.clear_error(ep_id)
+                            dest_file = dest_mp3 if dest_mp3.exists() else dest_m4a
+                            size_str = f" ({dest_file.stat().st_size / (1024 * 1024):.1f} MB)" if dest_file.exists() else ""
+                            tag_str = "repaired with exact bitstream parity" if ep.get("is_repair") else "exact bitstream copy preserved"
+                            l.info(f"   [✓] Completed via native fallback in {elapsed:.1f}s{size_str} - {tag_str}\n")
+                            if sleep_seconds > 0 and idx < len(pending_episodes) and elapsed > 1.0:
+                                time.sleep(sleep_seconds)
+                            continue
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as fallback_e:
+                        e = fallback_e
+                        err_str = str(fallback_e)
+
                 # Post-failure cleanup: purge any 0-byte remnants so they don't break subsequent attempts
                 for remnant in (dest_mp3, dest_m4a, dest_jpg):
                     if remnant.exists() and remnant.stat().st_size == 0:
@@ -909,7 +958,6 @@ def run_sync(
                             remnant.unlink()
                         except OSError:
                             pass
-                err_str = str(e)
                 if "user-site-page-not-found" in err_str or "HTTP Error 404" in err_str:
                     l.warning(f"[!] Podbean 404 Notice: Talk '{ep['title']}' was removed from CDN by host. Skipping.\n")
                     if tdb:
