@@ -175,3 +175,103 @@ def test_postprocessor_process_segments_preserves_raw_text_and_is_idempotent():
     assert reprocessed[0]["raw_text"] == raw_input
     assert reprocessed[0]["text"] == first_pass_text
     assert len(changelog2) == len(changelog)
+
+
+def test_storage_non_destructive_raw_asr_and_reprocess_episodes(tmp_path):
+    """
+    Verifies Phase 2 non-destructive storage and offline re-processing:
+    1. `save_episode` stores pristine `raw_text` and `raw_words` in `pipeline_state.db`.
+    2. `reprocess_episodes(dry_run=True)` previews updates without modifying `dhamma_transcripts.db`.
+    3. `reprocess_episodes(dry_run=False)` updates `speech_segments.text`, `terminology_changelog`,
+       FTS5 search index, and `episode_words` binary BLOB while preserving any VBR1 seek trailer.
+    """
+    from deeper_dhamma.postprocess import extract_vbr_trailer, pack_words_blob
+    from deeper_dhamma.storage import TranscriptDatabase
+
+    db_path = tmp_path / "test_transcripts.db"
+    db = TranscriptDatabase(db_path=db_path)
+
+    raw_text = (
+        "Watch the left foot foot when sloth and twelver arises, "
+        "or that's my ritual thinking."
+    )
+    tokens = raw_text.split()
+    words = [
+        {"word": f" {tok}", "start": float(i) * 0.25, "end": float(i) * 0.25 + 0.20, "prob": 0.50}
+        for i, tok in enumerate(tokens)
+    ]
+
+    # Simulate an episode saved before post-processing ran (or with older rules)
+    meta = {
+        "id": "pb_test_01",
+        "title": "Test Retreat Q&A | Ajahn Brahm",
+        "primary_teacher": "ajahn_brahm",
+        "primary_display": "Ajahn Brahm",
+        "media_url": "https://example.com/audio.mp3",
+        "permalink": "https://example.com/post",
+        "upload_date": "20061102",
+        "is_multi_speaker": False,
+        "speaker_shares": {"ajahn_brahm": 1.0},
+    }
+    segs = [
+        {
+            "start": 0.0,
+            "end": 5.0,
+            "speaker": "ajahn_brahm",
+            "speaker_display": "Ajahn Brahm",
+            "raw_text": raw_text,
+            "text": raw_text,
+            "raw_words": words,
+            "words": words,
+        }
+    ]
+    db.save_episode(
+        episode_metadata=meta,
+        attributed_segments=segs,
+        duration_sec=300.0,
+        year="2006",
+        filename_stem="2006-11-02_test",
+        terminology_changelog=[],
+    )
+
+    fake_vbr_trailer = b"VBR1\x01\x00\x00\x00\x10\x27\x00\x00"
+    initial_blob = pack_words_blob(words, vbr_trailer=fake_vbr_trailer)
+    db.save_episode_words("pb_test_01", initial_blob)
+
+    # Verify pristine raw ASR was saved in pipeline_state.db
+    stored_raw = db.pipeline_db.get_raw_asr("pb_test_01")
+    assert stored_raw is not None
+    assert stored_raw[0]["raw_text"] == raw_text
+    assert len(stored_raw[0]["raw_words"]) == len(tokens)
+
+    # Dry-run reprocess should detect modifications without mutating the DB
+    dry_res = db.reprocess_episodes(episode_ids=["pb_test_01"], dry_run=True)
+    assert dry_res["episodes_scanned"] == 1
+    assert dry_res["episodes_updated"] == 1
+    assert dry_res["segments_modified"] == 1
+    ep_before = db.get_episode("pb_test_01")
+    assert ep_before["segments"][0]["text"] == raw_text
+
+    # Live reprocess should update text, FTS5, changelog, and words_blob (preserving VBR1 trailer)
+    live_res = db.reprocess_episodes(episode_ids=["pb_test_01"], dry_run=False)
+    assert live_res["episodes_updated"] == 1
+    ep_after = db.get_episode("pb_test_01")
+    updated_text = ep_after["segments"][0]["text"]
+    assert "left foot when sloth and torpor arises" in updated_text
+    assert "my wishful thinking" in updated_text
+    assert len(ep_after["terminology_changelog"]) >= 3
+
+    # FTS5 index must reflect the updated text ("torpor" and "wishful")
+    fts_hits = db.search_fts("torpor wishful")
+    assert len(fts_hits) == 1
+    assert fts_hits[0]["episode_id"] == "pb_test_01"
+
+    # VBR1 seek trailer must remain intact in re-packed words_blob
+    updated_blob = db.get_episode_words("pb_test_01")
+    assert extract_vbr_trailer(updated_blob) == fake_vbr_trailer
+
+    # Second live reprocess with same rules should report 0 changes (idempotent)
+    second_res = db.reprocess_episodes(episode_ids=["pb_test_01"], dry_run=False)
+    assert second_res["episodes_updated"] == 0
+    assert second_res["segments_modified"] == 0
+

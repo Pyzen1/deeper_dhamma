@@ -162,6 +162,36 @@ def coalesce_subword_timings(words: List[Dict]) -> List[Dict]:
     return merged
 
 
+def pack_words_blob(words: List[Dict], vbr_trailer: Optional[bytes] = None) -> bytes:
+    """Serializes physical word timestamps and optional VBR1 seek trailer into a compact binary BLOB."""
+    import struct
+
+    words_sorted = sorted(words, key=lambda w: float(w["start"]))
+    buf = bytearray()
+    buf.extend(struct.pack("<I", len(words_sorted)))
+    for w in words_sorted:
+        st_ms = int(round(float(w["start"]) * 1000.0))
+        en_ms = int(round(float(w["end"]) * 1000.0))
+        dur_ms = max(1, min(65535, en_ms - st_ms))
+        buf.extend(struct.pack("<IH", st_ms, dur_ms))
+    if vbr_trailer:
+        buf.extend(vbr_trailer)
+    return bytes(buf)
+
+
+def extract_vbr_trailer(words_blob: Optional[bytes]) -> bytes:
+    """Extracts the trailing VBR1 seek trailer (if present) from an existing `words_blob`."""
+    import struct
+
+    if not words_blob or len(words_blob) < 4:
+        return b""
+    word_count = struct.unpack_from("<I", words_blob, 0)[0]
+    offset = 4 + word_count * 6
+    if len(words_blob) > offset:
+        return bytes(words_blob[offset:])
+    return b""
+
+
 def clean_word_token(raw_word: str) -> str:
     """Strips punctuation and whitespace for case-insensitive token comparison."""
     return re.sub(r"[^\w']", "", raw_word.strip().lower())
@@ -540,12 +570,17 @@ class TranscriptPostProcessor:
                     }
                 aggregated_changes[key]["count"] += ch.get("count", 1)
 
-        # Stage 0: Preserve or restore raw_text baseline
+        # Stage 0: Preserve or restore raw_text and raw_words baseline
         for seg in segments:
             if not seg.get("raw_text") and seg.get("text"):
                 seg["raw_text"] = seg["text"]
             elif reset_from_raw and seg.get("raw_text"):
                 seg["text"] = seg["raw_text"]
+
+            if seg.get("words") and not seg.get("raw_words"):
+                seg["raw_words"] = [dict(w) for w in coalesce_subword_timings(seg["words"])]
+            elif reset_from_raw and seg.get("raw_words"):
+                seg["words"] = [dict(w) for w in seg["raw_words"]]
 
             if seg.get("words"):
                 seg["words"] = coalesce_subword_timings(seg["words"])

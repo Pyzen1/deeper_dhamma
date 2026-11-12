@@ -29,6 +29,7 @@ from deeper_dhamma.asr import Transcriber
 from deeper_dhamma.profiler import SpeakerProfiler
 from deeper_dhamma.aligner import SpeakerAligner
 from deeper_dhamma.terminology import TerminologyEditor
+from deeper_dhamma.postprocess import TranscriptPostProcessor, pack_words_blob
 from deeper_dhamma.lexicon import BuddhismLexiconDatabase
 from deeper_dhamma.storage import TranscriptDatabase
 from deeper_dhamma.calibration import StreamSeekCalibrator
@@ -68,6 +69,7 @@ class TranscriptionPipeline:
         self.profiler = SpeakerProfiler(voiceprint_db=self.voiceprints_db, encoder=self.encoder)
         self.lexicon_db = BuddhismLexiconDatabase()
         self.terminology_editor = TerminologyEditor(self.lexicon_db.db_path)
+        self.postprocessor = TranscriptPostProcessor(terminology_editor=self.terminology_editor)
         self.calibrator = StreamSeekCalibrator()
         self.db = TranscriptDatabase(db_path=transcripts_db_path)
 
@@ -329,11 +331,11 @@ class TranscriptionPipeline:
             )
             logger.info(f"    Speaker alignment complete in {time.time() - t_spk0:.2f}s ({len(attributed)} turns).")
 
-            # 5. Buddhist Terminology Normalization & Audit Pass
-            logger.info("    Applying final Buddhist reference terminology normalization...")
-            attributed, term_changelog = self.terminology_editor.edit_segments(attributed)
+            # 5. Multi-Stage ASR Post-Processing & Buddhist Terminology Normalization
+            logger.info("    Applying ASR post-processing & Buddhist reference terminology normalization...")
+            attributed, term_changelog = self.postprocessor.process_segments(attributed)
             if term_changelog:
-                logger.info(f"    [+] Terminology editor applied {len(term_changelog)} standardization rule(s).")
+                logger.info(f"    [+] Post-processor applied {len(term_changelog)} standardization/cleanup rule(s).")
 
             # 6. Preserve exact physical PCM timestamps in SQLite and export VBR seek trailer in .bin
             # (Prevents intra-turn VBR bitrate drift and ensures cross-browser Firefox/Chrome parity)
@@ -396,26 +398,12 @@ class TranscriptionPipeline:
         vbr_trailer: Optional[bytes] = None,
     ) -> None:
         """Serializes physical word timestamps and optional VBR1 seek trailer into compact binary BLOB."""
-        import struct
-        words_sorted = sorted(words, key=lambda w: float(w["start"]))
-        buf = bytearray()
-        buf.extend(struct.pack("<I", len(words_sorted)))
-        for w in words_sorted:
-            st_ms = int(round(float(w["start"]) * 1000.0))
-            en_ms = int(round(float(w["end"]) * 1000.0))
-            dur_ms = max(1, min(65535, en_ms - st_ms))
-            buf.extend(struct.pack("<IH", st_ms, dur_ms))
+        resolved_trailer = vbr_trailer
+        if resolved_trailer is None and audio_path is not None:
+            resolved_trailer = self.calibrator.build_vbr_trailer(audio_path)
 
-        if vbr_trailer is not None:
-            if vbr_trailer:
-                buf.extend(vbr_trailer)
-        elif audio_path is not None:
-            computed_trailer = self.calibrator.build_vbr_trailer(audio_path)
-            if computed_trailer:
-                buf.extend(computed_trailer)
-
-        blob_bytes = bytes(buf)
+        blob_bytes = pack_words_blob(words, vbr_trailer=resolved_trailer)
 
         # Commit directly into SQLite database (100% self-referential)
         self.db.save_episode_words(ep_id, blob_bytes)
-        logger.info(f"    [✓] Saved {len(words_sorted):,} word timings ({len(blob_bytes)/1024:.1f} KB BLOB) to database for {ep_id}")
+        logger.info(f"    [✓] Saved {len(words):,} word timings ({len(blob_bytes)/1024:.1f} KB BLOB) to database for {ep_id}")

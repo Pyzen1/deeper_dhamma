@@ -79,8 +79,82 @@ class PipelineStateDatabase:
 
                 CREATE INDEX IF NOT EXISTS idx_episode_states_stem ON episode_states(filename_stem);
                 CREATE INDEX IF NOT EXISTS idx_episode_states_transcribed ON episode_states(is_transcribed);
+
+                CREATE TABLE IF NOT EXISTS episode_raw_asr (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_uid TEXT UNIQUE NOT NULL,
+                    raw_segments_zlib BLOB NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_episode_raw_asr_uid ON episode_raw_asr(episode_uid);
                 """
             )
+
+    def save_raw_asr(self, episode_uid: str, segments: List[Dict]) -> None:
+        """
+        Stores the pristine, pre-postprocessing ASR segments (including `raw_text` and
+        per-word timing + probability `raw_words` / `words`) compressed with zlib in
+        `pipeline_state.db` so post-processing can be re-run offline without bloating
+        `dhamma_transcripts.db`.
+        """
+        import zlib
+
+        if not segments:
+            return
+
+        payload = []
+        for seg in segments:
+            raw_txt = seg.get("raw_text") if seg.get("raw_text") is not None else seg.get("text", "")
+            raw_w = seg.get("raw_words") if seg.get("raw_words") is not None else seg.get("words")
+            item: Dict[str, Any] = {
+                "start": round(float(seg.get("start", seg.get("start_sec", 0.0))), 3),
+                "end": round(float(seg.get("end", seg.get("end_sec", 0.0))), 3),
+                "speaker": seg.get("speaker", seg.get("speaker_slug", "unknown")),
+                "speaker_display": seg.get("speaker_display", seg.get("speaker", "Unknown")),
+                "raw_text": raw_txt,
+                "text": raw_txt,
+            }
+            if raw_w:
+                item["raw_words"] = [
+                    {
+                        "word": w.get("word", ""),
+                        "start": round(float(w.get("start", 0.0)), 3),
+                        "end": round(float(w.get("end", 0.0)), 3),
+                        "prob": round(float(w.get("prob", 1.0)), 3),
+                    }
+                    for w in raw_w
+                ]
+                item["words"] = [dict(w) for w in item["raw_words"]]
+            payload.append(item)
+
+        compressed = zlib.compress(json.dumps(payload, ensure_ascii=False).encode("utf-8"), level=6)
+        with self._get_connection() as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO episode_raw_asr (episode_uid, raw_segments_zlib, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(episode_uid) DO UPDATE SET
+                        raw_segments_zlib = excluded.raw_segments_zlib,
+                        updated_at = CURRENT_TIMESTAMP;
+                    """,
+                    (episode_uid, sqlite3.Binary(compressed)),
+                )
+
+    def get_raw_asr(self, episode_uid: str) -> Optional[List[Dict]]:
+        """Retrieves and decompresses the pristine raw ASR segments for an episode if stored."""
+        import zlib
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT raw_segments_zlib FROM episode_raw_asr WHERE episode_uid = ? LIMIT 1;",
+                (episode_uid,),
+            ).fetchone()
+            if not row or not row["raw_segments_zlib"]:
+                return None
+            raw_json = zlib.decompress(bytes(row["raw_segments_zlib"])).decode("utf-8")
+            return json.loads(raw_json)
 
     def upsert_file_state(
         self,
@@ -515,6 +589,13 @@ class TranscriptDatabase:
             clear_error=True,
         )
 
+        # Persist pristine pre-postprocessing ASR baseline in pipeline_state.db
+        if attributed_segments and (
+            any("raw_text" in s or "words" in s for s in attributed_segments)
+            or self.pipeline_db.get_raw_asr(ep_id) is None
+        ):
+            self.pipeline_db.save_raw_asr(ep_id, attributed_segments)
+
         if primary_slug and primary_slug != "unknown_teacher":
             self.associate_teacher(
                 episode_id=ep_id,
@@ -525,6 +606,152 @@ class TranscriptDatabase:
             )
 
         logger.info(f"[✓] Saved '{title}' to database ({len(segment_rows)} turns indexed).")
+
+    def reprocess_episodes(
+        self,
+        postprocessor: Optional[Any] = None,
+        episode_ids: Optional[List[str]] = None,
+        year: Optional[int] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Re-runs multi-stage ASR post-processing across already-transcribed episodes in the
+        database without re-running GPU Whisper transcription.
+
+        - Uses the pristine raw ASR baseline (`raw_text` + per-word `prob` in `pipeline_state.db`)
+          when available so re-processing is 100% non-destructive and idempotent.
+        - Falls back to `speech_segments` for legacy episodes (and seeds their raw baseline).
+        - Automatically updates `speech_segments`, `episodes.terminology_changelog`, `transcripts_fts`,
+          and `episode_words` binary timing BLOBs (preserving any VBR1 seek trailer).
+        """
+        from deeper_dhamma.postprocess import (
+            TranscriptPostProcessor,
+            extract_vbr_trailer,
+            pack_words_blob,
+        )
+
+        if postprocessor is None:
+            postprocessor = TranscriptPostProcessor()
+
+        where_clauses = ["is_transcribed = 1"]
+        params: List[Any] = []
+        if episode_ids:
+            resolved_ids = []
+            for eid in episode_ids:
+                r_uid = self.pipeline_db.resolve_episode_uid(eid) or eid
+                resolved_ids.extend([eid, r_uid])
+            unique_ids = list(dict.fromkeys(resolved_ids))
+            placeholders = ", ".join(["?"] * len(unique_ids))
+            where_clauses.append(f"id IN ({placeholders})")
+            params.extend(unique_ids)
+        if year is not None:
+            where_clauses.append("year = ?")
+            params.append(int(year))
+
+        where_sql = " AND ".join(where_clauses)
+        with self._get_connection() as conn:
+            ep_rows = conn.execute(
+                f"SELECT id, title, year, terminology_changelog FROM episodes WHERE {where_sql} ORDER BY date ASC, id ASC;",
+                params,
+            ).fetchall()
+
+        episodes_scanned = 0
+        episodes_updated = 0
+        segments_modified = 0
+        total_rule_applications = 0
+        details: List[Dict[str, Any]] = []
+
+        for ep_row in ep_rows:
+            ep_id = ep_row["id"]
+            ep_title = ep_row["title"]
+            episodes_scanned += 1
+
+            with self._get_connection() as conn:
+                db_segs = [
+                    dict(r)
+                    for r in conn.execute(
+                        "SELECT id, turn_index, start_sec, end_sec, speaker_slug, speaker_display, text "
+                        "FROM speech_segments WHERE episode_id = ? ORDER BY turn_index ASC;",
+                        (ep_id,),
+                    ).fetchall()
+                ]
+            if not db_segs:
+                continue
+
+            raw_baseline = self.pipeline_db.get_raw_asr(ep_id)
+            if raw_baseline and len(raw_baseline) == len(db_segs):
+                working_segs = [dict(s) for s in raw_baseline]
+            else:
+                working_segs = [
+                    {
+                        "start": s["start_sec"],
+                        "end": s["end_sec"],
+                        "speaker": s["speaker_slug"],
+                        "speaker_display": s["speaker_display"],
+                        "raw_text": s["text"],
+                        "text": s["text"],
+                    }
+                    for s in db_segs
+                ]
+                if not dry_run and raw_baseline is None:
+                    self.pipeline_db.save_raw_asr(ep_id, working_segs)
+
+            processed_segs, changelog = postprocessor.process_segments(working_segs, reset_from_raw=True)
+            ep_rule_count = sum(c.get("count", 1) for c in changelog)
+            total_rule_applications += ep_rule_count
+
+            ep_seg_mods = 0
+            updates_to_apply = []
+            for db_s, proc_s in zip(db_segs, processed_segs):
+                new_txt = (proc_s.get("text") or "").strip()
+                old_txt = (db_s.get("text") or "").strip()
+                if new_txt != old_txt:
+                    ep_seg_mods += 1
+                    updates_to_apply.append((new_txt, db_s["id"]))
+
+            old_changelog_str = ep_row["terminology_changelog"] or "[]"
+            new_changelog_str = json.dumps(changelog, ensure_ascii=False)
+            changelog_changed = new_changelog_str != old_changelog_str
+
+            if ep_seg_mods > 0 or changelog_changed:
+                episodes_updated += 1
+                segments_modified += ep_seg_mods
+                details.append({
+                    "episode_id": ep_id,
+                    "title": ep_title,
+                    "segments_modified": ep_seg_mods,
+                    "changelog": changelog,
+                })
+
+                if not dry_run:
+                    with self._get_connection() as conn:
+                        with conn:
+                            if updates_to_apply:
+                                conn.executemany(
+                                    "UPDATE speech_segments SET text = ? WHERE id = ?;",
+                                    updates_to_apply,
+                                )
+                            conn.execute(
+                                "UPDATE episodes SET terminology_changelog = ? WHERE id = ?;",
+                                (new_changelog_str, ep_id),
+                            )
+
+                    # Re-pack word timings BLOB if segments carried word-level timing objects
+                    all_words = [w for seg in processed_segs for w in (seg.get("words") or [])]
+                    if all_words:
+                        old_blob = self.get_episode_words(ep_id)
+                        vbr_trailer = extract_vbr_trailer(old_blob)
+                        new_blob = pack_words_blob(all_words, vbr_trailer=vbr_trailer)
+                        self.save_episode_words(ep_id, new_blob)
+
+        return {
+            "episodes_scanned": episodes_scanned,
+            "episodes_updated": episodes_updated,
+            "segments_modified": segments_modified,
+            "total_rule_applications": total_rule_applications,
+            "dry_run": dry_run,
+            "details": details,
+        }
 
     def seed_teachers(self, teachers: Optional[List[Dict]] = None) -> int:
         """Seeds the teachers table with known monastics, roles, and color palettes."""
