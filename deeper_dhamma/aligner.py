@@ -4,7 +4,7 @@ Speaker Alignment, Word-Level Change-Point Diarization & Attribution.
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 import torch
 
@@ -49,20 +49,61 @@ class SpeakerAligner:
         waveform_16k: Optional[torch.Tensor] = None,
         sample_rate: int = 16000,
         min_pause_gap: float = 0.45,
+        _slice_cache: Optional[Dict[Tuple[int, int], np.ndarray]] = None,
     ) -> List[Dict]:
         """
         Splits merged ASR segments at conversational pauses where bilateral acoustic
         divergence indicates a genuine speaker change-point.
         """
         refined_segments = []
+        slice_cache: Dict[Tuple[int, int], np.ndarray] = _slice_cache if _slice_cache is not None else {}
+        use_batch = (
+            waveform_16k is not None
+            and type(self.encoder).__name__ == "SpeakerEncoder"
+            and hasattr(self.encoder, "encode_waveforms_batch")
+        )
 
-        def get_slice(st: float, en: float) -> torch.Tensor:
+        if use_batch and waveform_16k is not None:
+            total_frames = waveform_16k.shape[-1]
+            cand_keys: List[Tuple[int, int]] = []
+            cand_seen = set(slice_cache.keys())
+            for seg in asr_segments:
+                words = seg.get("words", [])
+                if len(words) < 2:
+                    continue
+                for i in range(len(words) - 1):
+                    if (words[i + 1]["start"] - words[i]["end"]) < min_pause_gap:
+                        continue
+                    left_st = words[0]["start"]
+                    left_en = words[i]["end"]
+                    right_st = words[i + 1]["start"]
+                    right_en = min(words[-1]["end"], right_st + 5.0)
+                    if (left_en - left_st) < 1.5 or (right_en - right_st) < 1.5:
+                        continue
+                    k_l = (max(0, int(left_st * sample_rate)), min(total_frames, int(min(left_en, left_st + 6.0) * sample_rate)))
+                    k_r = (max(0, int(right_st * sample_rate)), min(total_frames, int(right_en * sample_rate)))
+                    for k in (k_l, k_r):
+                        if k not in cand_seen and k[1] > k[0]:
+                            cand_seen.add(k)
+                            cand_keys.append(k)
+            if cand_keys:
+                cand_wavs = [waveform_16k[:, st_f:en_f] for st_f, en_f in cand_keys]
+                for k, emb in zip(cand_keys, self.encoder.encode_waveforms_batch(cand_wavs)):
+                    slice_cache[k] = emb
+
+        def get_slice_emb(st: float, en: float) -> np.ndarray:
             if waveform_16k is not None:
                 start_f = max(0, int(st * sample_rate))
                 end_f = min(waveform_16k.shape[-1], int(en * sample_rate))
-                return waveform_16k[:, start_f:end_f]
+                key = (start_f, end_f)
+                cached = slice_cache.get(key)
+                if cached is not None:
+                    return cached
+                emb = self.encoder.encode_waveform(waveform_16k[:, start_f:end_f])
+                slice_cache[key] = emb
+                return emb
             w, _ = load_audio_segment(audio_file, start_sec=st, end_sec=en)
-            return w
+            return self.encoder.encode_waveform(w)
 
         for seg in asr_segments:
             words = seg.get("words", [])
@@ -90,11 +131,8 @@ class SpeakerAligner:
                     continue
 
                 try:
-                    w_l = get_slice(left_st, min(left_en, left_st + 6.0))
-                    w_r = get_slice(right_st, right_en)
-
-                    emb_l = self.encoder.encode_waveform(w_l)
-                    emb_r = self.encoder.encode_waveform(w_r)
+                    emb_l = get_slice_emb(left_st, min(left_en, left_st + 6.0))
+                    emb_r = get_slice_emb(right_st, right_en)
 
                     id_l = self.db.identify_speaker(emb_l, era=era, threshold=0.42)
                     id_r = self.db.identify_speaker(emb_r, era=era, threshold=0.42)
@@ -163,6 +201,7 @@ class SpeakerAligner:
 
         # Clean single teacher display name for turn attribution
         primary_teacher_display = primary_display.split(" & ")[0] if " & " in primary_display else primary_display
+        slice_cache: Dict[Tuple[int, int], np.ndarray] = {}
 
         # 1. Word-level conversational pause refinement & change-point detection
         asr_segments = self.refine_turns_by_word_boundaries(
@@ -171,7 +210,31 @@ class SpeakerAligner:
             era=era,
             waveform_16k=waveform_16k,
             sample_rate=sample_rate,
+            _slice_cache=slice_cache,
         )
+
+        # Pre-batch turn slice embeddings on GPU when in-memory waveform is available
+        if (
+            waveform_16k is not None
+            and type(self.encoder).__name__ == "SpeakerEncoder"
+            and hasattr(self.encoder, "encode_waveforms_batch")
+        ):
+            total_frames = waveform_16k.shape[-1]
+            pending_keys: List[Tuple[int, int]] = []
+            seen_keys = set(slice_cache.keys())
+            for seg in asr_segments:
+                if (seg["end"] - seg["start"]) < 1.20:
+                    continue
+                st_f = int(seg["start"] * sample_rate)
+                en_f = min(total_frames, int(min(seg["end"], seg["start"] + 8.0) * sample_rate))
+                key = (st_f, en_f)
+                if key not in seen_keys and en_f > st_f:
+                    seen_keys.add(key)
+                    pending_keys.append(key)
+            if pending_keys:
+                pending_wavs = [waveform_16k[:, st_f:en_f] for st_f, en_f in pending_keys]
+                for key, emb in zip(pending_keys, self.encoder.encode_waveforms_batch(pending_wavs)):
+                    slice_cache[key] = emb
 
         # 2. Turn-level acoustic evaluation & identity attribution
         assigned_segments = []
@@ -215,33 +278,44 @@ class SpeakerAligner:
                     start_frame = int(seg["start"] * sample_rate)
                     end_sec = min(seg["end"], seg["start"] + 8.0)
                     end_frame = min(waveform_16k.shape[-1], int(end_sec * sample_rate))
-                    waveform = waveform_16k[:, start_frame:end_frame]
+                    key = (start_frame, end_frame)
+                    emb = slice_cache.get(key)
+                    if emb is None:
+                        emb = self.encoder.encode_waveform(waveform_16k[:, start_frame:end_frame])
+                        slice_cache[key] = emb
                 else:
                     waveform, _ = load_audio_segment(
                         audio_file,
                         start_sec=seg["start"],
                         end_sec=min(seg["end"], seg["start"] + 8.0),
                     )
-                emb = self.encoder.encode_waveform(waveform)
+                    emb = self.encoder.encode_waveform(waveform)
 
                 id_result = self.db.identify_speaker(emb, era=era, threshold=0.38)
                 new_slug = id_result["teacher_slug"]
                 new_display = id_result["display_name"]
                 new_conf = id_result["confidence"]
 
+                seg_scores: Dict[str, float] = {}
+
+                def _score(slug: str) -> float:
+                    if slug not in seg_scores:
+                        seg_scores[slug] = self.db.score_speaker(emb, slug, era=era)
+                    return seg_scores[slug]
+
                 # Measure direct acoustic agreement with the active and primary speakers
                 active_sim = (
-                    self.db.score_speaker(emb, current_speaker, era=era)
+                    _score(current_speaker)
                     if not current_speaker.startswith("unregistered")
                     else 0.0
                 )
                 primary_sim = (
-                    self.db.score_speaker(emb, primary_slug, era=era)
+                    _score(primary_slug)
                     if primary_slug and primary_slug != "unknown_teacher"
                     else 0.0
                 )
                 best_candidate_sim = max([active_sim, primary_sim] + [
-                    self.db.score_speaker(emb, c_slug, era=era) for c_slug in active_candidate_slugs
+                    _score(c_slug) for c_slug in active_candidate_slugs
                 ])
 
                 # Reject un-profiled third-party monastics unless match is strongly discriminative (>= 0.52)
@@ -251,11 +325,11 @@ class SpeakerAligner:
                             # Assign to best matching candidate monastic
                             best_cand = max(
                                 active_candidate_slugs,
-                                key=lambda s: self.db.score_speaker(emb, s, era=era),
+                                key=_score,
                             )
                             new_slug = best_cand
                             new_display = slug_to_display.get(best_cand, best_cand.replace("_", " ").title())
-                            new_conf = self.db.score_speaker(emb, best_cand, era=era)
+                            new_conf = _score(best_cand)
                         else:
                             new_slug = "unregistered_speaker"
                             new_display = "Unregistered Speaker"
@@ -266,7 +340,7 @@ class SpeakerAligner:
                     if best_candidate_sim >= recovery_thresh and current_speaker.startswith("unregistered"):
                         best_cand = max(
                             active_candidate_slugs,
-                            key=lambda s: self.db.score_speaker(emb, s, era=era),
+                            key=_score,
                         )
                         new_slug = best_cand
                         new_display = slug_to_display.get(best_cand, best_cand.replace("_", " ").title())

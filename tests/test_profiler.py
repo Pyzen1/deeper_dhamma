@@ -111,3 +111,47 @@ def test_profiler_multi_speaker_detection():
     assert "ajahn_brahm" in res["shares"]
     assert "ajahn_brahmali" in res["shares"]
 
+
+def test_voiceprint_db_in_memory_cache_and_invalidation(tmp_path):
+    """Verifies that VoiceprintDatabase caches gallery embeddings in RAM and invalidates on insert."""
+    from deeper_dhamma.voiceprints import VoiceprintDatabase
+
+    db_file = tmp_path / "test_vp.db"
+    vdb = VoiceprintDatabase(db_path=db_file)
+
+    emb1 = np.zeros(192, dtype=np.float32)
+    emb1[0] = 3.0
+    vdb.insert_voiceprint(
+        teacher_slug="ajahn_brahm",
+        display_name="Ajahn Brahm",
+        era="2004_2014",
+        role="monastic_primary",
+        source_file="talk1.mp3",
+        start_sec=10.0,
+        end_sec=16.0,
+        embedding=emb1,
+    )
+
+    gallery_1 = vdb.load_gallery(era="2004_2014")
+    assert len(gallery_1) == 1
+    assert "embedding_normed" in gallery_1[0]
+    assert np.isclose(np.linalg.norm(gallery_1[0]["embedding_normed"]), 1.0)
+    assert vdb.score_speaker(emb1, "ajahn_brahm", era="2004_2014") == 1.0
+
+    # Insert a second voiceprint and confirm cache automatically refreshes
+    emb2 = np.zeros(192, dtype=np.float32)
+    emb2[1] = 5.0
+    vdb.insert_voiceprint(
+        teacher_slug="ajahn_brahmali",
+        display_name="Ajahn Brahmali",
+        era="2004_2014",
+        role="monastic_primary",
+        source_file="talk2.mp3",
+        start_sec=20.0,
+        end_sec=26.0,
+        embedding=emb2,
+    )
+    gallery_2 = vdb.load_gallery(era="2004_2014")
+    assert len(gallery_2) == 2
+
+

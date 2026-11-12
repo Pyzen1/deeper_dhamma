@@ -52,6 +52,8 @@ class SpeakerProfiler:
 
         embeddings = []
         valid_times = []
+        valid_waveforms = []
+        use_batch = type(self.encoder).__name__ == "SpeakerEncoder" and hasattr(self.encoder, "encode_waveforms_batch")
 
         for t in sample_times:
             try:
@@ -65,11 +67,18 @@ class SpeakerProfiler:
                 # Check for minimum audio energy (skip silence)
                 if torch.mean(torch.abs(waveform)).item() < 0.005:
                     continue
-                emb = self.encoder.encode_waveform(waveform)
-                embeddings.append(emb)
-                valid_times.append(t)
+                if use_batch:
+                    valid_waveforms.append(waveform)
+                    valid_times.append(t)
+                else:
+                    emb = self.encoder.encode_waveform(waveform)
+                    embeddings.append(emb)
+                    valid_times.append(t)
             except Exception:
                 continue
+
+        if use_batch and valid_waveforms:
+            embeddings = self.encoder.encode_waveforms_batch(valid_waveforms)
 
         if not embeddings:
             return {

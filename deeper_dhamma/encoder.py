@@ -5,7 +5,7 @@ SpeechBrain ECAPA-TDNN Speaker Embedding Extractor.
 import deeper_dhamma.config  # Enforces HF_HOME and TORCH_HOME under C:\ai-models
 import logging
 from pathlib import Path
-from typing import Union
+from typing import Dict, List, Union
 import numpy as np
 import torch
 from speechbrain.inference.speaker import SpeakerRecognition
@@ -80,3 +80,56 @@ class SpeakerEncoder:
             vec = vec / norm
 
         return vec
+
+    def encode_waveforms_batch(
+        self,
+        waveforms: List[Union[torch.Tensor, np.ndarray]],
+        max_batch_size: int = 32,
+    ) -> List[np.ndarray]:
+        """
+        Extracts 192-d unit-normalized embeddings for a list of 16kHz mono waveforms.
+        Groups waveforms of identical frame length into zero-padded GPU batches to avoid
+        any boundary padding artifacts while deferring CPU synchronization to a single pass.
+        """
+        if not waveforms:
+            return []
+
+        tensors_1d: List[torch.Tensor] = []
+        length_groups: Dict[int, List[int]] = {}
+        for idx, w in enumerate(waveforms):
+            if isinstance(w, np.ndarray):
+                w = torch.from_numpy(w)
+            if w.dim() > 1:
+                w = w.squeeze(0)
+            tensors_1d.append(w)
+            length_groups.setdefault(int(w.shape[-1]), []).append(idx)
+
+        results_gpu: List[torch.Tensor] = [None] * len(waveforms)  # type: ignore[list-item]
+        with torch.no_grad():
+            for length, indices in length_groups.items():
+                if length <= 0:
+                    for idx in indices:
+                        results_gpu[idx] = torch.zeros(192, device=self.device)
+                    continue
+                if len(indices) == 1:
+                    idx = indices[0]
+                    w_gpu = tensors_1d[idx].unsqueeze(0).to(self.device)
+                    emb = self.model.encode_batch(w_gpu).reshape(-1)
+                    results_gpu[idx] = emb
+                else:
+                    for start in range(0, len(indices), max_batch_size):
+                        chunk_idxs = indices[start : start + max_batch_size]
+                        batch_gpu = torch.stack([tensors_1d[i] for i in chunk_idxs], dim=0).to(self.device)
+                        batch_embs = self.model.encode_batch(batch_gpu).reshape(len(chunk_idxs), -1)
+                        for b_pos, orig_idx in enumerate(chunk_idxs):
+                            results_gpu[orig_idx] = batch_embs[b_pos]
+
+            all_vecs = torch.stack(results_gpu, dim=0).cpu().numpy()
+
+        out: List[np.ndarray] = []
+        for vec in all_vecs:
+            norm = float(np.linalg.norm(vec))
+            if norm > 0:
+                vec = vec / norm
+            out.append(vec)
+        return out

@@ -36,7 +36,14 @@ class VoiceprintDatabase:
     def __init__(self, db_path: Path | str = VOICEPRINTS_DB_PATH):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._gallery_cache: Optional[List[Dict]] = None
+        self._cache_mtime_ns: Optional[int] = None
         self._init_db()
+
+    def invalidate_cache(self) -> None:
+        """Clears the in-memory voiceprint gallery cache."""
+        self._gallery_cache = None
+        self._cache_mtime_ns = None
 
     @contextmanager
     def _get_connection(self) -> Iterator[sqlite3.Connection]:
@@ -68,6 +75,7 @@ class VoiceprintDatabase:
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_teacher_era ON voiceprints(teacher_slug, era);")
+            conn.commit()
 
     def insert_voiceprint(
         self,
@@ -91,19 +99,25 @@ class VoiceprintDatabase:
                 """,
                 (teacher_slug, display_name, era, role, source_file, start_sec, end_sec, blob),
             )
-            return cursor.lastrowid
+            conn.commit()
+            row_id = cursor.lastrowid
+        self.invalidate_cache()
+        return row_id
 
-    def load_gallery(self, era: Optional[str] = None) -> List[Dict]:
+    def _ensure_gallery_cache(self) -> List[Dict]:
+        mtime_ns = self.db_path.stat().st_mtime_ns if self.db_path.exists() else None
+        if self._gallery_cache is not None and self._cache_mtime_ns == mtime_ns:
+            return self._gallery_cache
+
         with self._get_connection() as conn:
-            if era:
-                cursor = conn.execute("SELECT * FROM voiceprints WHERE era = ?;", (era,))
-            else:
-                cursor = conn.execute("SELECT * FROM voiceprints;")
+            cursor = conn.execute("SELECT * FROM voiceprints;")
             rows = cursor.fetchall()
 
         gallery = []
         for r in rows:
             vec = np.frombuffer(r["embedding"], dtype=np.float32)
+            v_norm = float(np.linalg.norm(vec))
+            vec_normed = (vec / v_norm) if v_norm > 0 else vec
             slug = r["teacher_slug"]
             display = r["display_name"]
             if slug in LEGACY_SLUG_MAP:
@@ -116,8 +130,17 @@ class VoiceprintDatabase:
                 "role": r["role"],
                 "source_file": r["source_file"],
                 "embedding": vec,
+                "embedding_normed": vec_normed,
             })
+        self._gallery_cache = gallery
+        self._cache_mtime_ns = mtime_ns
         return gallery
+
+    def load_gallery(self, era: Optional[str] = None) -> List[Dict]:
+        all_entries = self._ensure_gallery_cache()
+        if era:
+            return [g for g in all_entries if g["era"] == era]
+        return list(all_entries)
 
     @staticmethod
     def _compute_teacher_composite(sims: List[float], top_k: int = 3) -> Tuple[float, float]:
@@ -155,13 +178,15 @@ class VoiceprintDatabase:
         if not gallery:
             return 0.0
 
-        q_norm = np.linalg.norm(query_embedding)
+        q_norm = float(np.linalg.norm(query_embedding))
         q_vec = query_embedding / q_norm if q_norm > 0 else query_embedding
         sims = []
         for entry in gallery:
-            vec = entry["embedding"]
-            v_norm = np.linalg.norm(vec)
-            v_normed = vec / v_norm if v_norm > 0 else vec
+            v_normed = entry.get("embedding_normed")
+            if v_normed is None:
+                vec = entry["embedding"]
+                v_norm = float(np.linalg.norm(vec))
+                v_normed = vec / v_norm if v_norm > 0 else vec
             sims.append(float(np.dot(q_vec, v_normed)))
 
         comp, _ = self._compute_teacher_composite(sims, top_k=top_k)
@@ -187,15 +212,17 @@ class VoiceprintDatabase:
                 "role": "guest_or_qa",
             }
 
-        q_norm = np.linalg.norm(query_embedding)
+        q_norm = float(np.linalg.norm(query_embedding))
         q_vec = query_embedding / q_norm if q_norm > 0 else query_embedding
 
         # Group gallery entries by teacher
         teacher_sims: Dict[str, Dict] = {}
         for entry in gallery:
-            vec = entry["embedding"]
-            v_norm = np.linalg.norm(vec)
-            v_normed = vec / v_norm if v_norm > 0 else vec
+            v_normed = entry.get("embedding_normed")
+            if v_normed is None:
+                vec = entry["embedding"]
+                v_norm = float(np.linalg.norm(vec))
+                v_normed = vec / v_norm if v_norm > 0 else vec
             sim = float(np.dot(q_vec, v_normed))
             slug = entry["teacher_slug"]
             if slug not in teacher_sims:
