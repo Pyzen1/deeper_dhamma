@@ -19,8 +19,8 @@ In accordance with the monastic Vinaya and the living Buddhist tradition of gene
   - `databases/pipeline_state.db`: Local operational ingestion state (archive filepaths, transcription flags, and error logs; excluded from web distribution).
   - `databases/voiceprints.db`: Era-tagged speaker embeddings gallery.
   - `databases/buddhism_lexicon.db`: Master Pali terminology, translation matrix, and phonetic rule definitions.
-- **High-Accuracy Speech-to-Text (`faster-whisper-large-v3`)**:
-  - Float16 on NVIDIA CUDA (RTX 5070 Ti, 16 GB GDDR7) running **single-worker sequential transcription (`batch_size=1` by default)** with tuned Silero VAD to guarantee 100% speech capture with zero dropped words or boundary truncation.
+- **High-Accuracy Speech-to-Text (`faster-whisper-large-v3-turbo` by default)**:
+  - Float16 on NVIDIA CUDA (RTX 5070 Ti, 16 GB GDDR7) running **single-worker sequential transcription (`model="turbo"`, `batch_size=1` by default)** with the full 32-layer `large-v3` Audio Encoder + 4-layer distilled Text Decoder (8x less GDDR7 decoder weight traffic per token, achieving **63x–99x real-time** speed and outperforming `large-v3` on gold-standard WER when paired with `TranscriptPostProcessor`).
   - **1-Slot Lookahead CPU Prefetch Pipeline & Ryzen 7 9800X3D Tuning (`cpu_threads=8`)**: Overlaps Talk $N+1$'s CPU-bound 16 kHz audio decoding, Silero VAD speech chunk detection, 128-bin log-Mel spectrogram STFT (`Transcriber.prepare_audio`), and VBR1 seek table scanning (`TranscriptionPipeline.prefetch_file`) in a background thread while the GPU is executing Talk $N$'s ASR pass, eliminating the ~7.7s inter-talk CPU stall with 100% bit-for-bit output parity.
   - In-memory waveform caching for zero-disk acoustic profiling and speaker attribution.
   - Teacher-specific prompt steering with dynamic Pali lexicon conditioning.
@@ -176,7 +176,7 @@ deeper_dhamma/
 │   ├── encoder.py              # SpeechBrain ECAPA-TDNN embeddings
 │   ├── voiceprints.py          # SQLite voiceprints vector gallery
 │   ├── profiler.py             # Acoustic clustering & multi-speaker profiling
-│   ├── asr.py                  # faster-whisper large-v3 ASR
+│   ├── asr.py                  # faster-whisper turbo / large-v3 ASR
 │   ├── aligner.py              # Speaker assignment & monologue fast-path
 │   ├── postprocess.py          # Modular ASR post-processor (stutter dedup, collocations, phonetic)
 │   ├── lexicon.py              # BuddhismLexiconDatabase interface & FTS5 search

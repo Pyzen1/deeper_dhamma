@@ -46,7 +46,7 @@ class TranscriptionPipeline:
         transcripts_db_path: Path | str = TRANSCRIPTS_DB_PATH,
         catalog_path: Optional[Path | str] = CATALOG_PATH,
         device: str = "cuda:0",
-        model_size: str = "large-v3",
+        model_size: str = "turbo",
         batch_size: int = 1,
         cpu_threads: int = 8,
         check_updates: bool = False,

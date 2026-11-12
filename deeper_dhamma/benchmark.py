@@ -42,13 +42,16 @@ def calculate_token_metrics(ref_tokens: List[str], hyp_tokens: List[str]) -> Dic
         }
 
     # If the reference transcript is a full-length talk while the hypothesis is a prefix slice
-    # (e.g. 300s benchmark), align against the matching prefix window of ref_tokens
+    # (e.g. 300s benchmark), or vice versa (curated 120s prefix reference), align windows
     eval_ref = ref_tokens
+    eval_hyp = hyp_tokens
     if len(ref_tokens) > int(len(hyp_tokens) * 1.35):
         eval_ref = ref_tokens[: int(len(hyp_tokens) * 1.10)]
+    elif len(hyp_tokens) > int(len(ref_tokens) * 1.35):
+        eval_hyp = hyp_tokens[: len(ref_tokens)]
 
     ref_set = set(eval_ref)
-    hyp_set = set(hyp_tokens)
+    hyp_set = set(eval_hyp)
 
     intersection = ref_set.intersection(hyp_set)
     precision = len(intersection) / len(hyp_set) if hyp_set else 0.0
@@ -57,7 +60,7 @@ def calculate_token_metrics(ref_tokens: List[str], hyp_tokens: List[str]) -> Dic
 
     # Compute Word Error Rate (WER) via SequenceMatcher edit operations on the aligned window
     import difflib
-    matcher = difflib.SequenceMatcher(None, eval_ref, hyp_tokens)
+    matcher = difflib.SequenceMatcher(None, eval_ref, eval_hyp)
     edits = 0
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "replace":
@@ -142,7 +145,7 @@ def discover_active_benchmarks() -> List[Dict]:
 def run_benchmarks(
     duration_sec: float = 300.0,
     device: str = "cuda:0",
-    model_size: str = "large-v3",
+    model_size: str = "turbo",
     batch_size: int = 1,
 ) -> None:
     """

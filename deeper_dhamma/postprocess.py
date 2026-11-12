@@ -31,6 +31,20 @@ VALID_ENGLISH_REDUPLICATIONS = frozenset({
     "knock", "blah", "tut", "tsk", "now", "there", "well",
 })
 
+# High-frequency everyday English words that must never be replaced by single-word
+# phonetic Pali guessing (even when spoken softly with low token probability).
+COMMON_ENGLISH_PROTECTED_WORDS = frozenset({
+    "there", "their", "where", "other", "water", "matter", "better", "under",
+    "after", "never", "every", "again", "think", "thing", "world", "place",
+    "state", "sense", "three", "through", "throw", "those", "these", "while",
+    "which", "would", "could", "should", "about", "right", "light", "night",
+    "might", "great", "first", "still", "peace", "heart", "sound", "found",
+    "going", "doing", "being", "human", "woman", "money", "happy", "story",
+    "sorry", "worry", "early", "carry", "marry", "party", "comma", "common",
+    "person", "people", "father", "mother", "sister", "brother", "little",
+    "middle", "simple", "single", "normal", "mental", "nature", "future",
+})
+
 # High-PMI spoken collocations & homophone anchors where British/Australian
 # non-rhotic vowels or Whisper language priors produce predictable acoustic slips.
 COLLOCATION_RULES: List[Dict] = [
@@ -534,7 +548,7 @@ class TranscriptPostProcessor:
                 continue  # Locked: high-confidence word
 
             clean_tok = clean_word_token(tok)
-            if len(clean_tok) < 5:
+            if len(clean_tok) < 5 or clean_tok in COMMON_ENGLISH_PROTECTED_WORDS:
                 continue
 
             skel = phonetic_skeleton(clean_tok)
@@ -552,9 +566,9 @@ class TranscriptPostProcessor:
                 if not matched_kw:
                     continue
 
-                # Check character similarity isn't completely unrelated
+                # Check character similarity isn't an unrelated English word
                 ratio = difflib.SequenceMatcher(None, clean_tok, target).ratio()
-                if ratio < 0.60:
+                if ratio < 0.75:
                     continue
 
                 # Preserve leading/trailing punctuation

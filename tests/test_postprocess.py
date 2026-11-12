@@ -339,3 +339,39 @@ def test_cli_postprocess_help_and_execution(tmp_path):
     assert "sloth and torpor" in db.get_episode("pb_cli_01")["segments"][0]["text"]
 
 
+def test_protected_common_english_words_and_turbo_default():
+    """
+    Verifies that:
+    1. Common English words (e.g. 'there') are never over-corrected to Pali terms ('thera')
+       even when token confidence is low and monastic context is present.
+    2. Transcriber, TranscriptionPipeline, and run_benchmarks default to model_size='turbo'.
+    """
+    import inspect
+    from deeper_dhamma.asr import Transcriber
+    from deeper_dhamma.benchmark import run_benchmarks
+    from deeper_dhamma.pipeline import TranscriptionPipeline
+
+    assert inspect.signature(Transcriber.__init__).parameters["model_size"].default == "turbo"
+    assert inspect.signature(TranscriptionPipeline.__init__).parameters["model_size"].default == "turbo"
+    assert inspect.signature(run_benchmarks).parameters["model_size"].default == "turbo"
+
+    processor = TranscriptPostProcessor(confidence_threshold=0.72)
+    words = [
+        {"word": "The", "start": 0.0, "end": 0.2, "prob": 0.99},
+        {"word": " senior", "start": 0.2, "end": 0.5, "prob": 0.99},
+        {"word": " monk", "start": 0.5, "end": 0.8, "prob": 0.99},
+        {"word": " was", "start": 0.8, "end": 1.0, "prob": 0.99},
+        {"word": " there", "start": 1.0, "end": 1.3, "prob": 0.42},
+        {"word": " in", "start": 1.3, "end": 1.5, "prob": 0.99},
+        {"word": " Thailand.", "start": 1.5, "end": 2.0, "prob": 0.99},
+    ]
+    text_out, words_out, changes = processor.apply_phonetic_lexicon(
+        "The senior monk was there in Thailand.",
+        words,
+    )
+    assert "there" in text_out
+    assert "thera" not in text_out
+    assert len(changes) == 0
+
+
+

@@ -219,7 +219,7 @@ def cmd_transcribe(args):
 
     pipeline = TranscriptionPipeline(
         device=args.device,
-        model_size=getattr(args, "model_size", "large-v3"),
+        model_size=getattr(args, "model_size", "turbo"),
         batch_size=getattr(args, "batch_size", 1),
         check_updates=getattr(args, "check_updates", False),
     )
@@ -541,7 +541,7 @@ def cmd_benchmark(args):
     run_benchmarks(
         duration_sec=args.duration,
         device=args.device,
-        model_size=getattr(args, "model_size", "large-v3"),
+        model_size=getattr(args, "model_size", "turbo"),
         batch_size=getattr(args, "batch_size", 1),
     )
 
@@ -565,7 +565,7 @@ def cmd_test(args):
     print(f"[*] Target audio file: {sample_file.name}")
     pipeline = TranscriptionPipeline(
         device=args.device,
-        model_size=getattr(args, "model_size", "large-v3"),
+        model_size=getattr(args, "model_size", "turbo"),
         batch_size=getattr(args, "batch_size", 1),
         check_updates=getattr(args, "check_updates", False),
     )
@@ -840,7 +840,7 @@ def main(argv=None):
     p_trans.add_argument("--limit", "-n", type=int, help="Limit number of files to process")
     p_trans.add_argument("--force", action="store_true", help="Re-transcribe files even if already in DB")
     p_trans.add_argument("--batch-size", "-b", type=int, default=1, help="Batch size for inference (default: 1 for maximum quality)")
-    p_trans.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
+    p_trans.add_argument("--model-size", "-m", type=str, default="turbo", help="Whisper model size (default: turbo)")
     p_trans.add_argument("--archive-dir", default=ARCHIVE_DIR, help="Audio archive directory")
     p_trans.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
     p_trans.add_argument("--retry-errors", action="store_true", help="Retry transcribing episodes with previous recorded errors")
@@ -924,7 +924,7 @@ def main(argv=None):
     p_bench.add_argument("--run", action="store_true", help="Execute benchmark evaluations")
     p_bench.add_argument("--duration", "-d", type=float, default=300.0, help="Benchmark duration in seconds (default: 300)")
     p_bench.add_argument("--batch-size", "-b", type=int, default=1, help="Batch size for inference (default: 1)")
-    p_bench.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
+    p_bench.add_argument("--model-size", "-m", type=str, default="turbo", help="Whisper model size (default: turbo)")
     p_bench.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
     p_bench.set_defaults(func=cmd_benchmark, subparser=p_bench)
 
@@ -934,7 +934,7 @@ def main(argv=None):
     p_test.add_argument("--file", "-f", type=str, help="Specific audio file to test")
     p_test.add_argument("--duration", "-d", type=float, default=120.0, help="Test duration in seconds (default: 120)")
     p_test.add_argument("--batch-size", "-b", type=int, default=1, help="Batch size for inference (default: 1)")
-    p_test.add_argument("--model-size", "-m", type=str, default="large-v3", help="Whisper model size (default: large-v3)")
+    p_test.add_argument("--model-size", "-m", type=str, default="turbo", help="Whisper model size (default: turbo)")
     p_test.add_argument("--device", default="cuda:0", help="Compute device (default: cuda:0)")
     p_test.add_argument("--check-updates", action="store_true", help="Check Hugging Face Hub for newer model snapshots/checkpoints before running")
     p_test.set_defaults(func=cmd_test, subparser=p_test)

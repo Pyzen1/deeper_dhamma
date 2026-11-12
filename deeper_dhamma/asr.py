@@ -206,7 +206,7 @@ class Transcriber:
 
     def __init__(
         self,
-        model_size: str = "large-v3",
+        model_size: str = "turbo",
         device: str = "cuda",
         compute_type: str = "float16",
         initial_prompt: Optional[str] = PALI_PROMPT,

@@ -46,7 +46,7 @@ Speaker embeddings extracted via ECAPA-TDNN consist of 512-dimensional float32 v
                          v                                                 v
            +---------------------------+                     +---------------------------+
            |    faster-whisper ASR     |                     |    Speaker Diarization    |
-           |      (large-v3 model)     |                     |    & Voice Activity (VAD) |
+           |  (turbo / large-v3 model) |                     |    & Voice Activity (VAD) |
            +---------------------------+                     +---------------------------+
                          |                                                 |
                          | Text + Word Timestamps                          | Speaker Segments
@@ -87,7 +87,7 @@ Speaker embeddings extracted via ECAPA-TDNN consist of 512-dimensional float32 v
 
 | Pipeline Stage | Model / Tool | Hardware Target | Storage Location |
 | :--- | :--- | :--- | :--- |
-| **Speech-to-Text (ASR)** | `faster-whisper` (`Systran/faster-whisper-large-v3`) | NVIDIA RTX 5070 Ti (16GB VRAM, float16, `batch_size=1`, `cpu_threads=8`) | `C:\ai-models\cache\huggingface` |
+| **Speech-to-Text (ASR)** | `faster-whisper` (`mobiuslabsgmbh/faster-whisper-large-v3-turbo` default; `large-v3` optional) | NVIDIA RTX 5070 Ti (16GB VRAM, float16, `batch_size=1`, `cpu_threads=8`) | `C:\ai-models\cache\huggingface` |
 | **CPU Lookahead Prefetch** | `TranscriptionPipeline.prefetch_file` + `Transcriber.prepare_audio` | AMD Ryzen 7 9800X3D (Background Thread: Decode + Silero VAD + 128-bin Mel STFT + VBR1 Scan) | In-Memory RAM (~400 MB 1-slot buffer) |
 | **Voice Activity & Segmentation** | `silero-vad` + energy-based chunker | CPU (ONNX Runtime, pre-computed during lookahead prefetch) | `C:\ai-models\cache\torch` |
 | **Speaker Embeddings** | `speechbrain/spkrec-ecapa-voxceleb` (ECAPA-TDNN) | CUDA (float32, 192-d) | `C:\ai-models\cache\huggingface` |
@@ -97,7 +97,8 @@ Speaker embeddings extracted via ECAPA-TDNN consist of 512-dimensional float32 v
 
 ### 4.1 Hardware Concurrency & Memory-Bandwidth Architecture (RTX 5070 Ti + Ryzen 7 9800X3D)
 
-Autoregressive `large-v3` decoding at `batch_size=1` (`beam_size=5`) streams ~3.1 GB of FP16 model weights from GDDR7 VRAM on every token step, making single-talk inference **memory-bandwidth bound** (896 GB/s on the RTX 5070 Ti) rather than compute bound:
+Autoregressive Whisper decoding at `batch_size=1` (`beam_size=5`) streams decoder weights from GDDR7 VRAM on every token step, making single-talk inference **memory-bandwidth bound** (896 GB/s on the RTX 5070 Ti) rather than compute bound:
+- **Default `turbo` (`faster-whisper-large-v3-turbo`) Architecture**: Retains the identical 32-layer Audio Encoder of `large-v3` (`1,500 MB`, run once per 30s window) while distilling the autoregressive Text Decoder from 32 layers (`1,600 MB`) down to 4 layers (`200 MB`). This cuts GDDR7 VRAM bus traffic by **8x per token step**, achieving **63x–99x real-time** speed (~55s per 1-hour talk vs ~158s on `large-v3`) while scoring **4.6% WER (`0.9805` F1)** on the 1997 retreat benchmark and **14.9% WER (`0.9400` F1)** on the 2025 benchmark (beating `large-v3`'s `16.7%` WER).
 - **Why Parallel GPU `batch_size=1` Workers Are Avoided**: Running 2 or 3 concurrent `batch_size=1` workers on the same GPU does not coalesce weight reads across talks; instead, uncoordinated GEMV streams contend for GDDR7 memory bandwidth, thrash the L2 cache, and incur Windows WDDM context-switching overhead—empirically reducing aggregate real-time throughput by **14% (2 workers)** to **29% (3 workers)**. Furthermore, sharing a single `WhisperModel` across Python threads contends on the GIL and shares CTranslate2's temperature-fallback RNG state.
 - **Zero-Loss CPU/GPU Overlap (`prefetch_file` + `prepare_audio`)**: To maximize single-GPU utilization without altering `batch_size=1` transcription fidelity, `cmd_transcribe` triggers a 1-slot background CPU prefetch (`ThreadPoolExecutor(max_workers=1)`) for Talk $N+1$ as soon as Talk $N$ enters its GPU ASR pass (`on_gpu_asr_start`). While the RTX 5070 Ti spends ~158s decoding Talk $N$, the Ryzen 7 9800X3D decodes Talk $N+1$ into 16 kHz mono PCM, runs Silero VAD, computes the 128-bin log-Mel spectrogram features, and builds the VBR1 seek trailer in ~7.7s—feeding the GPU continuously with zero inter-talk CPU stall and 100% bit-for-bit deterministic output parity.
 
