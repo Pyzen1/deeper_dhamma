@@ -227,27 +227,72 @@ def cmd_transcribe(args):
     failed = 0
     show_progress = not getattr(args, "no_progress", False)
 
-    for idx, f in enumerate(to_process, 1):
-        print(f"\n[{idx}/{len(to_process)}] Processing: {f.name}")
-        try:
-            result = pipeline.process_file(
-                audio_path=f,
-                max_duration_sec=args.max_duration,
-                retry_errors=getattr(args, "retry_errors", False),
-                show_progress=show_progress,
-            )
-            if result.get("status") == "skipped":
-                print(f"    [-] Skipped by pre-flight check: {result.get('reason')}")
-            else:
-                completed += 1
-                print(f"    [✓] Finished in {result['elapsed_sec']}s: {result['episode_id']} ({result['turns_count']} turns)")
-        except KeyboardInterrupt:
-            print("\n\n[!] Transcription cancelled by user (Ctrl+C). Pipeline stopped safely.")
-            print("[i] No partial data was committed. Re-running will cleanly resume or re-transcribe.")
-            sys.exit(130)
-        except Exception as e:
-            failed += 1
-            logger.error(f"    [!] Error transcribing {f.name}: {e}")
+    from concurrent.futures import ThreadPoolExecutor
+
+    prefetch_executor = ThreadPoolExecutor(max_workers=1) if len(to_process) > 1 else None
+    next_prefetch_future = None
+
+    try:
+        for idx, f in enumerate(to_process, 1):
+            print(f"\n[{idx}/{len(to_process)}] Processing: {f.name}")
+            current_prefetched = None
+            if next_prefetch_future is not None:
+                try:
+                    current_prefetched = next_prefetch_future.result()
+                except Exception as pre_err:
+                    logger.debug(f"CPU prefetch fallback for {f.name}: {pre_err}")
+                next_prefetch_future = None
+
+            next_file = to_process[idx] if idx < len(to_process) else None
+
+            def _trigger_next_prefetch(nf=next_file):
+                nonlocal next_prefetch_future
+                if (
+                    prefetch_executor is not None
+                    and nf is not None
+                    and next_prefetch_future is None
+                    and hasattr(pipeline, "prefetch_file")
+                ):
+                    next_prefetch_future = prefetch_executor.submit(
+                        pipeline.prefetch_file,
+                        nf,
+                        args.max_duration,
+                    )
+
+            try:
+                if len(to_process) > 1:
+                    result = pipeline.process_file(
+                        audio_path=f,
+                        max_duration_sec=args.max_duration,
+                        retry_errors=getattr(args, "retry_errors", False),
+                        show_progress=show_progress,
+                        prefetched=current_prefetched,
+                        on_gpu_asr_start=_trigger_next_prefetch,
+                    )
+                else:
+                    result = pipeline.process_file(
+                        audio_path=f,
+                        max_duration_sec=args.max_duration,
+                        retry_errors=getattr(args, "retry_errors", False),
+                        show_progress=show_progress,
+                    )
+                if result.get("status") == "skipped":
+                    print(f"    [-] Skipped by pre-flight check: {result.get('reason')}")
+                    _trigger_next_prefetch()
+                else:
+                    completed += 1
+                    print(f"    [✓] Finished in {result['elapsed_sec']}s: {result['episode_id']} ({result['turns_count']} turns)")
+            except KeyboardInterrupt:
+                print("\n\n[!] Transcription cancelled by user (Ctrl+C). Pipeline stopped safely.")
+                print("[i] No partial data was committed. Re-running will cleanly resume or re-transcribe.")
+                sys.exit(130)
+            except Exception as e:
+                failed += 1
+                logger.error(f"    [!] Error transcribing {f.name}: {e}")
+                _trigger_next_prefetch()
+    finally:
+        if prefetch_executor is not None:
+            prefetch_executor.shutdown(wait=False, cancel_futures=True)
 
     print("\n" + "=" * 75)
     print(f"[✓] Batch transcription complete: {completed} successful, {failed} failed.")

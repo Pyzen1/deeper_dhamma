@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from deeper_dhamma.config import (
     CATALOG_PATH,
@@ -47,9 +47,13 @@ class TranscriptionPipeline:
         device: str = "cuda:0",
         model_size: str = "large-v3",
         batch_size: int = 1,
+        cpu_threads: int = 8,
         check_updates: bool = False,
     ):
-        logger.info(f"[*] Initializing TranscriptionPipeline components (model={model_size}, batch_size={batch_size})...")
+        logger.info(
+            f"[*] Initializing TranscriptionPipeline components "
+            f"(model={model_size}, batch_size={batch_size}, cpu_threads={cpu_threads})..."
+        )
         self.voiceprints_db = VoiceprintDatabase(voiceprints_db_path)
         self.encoder = SpeakerEncoder(device=device, check_updates=check_updates)
         self.transcriber = Transcriber(
@@ -57,6 +61,7 @@ class TranscriptionPipeline:
             device="cuda",
             compute_type="float16",
             batch_size=batch_size,
+            cpu_threads=cpu_threads,
             local_files_only=not check_updates,
         )
         self.aligner = SpeakerAligner(voiceprint_db=self.voiceprints_db, encoder=self.encoder)
@@ -83,6 +88,55 @@ class TranscriptionPipeline:
 
         logger.info("[✓] All pipeline components loaded and ready on GPU.")
 
+    def prefetch_file(
+        self,
+        audio_path: Path | str,
+        max_duration_sec: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Pre-decodes 16kHz mono audio, pre-computes Silero VAD speech chunks + 128-bin
+        log-Mel spectrogram features, and scans the VBR1 seek table on CPU so the next
+        talk is ready in RAM before the GPU finishes the current talk.
+        """
+        audio_path = Path(audio_path)
+        t_pre0 = time.time()
+        info = get_audio_info(audio_path)
+        total_dur = info["duration"]
+        process_dur = min(total_dur, max_duration_sec) if max_duration_sec else total_dur
+
+        waveform_16k, _ = load_audio_segment(
+            audio_path,
+            start_sec=0.0,
+            end_sec=process_dur,
+            target_sr=16000,
+        )
+        audio_np = waveform_16k.squeeze(0).numpy()
+        if len(audio_np) > 0:
+            actual_decoded_dur = round(float(len(audio_np)) / 16000.0, 3)
+            process_dur = (
+                actual_decoded_dur
+                if not max_duration_sec
+                else min(actual_decoded_dur, max_duration_sec)
+            )
+
+        prepared_asr = None
+        if self.transcriber.batch_size == 1:
+            prepared_asr = self.transcriber.prepare_audio(audio_np, vad_filter=True)
+
+        vbr_trailer = self.calibrator.build_vbr_trailer(audio_path)
+        return {
+            "audio_path": str(audio_path.resolve()),
+            "max_duration_sec": max_duration_sec,
+            "info": info,
+            "total_dur": total_dur,
+            "process_dur": process_dur,
+            "waveform_16k": waveform_16k,
+            "audio_np": audio_np,
+            "prepared_asr": prepared_asr,
+            "vbr_trailer": vbr_trailer,
+            "prefetch_elapsed_sec": round(time.time() - t_pre0, 2),
+        }
+
     def process_file(
         self,
         audio_path: Path | str,
@@ -92,6 +146,8 @@ class TranscriptionPipeline:
         export_words_blob: bool = True,
         show_progress: bool = True,
         progress_callback: Optional[Callable[[float, float, str], None]] = None,
+        prefetched: Optional[Dict[str, Any]] = None,
+        on_gpu_asr_start: Optional[Callable[[], None]] = None,
     ) -> Dict:
         audio_path = Path(audio_path)
         t0 = time.time()
@@ -155,18 +211,37 @@ class TranscriptionPipeline:
             }
 
         try:
-            info = get_audio_info(audio_path)
-            total_dur = info["duration"]
-            process_dur = min(total_dur, max_duration_sec) if max_duration_sec else total_dur
-            logger.info(f"    Total duration: {total_dur:.1f}s | Processing: {process_dur:.1f}s")
+            use_prefetched = (
+                prefetched is not None
+                and prefetched.get("audio_path") == str(audio_path.resolve())
+                and prefetched.get("max_duration_sec") == max_duration_sec
+            )
+            if use_prefetched:
+                total_dur = prefetched["total_dur"]
+                process_dur = prefetched["process_dur"]
+                waveform_16k = prefetched["waveform_16k"]
+                audio_np = prefetched["audio_np"]
+                prepared_asr = prefetched.get("prepared_asr")
+                prefetched_vbr_trailer = prefetched.get("vbr_trailer")
+                logger.info(
+                    f"    Total duration: {total_dur:.1f}s | Processing: {process_dur:.1f}s "
+                    f"(CPU audio+VAD+Mel prefetched in {prefetched.get('prefetch_elapsed_sec', 0.0):.2f}s)"
+                )
+            else:
+                info = get_audio_info(audio_path)
+                total_dur = info["duration"]
+                process_dur = min(total_dur, max_duration_sec) if max_duration_sec else total_dur
+                logger.info(f"    Total duration: {total_dur:.1f}s | Processing: {process_dur:.1f}s")
 
-            # 1. Single In-Memory Audio Loading & Resample (zero repeated disk I/O)
-            logger.info(f"    Loading {process_dur:.1f}s audio at 16kHz mono into RAM...")
-            waveform_16k, _ = load_audio_segment(audio_path, start_sec=0.0, end_sec=process_dur, target_sr=16000)
-            audio_np = waveform_16k.squeeze(0).numpy()
-            if len(audio_np) > 0:
-                actual_decoded_dur = round(float(len(audio_np)) / 16000.0, 3)
-                process_dur = actual_decoded_dur if not max_duration_sec else min(actual_decoded_dur, max_duration_sec)
+                # 1. Single In-Memory Audio Loading & Resample (zero repeated disk I/O)
+                logger.info(f"    Loading {process_dur:.1f}s audio at 16kHz mono into RAM...")
+                waveform_16k, _ = load_audio_segment(audio_path, start_sec=0.0, end_sec=process_dur, target_sr=16000)
+                audio_np = waveform_16k.squeeze(0).numpy()
+                if len(audio_np) > 0:
+                    actual_decoded_dur = round(float(len(audio_np)) / 16000.0, 3)
+                    process_dur = actual_decoded_dur if not max_duration_sec else min(actual_decoded_dur, max_duration_sec)
+                prepared_asr = None
+                prefetched_vbr_trailer = None
 
             # 2. Fast Acoustic Pre-Profiling (in-memory slice evaluation)
             logger.info(f"    Running fast acoustic pre-profiling across {process_dur:.1f}s...")
@@ -223,6 +298,11 @@ class TranscriptionPipeline:
             # 3. Speech-to-Text with Teacher-Specific Prompt Steering (hotwords disabled to avoid logit-bias looping)
             talk_prompt = self.lexicon_db.get_prompt_steering_terms(teacher_slugs=active_slugs, limit=30)
             logger.info(f"    Transcribing with faster-whisper (sequential, float16, Silero VAD, {len(active_slugs)} teacher profile(s))...")
+            if on_gpu_asr_start is not None:
+                try:
+                    on_gpu_asr_start()
+                except Exception as cb_err:
+                    logger.debug(f"Prefetch callback skipped: {cb_err}")
             t_asr0 = time.time()
             asr_segments = self.transcriber.transcribe(
                 audio_np,
@@ -230,6 +310,7 @@ class TranscriptionPipeline:
                 hotwords=None,
                 show_progress=show_progress,
                 progress_callback=progress_callback,
+                prepared_asr=prepared_asr,
             )
             logger.info(f"    ASR complete in {time.time() - t_asr0:.2f}s ({len(asr_segments)} segments).")
 
@@ -276,6 +357,7 @@ class TranscriptionPipeline:
                     ep_id=meta["id"],
                     filename_stem=audio_path.stem,
                     audio_path=audio_path,
+                    vbr_trailer=prefetched_vbr_trailer,
                 )
 
             elapsed = time.time() - t0
@@ -311,6 +393,7 @@ class TranscriptionPipeline:
         ep_id: str,
         filename_stem: str,
         audio_path: Optional[Path] = None,
+        vbr_trailer: Optional[bytes] = None,
     ) -> None:
         """Serializes physical word timestamps and optional VBR1 seek trailer into compact binary BLOB."""
         import struct
@@ -323,10 +406,13 @@ class TranscriptionPipeline:
             dur_ms = max(1, min(65535, en_ms - st_ms))
             buf.extend(struct.pack("<IH", st_ms, dur_ms))
 
-        if audio_path is not None:
-            vbr_trailer = self.calibrator.build_vbr_trailer(audio_path)
+        if vbr_trailer is not None:
             if vbr_trailer:
                 buf.extend(vbr_trailer)
+        elif audio_path is not None:
+            computed_trailer = self.calibrator.build_vbr_trailer(audio_path)
+            if computed_trailer:
+                buf.extend(computed_trailer)
 
         blob_bytes = bytes(buf)
 

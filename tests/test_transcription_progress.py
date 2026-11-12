@@ -151,3 +151,96 @@ def test_cli_transcribe_no_progress_flag():
         args = mock_cmd.call_args[0][0]
         assert args.no_progress is True
 
+
+def test_transcriber_cpu_threads_and_prepare_audio():
+    """Verifies that Transcriber configures cpu_threads=8 by default and pre-computes VAD+Mel features."""
+    import numpy as np
+
+    mock_model = MagicMock()
+    mock_model.feature_extractor.sampling_rate = 16000
+    mock_model.feature_extractor.return_value = np.zeros((128, 3000), dtype=np.float32)
+
+    with patch("deeper_dhamma.asr.WhisperModel", return_value=mock_model) as mock_cls:
+        transcriber = Transcriber(model_size="large-v3", device="cuda", compute_type="float16")
+        mock_cls.assert_called_once()
+        assert mock_cls.call_args.kwargs.get("cpu_threads") == 8
+
+    dummy_audio = np.zeros(5 * 16000, dtype=np.float32)
+    with (
+        patch("faster_whisper.vad.get_speech_timestamps", return_value=[{"start": 0, "end": 16000}]),
+        patch("faster_whisper.vad.collect_chunks", return_value=([dummy_audio[:16000]], [{}])),
+    ):
+        prep = transcriber.prepare_audio(dummy_audio, vad_filter=True)
+        assert prep["vad_filter"] is True
+        assert prep["sampling_rate"] == 16000
+        assert prep["duration"] == 5.0
+        assert prep["duration_after_vad"] == 1.0
+        assert prep["speech_chunks"] == [{"start": 0, "end": 16000}]
+        assert prep["features"].shape == (128, 3000)
+
+
+def test_cli_batch_transcribe_cpu_prefetch_lookahead(tmp_path):
+    """Verifies that batch transcription overlaps Talk N+1 CPU prefetch with Talk N GPU ASR."""
+    import argparse
+    from deeper_dhamma.cli import cmd_transcribe
+
+    f1 = tmp_path / "talk_01.mp3"
+    f2 = tmp_path / "talk_02.mp3"
+    f1.write_bytes(b"ID3" + b"\x00" * 1024)
+    f2.write_bytes(b"ID3" + b"\x00" * 1024)
+
+    mock_tdb = MagicMock()
+    mock_tdb.has_episode.return_value = False
+
+    mock_pipeline = MagicMock()
+    prefetched_payload = {"audio_path": str(f2.resolve()), "max_duration_sec": 60.0}
+    mock_pipeline.prefetch_file.return_value = prefetched_payload
+
+    received_prefetched = []
+
+    def fake_process_file(**kwargs):
+        received_prefetched.append(kwargs.get("prefetched"))
+        cb = kwargs.get("on_gpu_asr_start")
+        if cb:
+            cb()
+        return {
+            "status": "ok",
+            "elapsed_sec": 1.2,
+            "episode_id": Path(kwargs["audio_path"]).stem,
+            "turns_count": 5,
+        }
+
+    mock_pipeline.process_file.side_effect = fake_process_file
+
+    args = argparse.Namespace(
+        archive_dir=str(tmp_path),
+        id=None,
+        file=None,
+        year=None,
+        series=None,
+        all=True,
+        limit=None,
+        force=False,
+        max_duration=60.0,
+        device="cuda:0",
+        model_size="large-v3",
+        batch_size=1,
+        check_updates=False,
+        no_progress=True,
+        retry_errors=False,
+    )
+
+    from pathlib import Path
+    with (
+        patch("deeper_dhamma.storage.TranscriptDatabase", return_value=mock_tdb),
+        patch("deeper_dhamma.pipeline.TranscriptionPipeline", return_value=mock_pipeline),
+        patch("deeper_dhamma.export_web.export_static_site"),
+    ):
+        cmd_transcribe(args)
+
+    assert mock_pipeline.process_file.call_count == 2
+    mock_pipeline.prefetch_file.assert_called_once_with(f2, 60.0)
+    assert received_prefetched[0] is None
+    assert received_prefetched[1] == prefetched_payload
+
+

@@ -6,8 +6,9 @@ import deeper_dhamma.config  # Enforces HF_HOME and DLL paths under C:\ai-models
 import logging
 import shutil
 import sys
+import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 import numpy as np
 from faster_whisper import WhisperModel
 
@@ -18,6 +19,13 @@ PALI_PROMPT = (
     "Rains Retreat, Vassa, jhana, samadhi, anapanasati, patimokkha, sila, panna, "
     "anatta, anicca, dukkha, paticcasamuppada, nimitta, kamma, vipassana, samatha, "
     "bhavana, sangha, bhikkhu, bhikkhuni, dhamma, buddha, ariyasacca."
+)
+
+DEFAULT_VAD_PARAMS: Dict[str, Any] = dict(
+    threshold=0.20,
+    min_speech_duration_ms=100,
+    min_silence_duration_ms=800,
+    speech_pad_ms=600,
 )
 
 
@@ -142,24 +150,42 @@ class TranscriptionProgressBar:
         self.file.write(line)
         self.file.flush()
 
-    def close(self):
+    def close(self, completed: Optional[bool] = None):
         if self.closed:
             return
         self.closed = True
         elapsed = max(0.001, time.time() - self.start_time)
-        rtf = self.total_sec / elapsed
         tot_s = self._format_time(self.total_sec)
         elp_s = self._format_time(elapsed)
 
+        # Default to completed=True unless explicitly marked incomplete/interrupted
+        if completed is None:
+            completed = True
+
         cols = shutil.get_terminal_size((100, 24)).columns
         bar_w = 20 if cols >= 110 else 14
-        bar = "=" * bar_w
+        if completed:
+            bar = "=" * bar_w
+            rtf = self.total_sec / elapsed if elapsed > 0.05 else 0.0
+            if self.is_tty:
+                summary = f"\r   [✓] {self.desc}: [{bar}] 100.0% | {tot_s} in {elp_s} ({rtf:.1f}x RT) | {self.turn_count} turns"
+            else:
+                summary = f"   [✓] {self.desc}: 100.0% | {tot_s} in {elp_s} ({rtf:.1f}x RT) | {self.turn_count} turns"
+        else:
+            pct = min(100.0, (self.current_sec / self.total_sec) * 100.0)
+            filled = int(round((pct / 100.0) * bar_w))
+            bar = "=" * filled + "." * (bar_w - filled)
+            cur_s = self._format_time(self.current_sec)
+            rtf = self.current_sec / elapsed if elapsed > 0.05 else 0.0
+            if self.is_tty:
+                summary = f"\r   [-] {self.desc} stopped: [{bar}] {pct:5.1f}% | {cur_s}/{tot_s} ({rtf:.1f}x RT) | {self.turn_count} turns"
+            else:
+                summary = f"   [-] {self.desc} stopped: {pct:5.1f}% | {cur_s}/{tot_s} ({rtf:.1f}x RT) | {self.turn_count} turns"
+
         if self.is_tty:
-            summary = f"\r   [✓] {self.desc}: [{bar}] 100.0% | {tot_s} in {elp_s} ({rtf:.1f}x RT) | {self.turn_count} turns"
             self.file.write(summary[:cols - 1].ljust(cols - 1) + "\n")
         else:
-            summary = f"   [✓] {self.desc}: 100.0% | {tot_s} in {elp_s} ({rtf:.1f}x RT) | {self.turn_count} turns\n"
-            self.file.write(summary)
+            self.file.write(summary + "\n")
         self.file.flush()
 
     def __enter__(self):
@@ -168,7 +194,7 @@ class TranscriptionProgressBar:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        self.close(completed=(exc_type is None))
 
 
 class Transcriber:
@@ -185,29 +211,40 @@ class Transcriber:
         compute_type: str = "float16",
         initial_prompt: Optional[str] = PALI_PROMPT,
         batch_size: int = 1,
+        cpu_threads: int = 8,
         local_files_only: bool = True,
     ):
         self.device = device
         self.compute_type = compute_type
         self.initial_prompt = initial_prompt
         self.batch_size = batch_size
+        self.cpu_threads = cpu_threads
+        self._vad_lock = threading.Lock()
 
         if not local_files_only:
-            logger.info(f"Checking Hugging Face Hub for faster-whisper '{model_size}' updates...")
+            logger.info(
+                f"Checking Hugging Face Hub for faster-whisper '{model_size}' updates "
+                f"(cpu_threads={cpu_threads})..."
+            )
             self.model = WhisperModel(
                 model_size_or_path=model_size,
                 device=self.device,
                 compute_type=self.compute_type,
+                cpu_threads=self.cpu_threads,
                 local_files_only=False,
             )
         else:
-            logger.info(f"Loading faster-whisper '{model_size}' on {device} ({compute_type}, batch_size={batch_size})...")
+            logger.info(
+                f"Loading faster-whisper '{model_size}' on {device} "
+                f"({compute_type}, batch_size={batch_size}, cpu_threads={cpu_threads})..."
+            )
             # Local-first load to avoid unnecessary online Hugging Face validation pings
             try:
                 self.model = WhisperModel(
                     model_size_or_path=model_size,
                     device=self.device,
                     compute_type=self.compute_type,
+                    cpu_threads=self.cpu_threads,
                     local_files_only=True,
                 )
             except Exception:
@@ -217,6 +254,7 @@ class Transcriber:
                     model_size_or_path=model_size,
                     device=self.device,
                     compute_type=self.compute_type,
+                    cpu_threads=self.cpu_threads,
                     local_files_only=False,
                 )
         if self.batch_size > 1:
@@ -226,6 +264,129 @@ class Transcriber:
         else:
             self.batched_pipeline = None
         logger.info("Whisper model ready.")
+
+    def prepare_audio(
+        self,
+        audio_16k_mono: np.ndarray,
+        vad_filter: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Pre-computes CPU-bound Silero VAD speech chunks and 128-bin log-Mel spectrogram
+        features so they can be overlapped in a background thread while the GPU is busy
+        transcribing the preceding talk. Produces 100% bit-for-bit identical inputs to
+        WhisperModel.transcribe().
+        """
+        from faster_whisper.vad import VadOptions, collect_chunks, get_speech_timestamps
+
+        fe = getattr(self.model, "feature_extractor", None)
+        sampling_rate = getattr(fe, "sampling_rate", 16000)
+        if not isinstance(sampling_rate, int):
+            sampling_rate = 16000
+        duration = float(audio_16k_mono.shape[0]) / sampling_rate if len(audio_16k_mono) > 0 else 0.0
+
+        if vad_filter:
+            vad_opts = VadOptions(**DEFAULT_VAD_PARAMS)
+            with self._vad_lock:
+                speech_chunks = get_speech_timestamps(
+                    audio_16k_mono,
+                    vad_opts,
+                    sampling_rate=sampling_rate,
+                )
+            audio_chunks, _ = collect_chunks(
+                audio_16k_mono,
+                speech_chunks,
+                sampling_rate=sampling_rate,
+            )
+            vad_audio = (
+                np.concatenate(audio_chunks, axis=0)
+                if audio_chunks
+                else np.array([], dtype=np.float32)
+            )
+            duration_after_vad = float(vad_audio.shape[0]) / sampling_rate
+        else:
+            speech_chunks = None
+            vad_audio = audio_16k_mono
+            duration_after_vad = duration
+
+        features = self.model.feature_extractor(vad_audio, chunk_length=None)
+        return {
+            "speech_chunks": speech_chunks,
+            "features": features,
+            "duration": duration,
+            "duration_after_vad": duration_after_vad,
+            "sampling_rate": sampling_rate,
+            "vad_filter": vad_filter,
+        }
+
+    def _transcribe_from_prepared(
+        self,
+        prepared_asr: Dict[str, Any],
+        active_prompt: Optional[str],
+        hotwords: Optional[str],
+        word_timestamps: bool,
+        hallucination_silence_threshold: Optional[float],
+        condition_on_previous_text: bool,
+    ) -> Iterable[Any]:
+        """
+        Executes WhisperModel.generate_segments() directly on pre-computed Mel features
+        and restores Silero VAD timestamps without repeating CPU VAD/STFT work.
+        """
+        from faster_whisper.tokenizer import Tokenizer
+        from faster_whisper.transcribe import (
+            TranscriptionOptions,
+            get_suppressed_tokens,
+            restore_speech_timestamps,
+        )
+
+        tokenizer = Tokenizer(
+            self.model.hf_tokenizer,
+            self.model.model.is_multilingual,
+            task="transcribe",
+            language="en",
+        )
+        options = TranscriptionOptions(
+            beam_size=5,
+            best_of=5,
+            patience=1,
+            length_penalty=1,
+            repetition_penalty=1,
+            no_repeat_ngram_size=0,
+            log_prob_threshold=-1.0,
+            no_speech_threshold=0.6,
+            compression_ratio_threshold=2.4,
+            condition_on_previous_text=condition_on_previous_text,
+            prompt_reset_on_temperature=0.5,
+            temperatures=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+            initial_prompt=active_prompt,
+            prefix=None,
+            suppress_blank=True,
+            suppress_tokens=get_suppressed_tokens(tokenizer, [-1]),
+            without_timestamps=False,
+            max_initial_timestamp=1.0,
+            word_timestamps=word_timestamps,
+            prepend_punctuations="\"'“¿([{-",
+            append_punctuations="\"'.。,，!！?？:：”)]}、",
+            multilingual=False,
+            max_new_tokens=None,
+            clip_timestamps="0",
+            hallucination_silence_threshold=hallucination_silence_threshold,
+            hotwords=hotwords,
+        )
+        segments_gen = self.model.generate_segments(
+            prepared_asr["features"],
+            tokenizer,
+            options,
+            log_progress=False,
+            encoder_output=None,
+        )
+        speech_chunks = prepared_asr.get("speech_chunks")
+        if speech_chunks:
+            segments_gen = restore_speech_timestamps(
+                segments_gen,
+                speech_chunks,
+                prepared_asr.get("sampling_rate", 16000),
+            )
+        return segments_gen
 
     def transcribe(
         self,
@@ -238,6 +399,7 @@ class Transcriber:
         condition_on_previous_text: bool = False,
         show_progress: bool = True,
         progress_callback: Optional[Callable[[float, float, str], None]] = None,
+        prepared_asr: Optional[Dict[str, Any]] = None,
     ) -> List[Dict]:
         """
         Transcribes 16kHz mono float32 numpy audio.
@@ -245,12 +407,7 @@ class Transcriber:
         Displays an in-place live updating progress bar unless show_progress=False.
         """
         active_prompt = prompt or self.initial_prompt
-        vad_params = dict(
-            threshold=0.20,
-            min_speech_duration_ms=100,
-            min_silence_duration_ms=800,
-            speech_pad_ms=600,
-        )
+        vad_params = dict(DEFAULT_VAD_PARAMS)
         if self.batched_pipeline is not None and vad_filter:
             segments_gen, _ = self.batched_pipeline.transcribe(
                 audio_16k_mono,
@@ -264,18 +421,33 @@ class Transcriber:
                 hallucination_silence_threshold=hallucination_silence_threshold,
                 condition_on_previous_text=condition_on_previous_text,
             )
-        else:
-            segments_gen, _ = self.model.transcribe(
-                audio_16k_mono,
-                language="en",
-                initial_prompt=active_prompt,
+        elif (
+            prepared_asr is not None
+            and self.batched_pipeline is None
+            and prepared_asr.get("vad_filter") == vad_filter
+            and type(self.model).__name__ == "WhisperModel"
+        ):
+            segments_gen = self._transcribe_from_prepared(
+                prepared_asr=prepared_asr,
+                active_prompt=active_prompt,
                 hotwords=hotwords,
-                vad_filter=vad_filter,
-                vad_parameters=vad_params,
                 word_timestamps=word_timestamps,
                 hallucination_silence_threshold=hallucination_silence_threshold,
                 condition_on_previous_text=condition_on_previous_text,
             )
+        else:
+            with self._vad_lock:
+                segments_gen, _ = self.model.transcribe(
+                    audio_16k_mono,
+                    language="en",
+                    initial_prompt=active_prompt,
+                    hotwords=hotwords,
+                    vad_filter=vad_filter,
+                    vad_parameters=vad_params,
+                    word_timestamps=word_timestamps,
+                    hallucination_silence_threshold=hallucination_silence_threshold,
+                    condition_on_previous_text=condition_on_previous_text,
+                )
 
         total_dur_sec = float(len(audio_16k_mono)) / 16000.0 if len(audio_16k_mono) > 0 else 0.1
         pbar = None
@@ -290,6 +462,7 @@ class Transcriber:
             "thank you for watching",
             "thanks for watching",
         }
+        completed_cleanly = False
         try:
             for s in segments_gen:
                 clean_text = s.text.strip()
@@ -351,8 +524,9 @@ class Transcriber:
                         progress_callback(float(seg_end), total_dur_sec, clean_text)
                     except Exception:
                         pass
+            completed_cleanly = True
         finally:
             if pbar is not None:
-                pbar.close()
+                pbar.close(completed=completed_cleanly)
 
         return segments
