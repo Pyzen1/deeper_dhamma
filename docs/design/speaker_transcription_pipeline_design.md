@@ -91,7 +91,8 @@ Speaker embeddings extracted via ECAPA-TDNN consist of 512-dimensional float32 v
 | **CPU Lookahead Prefetch** | `TranscriptionPipeline.prefetch_file` + `Transcriber.prepare_audio` | AMD Ryzen 7 9800X3D (Background Thread: Decode + Silero VAD + 128-bin Mel STFT + VBR1 Scan) | In-Memory RAM (~400 MB 1-slot buffer) |
 | **Voice Activity & Segmentation** | `silero-vad` + energy-based chunker | CPU (ONNX Runtime, pre-computed during lookahead prefetch) | `C:\ai-models\cache\torch` |
 | **Speaker Embeddings** | `speechbrain/spkrec-ecapa-voxceleb` (ECAPA-TDNN) | CUDA (float32, 192-d) | `C:\ai-models\cache\huggingface` |
-| **Voiceprint Database** | SQLite (`voiceprints.db`) | Local Disk (~5 MB) | `databases/voiceprints.db` |
+| **Voiceprint Database** | SQLite (`voiceprints.db`) | Local Disk + In-Memory Norm Cache (~5 MB) | `databases/voiceprints.db` |
+| **ASR Post-Processing** | `TranscriptPostProcessor` (`postprocess.py` + `terminology.py`) | CPU (<15ms/talk: Stutter Dedup + Collocations + Confidence-Gated Phonetic + Pali Lexicon) | `databases/buddhism_lexicon.db` |
 | **Search & Indexing** | SQLite FTS5 / Tantivy | Local Disk / Web CDN | `databases/dhamma_transcripts.db` |
 
 ### 4.1 Hardware Concurrency & Memory-Bandwidth Architecture (RTX 5070 Ti + Ryzen 7 9800X3D)
@@ -110,6 +111,40 @@ Autoregressive `large-v3` decoding at `batch_size=1` (`beam_size=5`) streams ~3.
 |                                                                             v     |
 | Talk N+1 :                                               [GPU Profile] -> [GPU... |
 +-----------------------------------------------------------------------------------+
+```
+
+### 4.2 Modular Non-Destructive ASR Post-Processing (`postprocess.py`)
+
+`TranscriptPostProcessor` separates token-level acoustic artifact cleanup from domain-specific Pali terminology rules while preserving the pristine Whisper baseline (`raw_text`):
+
+```text
++-------------------------------------------------------------------------------+
+| TranscriptPostProcessor.process_segments()                                    |
++-------------------------------------------------------------------------------+
+  Stage 0: Preserve `seg["raw_text"]` & Coalesce Sub-Word BPE Continuations
+     |
+     v
+  Stage 1: `deduplicate_stutters()`
+     - Removes 30s seek-boundary word duplications ("foot foot", "beginning beginning")
+     - Gated by inter-word pause gap (<= 0.25s), token confidence (`prob`), and
+       English reduplication whitelist (`VALID_ENGLISH_REDUPLICATIONS`)
+     |
+     v
+  Stage 2: `apply_collocations()`
+     - High-PMI spoken collocation & homophone anchors
+       ("sloth and [twelver/tulpa]" -> "sloth and torpor",
+        "my [ritual] thinking" -> "my wishful thinking",
+        "[bear] from the waist" -> "bare from the waist")
+     |
+     v
+  Stage 3: `apply_phonetic_lexicon()`
+     - Confidence-gated (`prob < 0.72`) phonetic skeleton matching (`phonetic_skeleton`)
+       against `buddhism_lexicon.db` verified by surrounding context keywords
+     |
+     v
+  Stage 4: `TerminologyEditor.edit_segments()`
+     - Context-aware canonical Pali phrase rules & word-timing synchronization
++-------------------------------------------------------------------------------+
 ```
 
 ---
