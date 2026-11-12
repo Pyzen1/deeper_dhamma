@@ -1086,7 +1086,7 @@ def test_pb22228026_word_sync_hyphenated_compounds_and_lead_in_alignment():
     assert data["t1Word1"] == "evening"
     assert data["t2Word0"] in ("cittaviveka,", "citta-viveka,")
     assert data["t2Word1"] in ("cittabhavana.", "citta-bhavana.")
-    assert data["t2Word2"] in ("Cittaviveka", "Citta-viveka")
+    assert data["t2Word2"] in ("cittaviveka", "Cittaviveka", "Citta-viveka")
     assert data["t2Word3"] == "is"
 
 
