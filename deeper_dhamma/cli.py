@@ -5,6 +5,7 @@ Subcommands:
   sync        Sync podcast catalog and download audio files
   voiceprints Build or inspect reference speaker embeddings gallery
   transcribe  Transcribe audio with faster-whisper, diarization, and Pali editing
+  postprocess Re-run non-destructive ASR post-processing across stored transcripts
   search      Instant full-text search across transcripts using SQLite FTS5
   export      Generate Markdown, WebVTT, or JSON on demand from database
   lexicon     Query and search the Buddhism Lexicon Database (buddhism_lexicon.db)
@@ -697,6 +698,52 @@ def cmd_audit(args):
             print("[i] To apply changes permanently, run again without --dry-run: python main.py audit --clean")
 
 
+def cmd_postprocess(args):
+    """Re-runs non-destructive ASR post-processing across stored database transcripts."""
+    if not getattr(args, "run", False):
+        if hasattr(args, "subparser"):
+            args.subparser.print_help()
+        return
+
+    import time
+    from deeper_dhamma.postprocess import TranscriptPostProcessor
+
+    db = TranscriptDatabase(db_path=getattr(args, "db", TRANSCRIPTS_DB_PATH))
+    processor = TranscriptPostProcessor()
+    dry_run = getattr(args, "dry_run", False)
+    ep_ids = getattr(args, "id", None)
+    year = getattr(args, "year", None)
+
+    mode_str = "DRY RUN (Preview only)" if dry_run else "LIVE UPDATE"
+    print("=" * 75)
+    print(f"BSWA Deeper Dhamma: Non-Destructive ASR Post-Processing ({mode_str})")
+    print("=" * 75)
+
+    t0 = time.perf_counter()
+    summary = db.reprocess_episodes(
+        postprocessor=processor,
+        episode_ids=ep_ids,
+        year=year,
+        dry_run=dry_run,
+    )
+    elapsed = time.perf_counter() - t0
+
+    print(f"[*] Episodes scanned:         {summary['episodes_scanned']:,}")
+    print(f"[*] Episodes updated:         {summary['episodes_updated']:,}")
+    print(f"[*] Segments modified:        {summary['segments_modified']:,}")
+    print(f"[*] Total rule applications:  {summary['total_rule_applications']:,}")
+    print(f"[*] Elapsed CPU time:         {elapsed:.2f}s")
+
+    for item in summary["details"][:20]:
+        print(f"\n  - {item['episode_id']}: {item['title']} ({item['segments_modified']} turn(s) updated)")
+        for ch in item["changelog"][:8]:
+            print(f"      [{ch.get('category', 'rule')}] '{ch['original']}' -> '{ch['replacement']}' ({ch.get('count', 1)}x)")
+
+    if len(summary["details"]) > 20:
+        print(f"\n  ... and {len(summary['details']) - 20} more updated episode(s).")
+    print("=" * 75)
+
+
 def cmd_serve(args):
     """Launches the in-browser static web application (redirects to web preview)."""
     if not getattr(args, "run", False):
@@ -800,6 +847,38 @@ def main(argv=None):
     p_trans.add_argument("--no-progress", action="store_true", help="Disable the live updating transcription progress bar")
     p_trans.add_argument("--check-updates", action="store_true", help="Check Hugging Face Hub for newer model snapshots/checkpoints before running")
     p_trans.set_defaults(func=cmd_transcribe, subparser=p_trans)
+
+    # 3b. Postprocess
+    p_post = subparsers.add_parser(
+        "postprocess",
+        help="Re-run non-destructive ASR post-processing across stored transcripts",
+    )
+    p_post.add_argument(
+        "--run", "-r",
+        action="store_true",
+        help="Execute ASR post-processing pass across database transcripts",
+    )
+    p_post.add_argument(
+        "--id", "-i",
+        nargs="+",
+        help="Specific episode ID(s) to re-process (e.g. pbXXXX)",
+    )
+    p_post.add_argument(
+        "--year", "-y",
+        type=int,
+        help="Filter episodes to re-process by year",
+    )
+    p_post.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview corrections without modifying the database",
+    )
+    p_post.add_argument(
+        "--db",
+        default=TRANSCRIPTS_DB_PATH,
+        help="Path to SQLite transcripts database",
+    )
+    p_post.set_defaults(func=cmd_postprocess, subparser=p_post)
 
     # 4. Search
     p_search = subparsers.add_parser("search", help="Full-text search across transcripts")

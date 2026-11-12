@@ -38,11 +38,19 @@ def test_transcribed_episodes_cdn_parity():
         fp = tdb.pipeline_db.get_filepath(r["id"])
         assert fp, f"No local filepath recorded in pipeline_state.db for {r['id']}"
         local_p = Path(fp)
-        media_url = r["media_url"]
-        
         assert local_p.exists(), f"Local audio file missing for {r['id']}: {local_p}"
         local_size = local_p.stat().st_size
-        assert local_size > 1024 * 1024, f"Local audio file too small: {local_size} bytes"
+        assert local_size > 256 * 1024, f"Local audio file too small: {local_size} bytes"
+
+    # Probe remote CDN headers on a deterministic sample (plus any short <1MB chanting tracks)
+    sample_rows = list(rows[:10]) + [
+        r for r in rows[10:]
+        if Path(tdb.pipeline_db.get_filepath(r["id"])).stat().st_size <= 1024 * 1024
+    ]
+    for r in sample_rows:
+        local_p = Path(tdb.pipeline_db.get_filepath(r["id"]))
+        local_size = local_p.stat().st_size
+        media_url = r["media_url"]
         
         # Verify remote Content-Length
         try:

@@ -92,6 +92,11 @@ python main.py transcribe --file archive/2001/standalone/2001-08-15_the_five_hin
 python main.py transcribe --year 2001 --limit 5
 python main.py transcribe --check-updates     # Explicitly check Hugging Face for model updates
 
+# 2b. Re-Run Non-Destructive ASR Post-Processing on Stored Database Transcripts
+python main.py postprocess --run --dry-run    # Preview stutter dedup, collocations, and lexicon updates
+python main.py postprocess --run              # Apply non-destructive post-processing across stored talks
+python main.py postprocess -r --year 2006     # Re-process talks for a specific year or --id pbXXXX
+
 # 3. Export Transcripts on demand
 python main.py export --list
 python main.py export --id pb28113880 --format md
@@ -173,6 +178,7 @@ deeper_dhamma/
 │   ├── profiler.py             # Acoustic clustering & multi-speaker profiling
 │   ├── asr.py                  # faster-whisper large-v3 ASR
 │   ├── aligner.py              # Speaker assignment & monologue fast-path
+│   ├── postprocess.py          # Modular ASR post-processor (stutter dedup, collocations, phonetic)
 │   ├── lexicon.py              # BuddhismLexiconDatabase interface & FTS5 search
 │   ├── terminology.py          # Context-aware Buddhist lexicon normalizer & audit tracking
 │   ├── self_correction.py      # Dual-pass prompt steering & anti-drift guardrail engine

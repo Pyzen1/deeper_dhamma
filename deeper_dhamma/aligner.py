@@ -445,4 +445,15 @@ class SpeakerAligner:
                 current = dict(nxt)
 
         merged.append(current)
+        for turn in merged:
+            words = turn.get("words")
+            if words and len(words) >= 2:
+                lead_gap = float(words[1]["start"]) - float(words[0]["end"])
+                toks = (turn.get("text") or "").split()
+                w0_tok = toks[0] if toks else str(words[0].get("word", "")).strip()
+                if lead_gap >= 2.5 and w0_tok and w0_tok[-1] not in ".?!,:;":
+                    dur0 = min(max(0.25, float(words[0]["end"]) - float(words[0]["start"])), 0.60)
+                    words[0]["end"] = round(float(words[1]["start"]), 3)
+                    words[0]["start"] = round(max(0.0, float(words[1]["start"]) - dur0), 3)
+                    turn["start"] = words[0]["start"]
         return merged

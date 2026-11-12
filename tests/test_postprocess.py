@@ -275,3 +275,67 @@ def test_storage_non_destructive_raw_asr_and_reprocess_episodes(tmp_path):
     assert second_res["episodes_updated"] == 0
     assert second_res["segments_modified"] == 0
 
+
+def test_cli_postprocess_help_and_execution(tmp_path):
+    """
+    Verifies CLI design compliance for `postprocess` subcommand:
+    1. Running `postprocess` without `--run` prints deterministic help without executing.
+    2. Running `postprocess --run --dry-run` previews changes without altering DB.
+    3. Running `postprocess --run --id pb_cli_01` applies post-processing via CLI.
+    """
+    from io import StringIO
+    from unittest.mock import patch
+    from deeper_dhamma.cli import main
+    from deeper_dhamma.storage import TranscriptDatabase
+
+    db_path = tmp_path / "cli_postprocess.db"
+    db = TranscriptDatabase(db_path=db_path)
+
+    raw_text = "On retreat sloth and tulpa fades away."
+    db.save_episode(
+        episode_metadata={
+            "id": "pb_cli_01",
+            "title": "CLI Postprocess Talk | Ajahn Brahm",
+            "primary_teacher": "ajahn_brahm",
+            "primary_display": "Ajahn Brahm",
+            "upload_date": "20100501",
+        },
+        attributed_segments=[
+            {
+                "start": 0.0,
+                "end": 4.0,
+                "speaker": "ajahn_brahm",
+                "speaker_display": "Ajahn Brahm",
+                "raw_text": raw_text,
+                "text": raw_text,
+            }
+        ],
+        duration_sec=120.0,
+        year="2010",
+        filename_stem="2010-05-01_cli_postprocess",
+        terminology_changelog=[],
+    )
+
+    # 1. Incomplete input (no --run) -> prints help, does not mutate DB
+    with patch("sys.stdout", new_callable=StringIO) as mock_out:
+        main(["postprocess", "--db", str(db_path)])
+        help_out = mock_out.getvalue()
+        assert "--run" in help_out
+    assert db.get_episode("pb_cli_01")["segments"][0]["text"] == raw_text
+
+    # 2. Dry run (--run --dry-run) -> previews update, does not mutate DB
+    with patch("sys.stdout", new_callable=StringIO) as mock_out:
+        main(["postprocess", "--run", "--dry-run", "--db", str(db_path)])
+        dry_out = mock_out.getvalue()
+        assert "DRY RUN" in dry_out
+        assert "sloth and torpor" in dry_out
+    assert db.get_episode("pb_cli_01")["segments"][0]["text"] == raw_text
+
+    # 3. Live run (--run --id pb_cli_01) -> applies update
+    with patch("sys.stdout", new_callable=StringIO) as mock_out:
+        main(["postprocess", "--run", "--id", "pb_cli_01", "--db", str(db_path)])
+        live_out = mock_out.getvalue()
+        assert "LIVE UPDATE" in live_out
+    assert "sloth and torpor" in db.get_episode("pb_cli_01")["segments"][0]["text"]
+
+

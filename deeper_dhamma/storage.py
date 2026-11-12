@@ -628,6 +628,7 @@ class TranscriptDatabase:
             TranscriptPostProcessor,
             extract_vbr_trailer,
             pack_words_blob,
+            unpack_words_blob_to_segments,
         )
 
         if postprocessor is None:
@@ -678,9 +679,12 @@ class TranscriptDatabase:
             if not db_segs:
                 continue
 
+            old_blob = self.get_episode_words(ep_id)
             raw_baseline = self.pipeline_db.get_raw_asr(ep_id)
             if raw_baseline and len(raw_baseline) == len(db_segs):
                 working_segs = [dict(s) for s in raw_baseline]
+                if not any(s.get("words") for s in working_segs):
+                    unpack_words_blob_to_segments(old_blob, working_segs)
             else:
                 working_segs = [
                     {
@@ -693,6 +697,7 @@ class TranscriptDatabase:
                     }
                     for s in db_segs
                 ]
+                unpack_words_blob_to_segments(old_blob, working_segs)
                 if not dry_run and raw_baseline is None:
                     self.pipeline_db.save_raw_asr(ep_id, working_segs)
 
@@ -705,15 +710,25 @@ class TranscriptDatabase:
             for db_s, proc_s in zip(db_segs, processed_segs):
                 new_txt = (proc_s.get("text") or "").strip()
                 old_txt = (db_s.get("text") or "").strip()
-                if new_txt != old_txt:
+                new_st = round(float(proc_s.get("start", db_s["start_sec"])), 3)
+                old_st = round(float(db_s["start_sec"]), 3)
+                if new_txt != old_txt or new_st != old_st:
                     ep_seg_mods += 1
-                    updates_to_apply.append((new_txt, db_s["id"]))
+                    updates_to_apply.append((new_txt, new_st, db_s["id"]))
+
+            all_words = [w for seg in processed_segs for w in (seg.get("words") or [])]
+            new_blob = None
+            blob_changed = False
+            if all_words:
+                vbr_trailer = extract_vbr_trailer(old_blob)
+                new_blob = pack_words_blob(all_words, vbr_trailer=vbr_trailer)
+                blob_changed = new_blob != old_blob
 
             old_changelog_str = ep_row["terminology_changelog"] or "[]"
             new_changelog_str = json.dumps(changelog, ensure_ascii=False)
             changelog_changed = new_changelog_str != old_changelog_str
 
-            if ep_seg_mods > 0 or changelog_changed:
+            if ep_seg_mods > 0 or changelog_changed or blob_changed:
                 episodes_updated += 1
                 segments_modified += ep_seg_mods
                 details.append({
@@ -728,7 +743,7 @@ class TranscriptDatabase:
                         with conn:
                             if updates_to_apply:
                                 conn.executemany(
-                                    "UPDATE speech_segments SET text = ? WHERE id = ?;",
+                                    "UPDATE speech_segments SET text = ?, start_sec = ? WHERE id = ?;",
                                     updates_to_apply,
                                 )
                             conn.execute(
@@ -736,12 +751,7 @@ class TranscriptDatabase:
                                 (new_changelog_str, ep_id),
                             )
 
-                    # Re-pack word timings BLOB if segments carried word-level timing objects
-                    all_words = [w for seg in processed_segs for w in (seg.get("words") or [])]
-                    if all_words:
-                        old_blob = self.get_episode_words(ep_id)
-                        vbr_trailer = extract_vbr_trailer(old_blob)
-                        new_blob = pack_words_blob(all_words, vbr_trailer=vbr_trailer)
+                    if new_blob is not None:
                         self.save_episode_words(ep_id, new_blob)
 
         return {

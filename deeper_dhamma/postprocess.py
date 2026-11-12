@@ -28,7 +28,7 @@ logger = logging.getLogger("postprocess")
 VALID_ENGLISH_REDUPLICATIONS = frozenset({
     "very", "many", "had", "that", "so", "no", "yes", "ha", "haha",
     "bye", "one", "long", "far", "step", "day", "little", "more",
-    "Knock", "knock", "blah", "tut", "tsk", "now", "there", "well",
+    "knock", "blah", "tut", "tsk", "now", "there", "well",
 })
 
 # High-PMI spoken collocations & homophone anchors where British/Australian
@@ -163,13 +163,12 @@ def coalesce_subword_timings(words: List[Dict]) -> List[Dict]:
 
 
 def pack_words_blob(words: List[Dict], vbr_trailer: Optional[bytes] = None) -> bytes:
-    """Serializes physical word timestamps and optional VBR1 seek trailer into a compact binary BLOB."""
+    """Serializes physical word timestamps (in sequential turn/token order) and optional VBR1 seek trailer into a compact binary BLOB."""
     import struct
 
-    words_sorted = sorted(words, key=lambda w: float(w["start"]))
     buf = bytearray()
-    buf.extend(struct.pack("<I", len(words_sorted)))
-    for w in words_sorted:
+    buf.extend(struct.pack("<I", len(words)))
+    for w in words:
         st_ms = int(round(float(w["start"]) * 1000.0))
         en_ms = int(round(float(w["end"]) * 1000.0))
         dur_ms = max(1, min(65535, en_ms - st_ms))
@@ -190,6 +189,45 @@ def extract_vbr_trailer(words_blob: Optional[bytes]) -> bytes:
     if len(words_blob) > offset:
         return bytes(words_blob[offset:])
     return b""
+
+
+def unpack_words_blob_to_segments(words_blob: Optional[bytes], segments: List[Dict]) -> bool:
+    """
+    Reconstructs per-segment `words` lists from a compact `words_blob` when segments
+    do not already carry word-level timing dicts (e.g. legacy episodes in SQLite).
+    Returns True if `words_blob` matched the total whitespace token count across `segments`.
+    """
+    import struct
+
+    if not words_blob or len(words_blob) < 4 or not segments:
+        return False
+
+    word_count = struct.unpack_from("<I", words_blob, 0)[0]
+    if len(words_blob) < 4 + word_count * 6:
+        return False
+
+    seg_token_lists = [(seg.get("text") or "").split() for seg in segments]
+    total_tokens = sum(len(t) for t in seg_token_lists)
+    if total_tokens != word_count:
+        return False
+
+    cursor = 0
+    for seg, toks in zip(segments, seg_token_lists):
+        seg_words: List[Dict] = []
+        for tok in toks:
+            st_ms, dur_ms = struct.unpack_from("<IH", words_blob, 4 + cursor * 6)
+            st_s = round(st_ms / 1000.0, 3)
+            en_s = round((st_ms + dur_ms) / 1000.0, 3)
+            seg_words.append({
+                "word": f" {tok}",
+                "start": st_s,
+                "end": en_s,
+                "prob": 0.90,
+            })
+            cursor += 1
+        seg["words"] = seg_words
+        seg["raw_words"] = [dict(w) for w in seg_words]
+    return True
 
 
 def clean_word_token(raw_word: str) -> str:
@@ -253,7 +291,7 @@ def deduplicate_stutters(
                         is_whitelisted = clean_curr in VALID_ENGLISH_REDUPLICATIONS
                         should_dedup = False
 
-                        if is_triple:
+                        if is_triple and not has_comma_break and not is_whitelisted:
                             should_dedup = True
                         elif not is_whitelisted and not has_comma_break:
                             # Non-reduplicating word (e.g. "foot foot", "beginning beginning", "thing thing")
@@ -269,8 +307,6 @@ def deduplicate_stutters(
                             trailing_punct = re.search(r"[^\w']+$", tok_next.strip())
                             merged_tok = tok_curr.rstrip(",;:")
                             if trailing_punct and not merged_tok.endswith(trailing_punct.group(0)):
-                                merged_tok = clean_word_token(tok_curr)
-                                # Restore original casing of tok_curr
                                 base_tok = re.sub(r"[^\w']+$", "", tok_curr.strip())
                                 merged_tok = base_tok + trailing_punct.group(0)
 
@@ -622,5 +658,18 @@ class TranscriptPostProcessor:
         # Stage 4: Curated Pali terminology normalization & audit pass
         segments, term_changes = self.terminology_editor.edit_segments(segments)
         _record_changes(term_changes)
+
+        # Stage 5: Clamp any stranded unpunctuated lead-in Word 0 (gap >= 2.5s) created by turn splitting/merging
+        for seg in segments:
+            words = seg.get("words")
+            toks = (seg.get("text") or "").split()
+            if words and len(words) >= 2 and len(words) == len(toks):
+                lead_gap = float(words[1]["start"]) - float(words[0]["end"])
+                w0_tok = toks[0]
+                if lead_gap >= 2.5 and w0_tok and w0_tok[-1] not in ".?!,:;":
+                    dur0 = min(max(0.25, float(words[0]["end"]) - float(words[0]["start"])), 0.60)
+                    words[0]["end"] = round(float(words[1]["start"]), 3)
+                    words[0]["start"] = round(max(0.0, float(words[1]["start"]) - dur0), 3)
+                    seg["start"] = words[0]["start"]
 
         return segments, list(aggregated_changes.values())
