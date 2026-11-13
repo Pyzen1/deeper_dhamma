@@ -108,12 +108,20 @@ class BuddhismLexiconDatabase:
             return items
 
     def lookup_term(self, term: str) -> Optional[Dict]:
-        """Look up a term by plain Latin or diacritic form, including source document details."""
+        """Look up a term by plain Latin, diacritic, or hyphenated compound form, including source document details."""
         plain = strip_diacritics(term)
+        condensed = plain.replace("-", "").replace(" ", "")
         with self._get_connection() as conn:
             cur = conn.execute(
-                "SELECT * FROM v_terms WHERE pali_plain = ? OR pali_diacritic = ? COLLATE NOCASE LIMIT 1;",
-                (plain, term),
+                """
+                SELECT * FROM v_terms 
+                WHERE pali_plain = ? 
+                   OR pali_diacritic = ? COLLATE NOCASE
+                   OR pali_plain = ?
+                   OR phonetic_variants LIKE ?
+                LIMIT 1;
+                """,
+                (plain, term, condensed, f'%"{plain}"%'),
             )
             row = cur.fetchone()
             if row:

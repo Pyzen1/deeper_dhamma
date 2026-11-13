@@ -45,6 +45,7 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 !databases/buddhism_lexicon.db
+!databases/authoritative_ebt_compounds.db
 !databases/sources/*
 
 # Static web build distribution

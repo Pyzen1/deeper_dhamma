@@ -100,6 +100,52 @@ def test_terminology_editor_yoniso_manasikara_and_noble_eightfold_path():
     assert len(changelog) >= 4
 
 
+def test_terminology_editor_ebt_compounds_phonetic_rules():
+    """
+    Verifies that phonetic phrase rules for authoritative EBT compounds
+    (citta-viveka, kaya-viveka, piti-sukha, citta-sankhara) are applied
+    by the TerminologyEditor with surrounding context verification,
+    maintaining 1:1 token-to-word timing synchronization.
+    """
+    editor = TerminologyEditor()
+    segments = [
+        {
+            "start": 0.0,
+            "end": 15.0,
+            "text": "First you develop kaya viveka by going into solitude in the forest, which leads to citta viveka when the mind is still in samadhi.",
+            "words": [
+                {"word": w, "start": float(i), "end": float(i) + 0.5}
+                for i, w in enumerate(
+                    "First you develop kaya viveka by going into solitude in the forest, which leads to citta viveka when the mind is still in samadhi.".split()
+                )
+            ],
+        },
+        {
+            "start": 15.0,
+            "end": 30.0,
+            "text": "In deep meditation you experience peeti sukha with great bliss, while calming the breath and the chitta sankara.",
+            "words": [
+                {"word": w, "start": 15.0 + float(i), "end": 15.5 + float(i)}
+                for i, w in enumerate(
+                    "In deep meditation you experience peeti sukha with great bliss, while calming the breath and the chitta sankara.".split()
+                )
+            ],
+        },
+    ]
+
+    edited, changelog = editor.edit_segments(segments)
+    text_0 = edited[0]["text"]
+    assert "kayaviveka" in text_0
+    assert "cittaviveka" in text_0
+    assert len(edited[0]["words"]) == len(text_0.split())
+
+    text_1 = edited[1]["text"]
+    assert "pitisukha" in text_1
+    assert "cittasankhara" in text_1
+    assert len(edited[1]["words"]) == len(text_1.split())
+    assert len(changelog) >= 4
+
+
 def test_format_timestamp_vtt_millisecond_carry_over():
     """Verify VTT timestamps never emit .1000 when fractional seconds round up."""
     assert format_timestamp_vtt(10.9996) == "00:00:11.000"
@@ -179,3 +225,28 @@ def test_voiceprint_legacy_slug_resolution():
     slugs = {e["teacher_slug"] for e in embeddings}
     assert "ajahn_sujato" not in slugs
     assert "bhante_sujato" in slugs
+
+
+def test_transcription_progress_bar_interrupted_reporting():
+    """Verify TranscriptionProgressBar reports stopped/aborted rather than false 100% completion when cancelled."""
+    import io
+    from deeper_dhamma.asr import TranscriptionProgressBar
+
+    buf = io.StringIO()
+    pbar = TranscriptionProgressBar(total_sec=4000.0, file=buf)
+    pbar.update(current_sec=30.0, text="Interrupted early snippet")
+    pbar.close(completed=False)
+
+    output = buf.getvalue()
+    assert "aborted" in output or "stopped" in output
+    assert "100.0%" not in output
+    assert "[✓]" not in output
+
+    # Clean completion test
+    buf_clean = io.StringIO()
+    pbar_clean = TranscriptionProgressBar(total_sec=100.0, file=buf_clean)
+    pbar_clean.update(current_sec=100.0, text="Finished")
+    pbar_clean.close(completed=True)
+    out_clean = buf_clean.getvalue()
+    assert "[✓]" in out_clean
+    assert "100.0%" in out_clean

@@ -127,10 +127,19 @@ class TerminologyEditor:
         """
         if not words:
             return []
+        has_leading_spaces = any(str(w.get("word", "")).startswith(" ") for w in words)
         merged: List[Dict] = []
         for idx, w in enumerate(words):
             raw_w = str(w.get("word", ""))
-            if idx > 0 and raw_w and not raw_w[0].isspace() and not str(merged[-1].get("word", ""))[-1:].isspace():
+            should_coalesce = (
+                idx > 0
+                and raw_w
+                and (
+                    (has_leading_spaces and not raw_w[0].isspace() and not str(merged[-1].get("word", ""))[-1:].isspace())
+                    or (not has_leading_spaces and (raw_w.startswith("-") or raw_w.startswith("—")))
+                )
+            )
+            if should_coalesce:
                 prev = merged[-1]
                 merged[-1] = {
                     **prev,

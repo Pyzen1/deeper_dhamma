@@ -19,10 +19,12 @@ verifiable upstream authority files stored in `databases/sources/`:
      - `databases/sources/suttacentral_suttaplex_dn.json`
      - `databases/sources/suttacentral_suttaplex_mn.json`
    - Canonical URL: https://suttacentral.net/pitaka/sutta
+5. Authoritative Early Buddhist Text (EBT) Compounds & Phrase Rules
+   - Local data source: `databases/authoritative_ebt_compounds.db` (`ebt_compounds`, `phrase_rules`)
 
 Zero lexicon terms or definitions are hardcoded in Python. All entries, teacher
-translations, descriptions, and canonical URLs are parsed deterministically
-from the local source files in `databases/sources/`.
+translations, descriptions, phrase rules, and canonical URLs are loaded deterministically
+from `databases/sources/` and `databases/authoritative_ebt_compounds.db`.
 """
 
 import argparse
@@ -764,101 +766,75 @@ def parse_suttacentral_canonical_texts(
     return entries, doc_markdown
 
 
-def get_standard_phrase_rules() -> List[Dict]:
-    """Phonetic substitution rules for ASR post-processing disambiguation."""
-    return [
-        {
-            "pattern": r"\b(?:vains|veins|reins|rayns|vanes)(?=\s+retreats?\b)",
-            "canonical_pali": "vassa",
-            "category": "vinaya",
-            "explanation": "Acoustic misrecognition of Rains Retreat (Vassa)",
-            "context_requirement": "retreat|monastery|monks|winter|vassa|serpentine",
-        },
-        {
-            "pattern": r"\b(?:ghana|gana|jana)(?=\s+(?:factors?|states?|attainments?|experiences?)\b)",
-            "canonical_pali": "jhana",
-            "category": "meditation",
-            "explanation": "Jhana absorption factors acoustic slip",
-            "context_requirement": "meditation|absorption|stillness|samadhi|breath",
-        },
-        {
-            "pattern": r"\b(?:ghana|gana|jana)\b",
-            "canonical_pali": "jhana",
-            "category": "meditation",
-            "explanation": "Ordinal or contextual jhana absorption stage",
-            "context_requirement": "first|second|third|fourth|1st|2nd|3rd|4th|deep|meditation|absorption|bliss|stillness|samadhi",
-        },
-        {
-            "pattern": r"\bnimiter\b",
-            "canonical_pali": "nimitta",
-            "category": "meditation",
-            "explanation": "Nimitta meditation light / mental sign",
-            "context_requirement": "light|glow|shining|breath|mind|meditation|gateway",
-        },
-        {
-            "pattern": r"\b(?:five\s+entrances|5\s+entrances)\b",
-            "canonical_pali": "nivarana",
-            "category": "sutta_canon",
-            "explanation": "Five Hindrances (Nivarana) acoustic false-friend",
-            "context_requirement": "obstacle|desire|sloth|doubt|meditation|restlessness",
-        },
-        {
-            "pattern": r"\b(?:party\s*mocker|patimoker)\b",
-            "canonical_pali": "patimokkha",
-            "category": "vinaya",
-            "explanation": "Patimokkha monastic disciplinary code",
-            "context_requirement": "rules|recitation|monk|vinaya|uposatha|monastery",
-        },
-        {
-            "pattern": r"\b(?:anna|ana)\s+panasati\b",
-            "canonical_pali": "anapanasati",
-            "category": "meditation",
-            "explanation": "Anapanasati mindfulness of breathing",
-            "context_requirement": None,
-        },
-        {
-            "pattern": r"\b(?:yonis\s+om\s+man[ia]sikara|yonis\s+oman[ie]s\s+ikara|yonis\s+oman[ie]sikara|yoniso\s+man[ie]sikara)\b",
-            "canonical_pali": "yoniso manasikara",
-            "category": "sutta_canon",
-            "explanation": "Yoniso manasikara (wise / proper attention)",
-            "context_requirement": "attention|wise|mind|comprehension|quality|qualities|sutta|dhamma|meditation",
-        },
-        {
-            "pattern": r"\b(?:ayonis\s+om\s+man[ia]sikara|ayonis\s+oman[ie]s\s+ikara|ayonis\s+oman[ie]sikara|ayoniso\s+man[ie]sikara)\b",
-            "canonical_pali": "ayoniso manasikara",
-            "category": "sutta_canon",
-            "explanation": "Ayoniso manasikara (unwise / improper attention)",
-            "context_requirement": "attention|unwise|mind|comprehension|quality|qualities|sutta|dhamma|meditation",
-        },
-        {
-            "pattern": r"\b(?:sampajanaya|sampajjanya|samparjanya)\b",
-            "canonical_pali": "sampajanna",
-            "category": "meditation",
-            "explanation": "Sampajanna (clear comprehension / full awareness)",
-            "context_requirement": "comprehension|awareness|mindfulness|attention|sati|meditation",
-        },
-        {
-            "pattern": r"\bnoble,?\s+aidful\s+path\b",
-            "canonical_pali": "noble eightfold path",
-            "category": "sutta_canon",
-            "explanation": "Noble Eightfold Path (ariya atthangika magga) acoustic misrecognition",
-            "context_requirement": "path|noble|visuddhimagga|magga|buddha|dhamma|purification",
-        },
-        {
-            "pattern": r"\baidful\s+path\b",
-            "canonical_pali": "eightfold path",
-            "category": "sutta_canon",
-            "explanation": "Eightfold Path (atthangika magga) acoustic misrecognition",
-            "context_requirement": "path|noble|visuddhimagga|magga|buddha|dhamma|purification",
-        },
-    ]
+def load_authoritative_ebt_compounds(db_path: Optional[Path] = None) -> List[Dict]:
+    """
+    Loads authoritative Early Buddhist Texts (EBT) doctrinal and meditative terminology
+    from the dedicated SQLite database `databases/authoritative_ebt_compounds.db`.
+    Enforces strict architectural separation of domain data from executable code.
+    """
+    target = db_path or (PROJECT_ROOT / "databases" / "authoritative_ebt_compounds.db")
+    if not target.exists():
+        logger.warning(f"Authoritative compounds database not found at {target}")
+        return []
+    conn = sqlite3.connect(target)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("""
+            SELECT pali_plain, pali_diacritic, category,
+                   translation_bodhi, translation_sujato, translation_brahm, translation_brahmali,
+                   english_description, context_keywords, phonetic_variants, source, source_url
+            FROM ebt_compounds
+            ORDER BY id;
+        """).fetchall()
+        entries = []
+        for r in rows:
+            entry = dict(r)
+            if entry.get("phonetic_variants"):
+                try:
+                    entry["phonetic_variants"] = json.loads(entry["phonetic_variants"])
+                except Exception:
+                    entry["phonetic_variants"] = []
+            else:
+                entry["phonetic_variants"] = []
+            entries.append(entry)
+        return entries
+    finally:
+        conn.close()
+
+
+def load_standard_phrase_rules(db_path: Optional[Path] = None) -> List[Dict]:
+    """
+    Loads phonetic substitution rules for ASR post-processing disambiguation
+    from the dedicated SQLite database `databases/authoritative_ebt_compounds.db`.
+    Enforces strict architectural separation of rule data from executable code.
+    """
+    target = db_path or (PROJECT_ROOT / "databases" / "authoritative_ebt_compounds.db")
+    if not target.exists():
+        logger.warning(f"Phrase rules database not found at {target}")
+        return []
+    conn = sqlite3.connect(target)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("""
+            SELECT pattern, canonical_pali, category, explanation, context_requirement
+            FROM phrase_rules
+            ORDER BY id;
+        """).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# Backward-compatibility aliases
+get_authoritative_ebt_compounds = load_authoritative_ebt_compounds
+get_standard_phrase_rules = load_standard_phrase_rules
 
 
 def build_buddhism_lexicon_db(force_fetch: bool = False) -> None:
     """Builds and populates the master SQLite lexicon database from `databases/sources/`."""
     fetch_missing_sources(force=force_fetch)
 
-    # Parse all 4 canonical source groups deterministically from local files
+    # Parse all canonical source groups deterministically from local files
     file_sc_glossary = SOURCES_DIR / "suttacentral_bodhi_sujato_glossary.json"
     file_vinaya_glossary = SOURCES_DIR / "suttacentral_brahmali_vinaya_glossary.html"
     file_bswa_pdf = SOURCES_DIR / "bswa_word_of_the_buddha_2024.pdf"
@@ -873,6 +849,7 @@ def build_buddhism_lexicon_db(force_fetch: bool = False) -> None:
     canon_entries, doc4_md = parse_suttacentral_canonical_texts(
         file_super_root, file_super_en, file_suttaplex_dn, file_suttaplex_mn
     )
+    ebt_entries = load_authoritative_ebt_compounds()
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     if DB_PATH.exists():
@@ -1113,6 +1090,9 @@ def build_buddhism_lexicon_db(force_fetch: bool = False) -> None:
     for e in bswa_entries:
         _merge_entry(e, URL_BSWA_WORD_OF_THE_BUDDHA)
 
+    for e in ebt_entries:
+        _merge_entry(e, URL_SUTTACENTRAL_BODHI_SUJATO)
+
     term_rows = []
     for term in sorted(all_terms.values(), key=lambda x: x["pali_plain"]):
         doc_url = term.get("_doc_url", URL_SUTTACENTRAL_BODHI_SUJATO)
@@ -1146,7 +1126,7 @@ def build_buddhism_lexicon_db(force_fetch: bool = False) -> None:
         SELECT id, pali_plain, english_description, context_keywords, translation_bodhi, translation_sujato, translation_brahm, translation_brahmali FROM terms;
     """)
 
-    rules = get_standard_phrase_rules()
+    rules = load_standard_phrase_rules()
     conn.executemany("""
         INSERT INTO phrase_rules (pattern, canonical_pali, category, explanation, context_requirement)
         VALUES (?, ?, ?, ?, ?);

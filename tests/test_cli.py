@@ -131,6 +131,23 @@ def test_cli_lexicon_live_lookup_execution():
         assert "breath" in output.lower() or "mindfulness" in output.lower()
 
 
+def test_cli_lexicon_compound_lookup_execution():
+    """Verifies that hyphenated EBT compounds (citta-viveka, kaya-viveka) resolve via CLI with SuttaCentral URLs."""
+    with patch("sys.stdout", new_callable=StringIO) as mock_out:
+        main(["lexicon", "--lookup", "citta-viveka"])
+        output = mock_out.getvalue()
+        assert "cittaviveka" in output.lower()
+        assert "seclusion" in output.lower()
+        assert "https://suttacentral.net/mnd2" in output
+
+    with patch("sys.stdout", new_callable=StringIO) as mock_out:
+        main(["lexicon", "--lookup", "kaya-viveka"])
+        output = mock_out.getvalue()
+        assert "kayaviveka" in output.lower()
+        assert "seclusion" in output.lower()
+        assert "https://suttacentral.net/mnd2" in output
+
+
 def test_cli_status_live_summary_execution():
     """Executes a live read-only status summary through the CLI router and verifies formatted output."""
     with patch("sys.stdout", new_callable=StringIO) as mock_out:

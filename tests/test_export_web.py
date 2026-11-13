@@ -4,6 +4,7 @@ Unit tests for Static Web Application & SQLite WASM Compiler.
 
 from pathlib import Path
 import sqlite3
+import struct
 import pytest
 
 from deeper_dhamma.config import BUDDHISM_LEXICON_DB_PATH, TRANSCRIPTS_DB_PATH
@@ -61,7 +62,22 @@ def test_compile_static_database_header_version_and_vocab_table(tmp_path: Path):
 
         w_row = conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = 'pb28113880';").fetchone()
         assert w_row is not None
-        assert len(w_row[0]) == 41416
+        blob = w_row[0]
+        word_count = struct.unpack("<I", blob[:4])[0]
+        assert word_count > 0
+        assert len(blob) >= 4 + word_count * 6
+
+        seg_rows = conn.execute("SELECT text FROM speech_segments WHERE episode_id = 'pb28113880' ORDER BY turn_index;").fetchall()
+        token_count = sum(len(r[0].split()) for r in seg_rows)
+        assert word_count == token_count, f"Compiled pb28113880 word count {word_count} != token count {token_count}"
+
+        src_conn = sqlite3.connect(TRANSCRIPTS_DB_PATH)
+        try:
+            src_row = src_conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = 'pb28113880';").fetchone()
+            assert src_row is not None
+            assert blob == src_row[0], "Compiled words_blob must match source dhamma_transcripts.db byte-for-byte"
+        finally:
+            src_conn.close()
     finally:
         conn.close()
 

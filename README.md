@@ -19,6 +19,7 @@ In accordance with the monastic Vinaya and the living Buddhist tradition of gene
   - `databases/pipeline_state.db`: Local operational ingestion state (archive filepaths, transcription flags, and error logs; excluded from web distribution).
   - `databases/voiceprints.db`: Era-tagged speaker embeddings gallery.
   - `databases/buddhism_lexicon.db`: Master Pali terminology, translation matrix, and phonetic rule definitions.
+  - `databases/authoritative_ebt_compounds.db`: Authoritative EBT doctrinal compounds and ASR phonetic substitution rules (compiled into `buddhism_lexicon.db`).
 - **High-Accuracy Speech-to-Text (`faster-whisper-large-v3-turbo` by default)**:
   - Float16 on NVIDIA CUDA (RTX 5070 Ti, 16 GB GDDR7) running **single-worker sequential transcription (`model="turbo"`, `batch_size=1` by default)** with the full 32-layer `large-v3` Audio Encoder + 4-layer distilled Text Decoder (8x less GDDR7 decoder weight traffic per token, achieving **63x–99x real-time** speed and outperforming `large-v3` on gold-standard WER when paired with `TranscriptPostProcessor`).
   - **1-Slot Lookahead CPU Prefetch Pipeline & Ryzen 7 9800X3D Tuning (`cpu_threads=8`)**: Overlaps Talk $N+1$'s CPU-bound 16 kHz audio decoding, Silero VAD speech chunk detection, 128-bin log-Mel spectrogram STFT (`Transcriber.prepare_audio`), and VBR1 seek table scanning (`TranscriptionPipeline.prefetch_file`) in a background thread while the GPU is executing Talk $N$'s ASR pass, eliminating the ~7.7s inter-talk CPU stall with 100% bit-for-bit output parity.
@@ -32,7 +33,7 @@ In accordance with the monastic Vinaya and the living Buddhist tradition of gene
   - Candidate-aware hysteresis and isolated turn smoothing (`_smooth_isolated_turns`) to eliminate false third-party teacher flips on solo talks while preserving genuine secondary speakers (such as archival tape narrators and audience Q&A).
   - Word-level conversational pause change-point detection: splits multi-speaker exchanges grouped by ASR at natural speech pauses ($\ge 0.45\text{s}$) while preserving pristine Whisper text on un-split turns and adhering word punctuation tokens.
 - **Buddhist Reference Terminology Editor & Canonical Authority Documents**:
-  - 2,447 canonical Pali entries & multi-word phrases covering doctrinal concepts, Tipiṭaka text titles, and Vinaya monastic law across Theravada traditions.
+  - 2,482 canonical Pali entries & multi-word phrases covering doctrinal concepts, Tipiṭaka text titles, and Vinaya monastic law across Theravada traditions.
   - Non-destructive context-aware phrase disambiguation (using non-consuming lookaheads for multi-word misrecognitions like `vassa`, `jhana`, `nimitta`, `yoniso manasikara`, `noble eightfold path`, and `patimokkha`).
   - Automated word-timing array synchronization (`_sync_word_timings`) maintaining 1:1 parity with binary synchronization BLOBs (`words/<id>.bin`) when multi-word misrecognitions are merged into canonical tokens.
   - Deterministically compiled from pristine local upstream sources (`databases/sources/`) with authentic external links (`source_url`) and mirrored offline verification copies (`dist/sources/`).
@@ -149,7 +150,7 @@ python main.py web -r --port 8080       # Custom port or output directory
 python main.py serve --run              # Serve static bundle on http://127.0.0.1:34266
 python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
 
-# 13. Run Full Verification & Unit Test Suite (151 tests, 100% passing, 0 warnings)
+# 13. Run Full Verification & Unit Test Suite (178 tests)
 python -m pytest tests -p no:cov        # Execute all unit and integration tests
 pytest --cov=deeper_dhamma              # Generate full code coverage report
 ```
@@ -163,6 +164,7 @@ deeper_dhamma/
 ├── databases/                  # Centralized SQLite databases directory
 │   ├── readme.md               # Architecture & lifecycle documentation
 │   ├── sources/                # Pristine upstream authority documents (JSON, HTML, PDF)
+│   ├── authoritative_ebt_compounds.db # Authoritative EBT compounds & phrase rules
 │   ├── buddhism_lexicon.db     # Master SQLite Lexicon (SuttaCentral & BSWA authorities)
 │   ├── dhamma_transcripts.db   # Canonical SQLite domain warehouse & FTS5 search index
 │   ├── pipeline_state.db       # Local operational state (archive filepaths & error tracking)
@@ -193,7 +195,7 @@ deeper_dhamma/
 │       ├── static/             # CSS, app.js, word_sync.js, db_worker.js, sqlite3.wasm
 │       │   └── adapters/       # In-browser SQLite WASM adapter (wasm_client.js)
 │       └── views/              # Static HTML template (index.html)
-├── tests/                      # Comprehensive Unit & Integration Test Suite (151 tests)
+├── tests/                      # Comprehensive Unit & Integration Test Suite (178 tests)
 │   ├── test_cli.py             # CLI parser, "One Obvious Way" flags, subcommands dispatch
 │   ├── test_audit.py           # Ghost files, temp fragments, html error pages, archive cleanup
 │   ├── test_benchmark.py       # Precision, recall, F1, and sequence-aligned WER evaluation

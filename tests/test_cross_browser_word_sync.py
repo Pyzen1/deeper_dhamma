@@ -1138,12 +1138,18 @@ def test_sampled_newly_transcribed_episodes_one_to_one_word_sync_parity():
                     "SELECT turn_index, start_sec, end_sec, text FROM speech_segments WHERE episode_id = ? ORDER BY turn_index",
                     (ep_id,),
                 ).fetchall()
-                blob = conn.execute(
+                ws_count = sum(len(s[3].split()) for s in segs)
+                w_row = conn.execute(
                     "SELECT words_blob FROM episode_words WHERE episode_id = ?",
                     (ep_id,),
-                ).fetchone()[0]
+                ).fetchone()
+                if ws_count == 0:
+                    assert len(segs) == 0, f"{db_path.name} {ep_id}: non-empty segments with 0 tokens"
+                    assert w_row is None or struct.unpack("<I", w_row[0][:4])[0] == 0
+                    continue
+                assert w_row is not None, f"{db_path.name} {ep_id}: missing words_blob for {ws_count} tokens"
+                blob = w_row[0]
                 wc = struct.unpack("<I", blob[:4])[0]
-                ws_count = sum(len(s[3].split()) for s in segs)
                 assert wc == ws_count, f"{db_path.name} {ep_id}: blob word count {wc} != token count {ws_count}"
 
                 cursor = 0

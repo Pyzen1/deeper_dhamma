@@ -28,12 +28,13 @@ def test_transcribed_episodes_cdn_parity():
     conn = sqlite3.connect(TRANSCRIPTS_DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.cursor().execute(
-        "SELECT id, title, media_url FROM episodes WHERE is_transcribed = 1"
+        "SELECT id, title, media_url FROM episodes WHERE is_transcribed = 1 ORDER BY created_at ASC, id ASC"
     ).fetchall()
     conn.close()
 
     assert len(rows) > 0, "No transcribed episodes found in database"
 
+    eligible_for_cdn = []
     for r in rows:
         fp = tdb.pipeline_db.get_filepath(r["id"])
         assert fp, f"No local filepath recorded in pipeline_state.db for {r['id']}"
@@ -41,12 +42,14 @@ def test_transcribed_episodes_cdn_parity():
         assert local_p.exists(), f"Local audio file missing for {r['id']}: {local_p}"
         local_size = local_p.stat().st_size
         assert local_size > 256 * 1024, f"Local audio file too small: {local_size} bytes"
+        # Mirror downloader.verify_remote_parity's >1MB threshold and require a valid CDN URL
+        if local_size > 1024 * 1024 and r["media_url"]:
+            eligible_for_cdn.append(r)
 
-    # Probe remote CDN headers on a deterministic sample (plus any short <1MB chanting tracks)
-    sample_rows = list(rows[:10]) + [
-        r for r in rows[10:]
-        if Path(tdb.pipeline_db.get_filepath(r["id"])).stat().st_size <= 1024 * 1024
-    ]
+    assert len(eligible_for_cdn) > 0, "No >1MB transcribed episodes with media_url found for CDN probe"
+
+    # Probe remote CDN headers on a deterministic sample spanning earliest and latest transcribed talks
+    sample_rows = list({r["id"]: r for r in (eligible_for_cdn[:5] + eligible_for_cdn[-5:])}.values())
     for r in sample_rows:
         local_p = Path(tdb.pipeline_db.get_filepath(r["id"]))
         local_size = local_p.stat().st_size

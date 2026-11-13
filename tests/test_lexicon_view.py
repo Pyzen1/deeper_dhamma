@@ -396,7 +396,7 @@ def test_wordsync_multiword_phrase_highlighting_and_seeking(lexicon_db):
 
 def test_lexicon_and_documents_shareable_url_routing():
     """
-    Verifies thatapp.js updates and parses shareable deep-link URLs for:
+    Verifies that app.js updates and parses shareable deep-link URLs for:
     1. Specific lexicon terms: #lexicon?term=dhamma
     2. Filtered offline source documents: #documents?id=1&q=dhamma
     """
@@ -409,6 +409,132 @@ def test_lexicon_and_documents_shareable_url_routing():
     assert "btn-lexicon-share" in app_js
     assert "View in Offline Source" in app_js
     assert "Raw Archive File" in app_js
+
+
+def test_citta_viveka_and_authoritative_compounds(lexicon_db):
+    """
+    Verifies that citta-viveka, kaya-viveka, upadhi-viveka, and core doctrinal compounds
+    from Bhante Sujato and Ajahn Brahmali are properly indexed, searchable, and mapped.
+    """
+    # 1. citta-viveka
+    cv = lexicon_db.lookup_term("citta-viveka")
+    assert cv is not None
+    assert cv["pali_plain"] == "cittaviveka"
+    assert cv["category"] == "meditation"
+    assert "seclusion" in cv["translation_sujato"].lower()
+    assert "aloneness" in cv["translation_brahm"].lower()
+    assert "hindrance" in cv["translation_brahmali"].lower()
+    assert cv["source_url"] == "https://suttacentral.net/mnd2/en/sujato#12.1"
+
+    # Exact plain lookup
+    cv_plain = lexicon_db.lookup_term("cittaviveka")
+    assert cv_plain is not None
+    assert cv_plain["id"] == cv["id"]
+
+    # 2. kaya-viveka
+    kv = lexicon_db.lookup_term("kaya-viveka")
+    assert kv is not None
+    assert kv["pali_plain"] == "kayaviveka"
+    assert kv["category"] == "meditation"
+    assert "physical" in kv["translation_sujato"].lower() or "bodily" in kv["translation_sujato"].lower()
+
+    # 3. upadhi-viveka
+    uv = lexicon_db.lookup_term("upadhi-viveka")
+    assert uv is not None
+    assert uv["pali_plain"] == "upadhiviveka"
+    assert uv["category"] == "doctrine"
+
+    # 4. citta-sankhara & kaya-sankhara
+    cs = lexicon_db.lookup_term("citta-sankhara")
+    assert cs is not None
+    assert cs["pali_plain"] == "cittasankhara"
+    assert "mental" in cs["translation_sujato"].lower()
+
+    ks = lexicon_db.lookup_term("kaya-sankhara")
+    assert ks is not None
+    assert ks["pali_plain"] == "kayasankhara"
+    assert "physical" in ks["translation_sujato"].lower() or "bodily" in ks["translation_sujato"].lower()
+
+    # 5. piti-sukha
+    ps = lexicon_db.lookup_term("piti-sukha")
+    assert ps is not None
+    assert ps["pali_plain"] == "pitisukha"
+    assert "joy" in ps["translation_sujato"].lower() or "rapture" in ps["translation_sujato"].lower()
+
+
+def test_authoritative_compounds_database_architecture():
+    """
+    Verifies the architectural separation of code, source material, and data:
+    1. authoritative_ebt_compounds.db exists in databases/
+    2. ebt_compounds and phrase_rules tables use integer surrogate primary key 'id'
+    3. load_authoritative_ebt_compounds and load_standard_phrase_rules query SQLite
+    """
+    import sqlite3
+    from deeper_dhamma.config import AUTHORITATIVE_EBT_COMPOUNDS_DB_PATH
+    from deeper_dhamma.build_lexicon import load_authoritative_ebt_compounds, load_standard_phrase_rules
+
+    assert AUTHORITATIVE_EBT_COMPOUNDS_DB_PATH.exists()
+
+    conn = sqlite3.connect(AUTHORITATIVE_EBT_COMPOUNDS_DB_PATH)
+    try:
+        # 1. ebt_compounds table
+        info = conn.execute("PRAGMA table_info(ebt_compounds);").fetchall()
+        assert len(info) >= 5
+        pk_col = next(r[1] for r in info if r[5] == 1)
+        assert pk_col == "id", "ebt_compounds table must use integer primary key 'id'"
+
+        count = conn.execute("SELECT COUNT(*) FROM ebt_compounds;").fetchone()[0]
+        assert count >= 30
+
+        # 2. phrase_rules table
+        p_info = conn.execute("PRAGMA table_info(phrase_rules);").fetchall()
+        assert len(p_info) >= 4
+        pk_p = next(r[1] for r in p_info if r[5] == 1)
+        assert pk_p == "id", "phrase_rules table must use integer primary key 'id'"
+
+        p_count = conn.execute("SELECT COUNT(*) FROM phrase_rules;").fetchone()[0]
+        assert p_count >= 25
+    finally:
+        conn.close()
+
+    # 3. Loader functions return structured dicts from DB
+    compounds = load_authoritative_ebt_compounds()
+    assert len(compounds) >= 30
+    assert any(c["pali_plain"] == "cittaviveka" for c in compounds)
+
+    rules = load_standard_phrase_rules()
+    assert len(rules) >= 25
+    assert any(r["canonical_pali"] == "cittaviveka" for r in rules)
+
+
+def test_ebt_compounds_phonetic_and_fts_queries(lexicon_db):
+    """
+    Verifies that authoritative compound terms can be discovered via:
+    1. Hyphenated and spaced phonetic variants ('citta-viveka', 'citta viveka')
+    2. SQLite FTS5 lexical match ('cittaviveka', 'pitisukha')
+    3. Contextual keyword match ('aloneness of the citta', 'mental seclusion')
+    """
+    # 1. Spaced variant lookup
+    res_space = lexicon_db.lookup_term("citta viveka")
+    assert res_space is not None
+    assert res_space["pali_plain"] == "cittaviveka"
+
+    res_kaya = lexicon_db.lookup_term("kaya viveka")
+    assert res_kaya is not None
+    assert res_kaya["pali_plain"] == "kayaviveka"
+
+    # 2. FTS5 search
+    with lexicon_db._get_connection() as conn:
+        fts_row = conn.execute("SELECT rowid, pali_plain FROM fts_terms WHERE fts_terms MATCH 'cittaviveka';").fetchone()
+        assert fts_row is not None
+        assert fts_row["pali_plain"] == "cittaviveka"
+
+        fts_piti = conn.execute("SELECT rowid, pali_plain FROM fts_terms WHERE fts_terms MATCH 'pitisukha';").fetchone()
+        assert fts_piti is not None
+        assert fts_piti["pali_plain"] == "pitisukha"
+
+
+
 
 
 

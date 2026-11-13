@@ -4,19 +4,20 @@ This directory centralizes all SQLite databases utilized by the BSWA Deeper Dham
 
 ```text
 databases/
-├── sources/                # Pristine local copies of upstream authority documents (mirrored to dist/sources/)
-├── buddhism_lexicon.db     # Master Pali terminology, canonical phrases, translations & phonetic rules
-├── dhamma_transcripts.db   # Canonical transcripts archive & FTS5 search index (pure domain data)
-├── pipeline_state.db       # Local ingestion state: archive filepaths & error tracking (excluded from web)
-├── voiceprints.db          # Reference speaker embeddings gallery (ECAPA-TDNN)
-└── readme.md               # Architecture, lifecycle & separation rationale
+├── sources/                            # Pristine local copies of upstream authority documents (mirrored to dist/sources/)
+├── authoritative_ebt_compounds.db      # Authoritative EBT doctrinal compounds & phonetic rules (data tier, tracked in Git)
+├── buddhism_lexicon.db                 # Master compiled Pali terminology, canonical phrases, translations & phonetic rules
+├── dhamma_transcripts.db               # Canonical transcripts archive & FTS5 search index (pure domain data)
+├── pipeline_state.db                   # Local ingestion state: archive filepaths & error tracking (excluded from web)
+├── voiceprints.db                      # Reference speaker embeddings gallery (ECAPA-TDNN)
+└── readme.md                           # Architecture, lifecycle & separation rationale
 ```
 
 ---
 
 ## Why Separate Database Files? (Architecture & Rationale)
 
-While consolidating these files under a single `databases/` folder makes discovery, backup, and inspection intuitive, keeping them as **four distinct SQLite database files** is a deliberate architectural decision based on the following factors:
+While consolidating these files under a single `databases/` folder makes discovery, backup, and inspection intuitive, keeping them as **distinct SQLite database files** (five total, including the EBT compounds data store) is a deliberate architectural decision based on the following factors:
 
 ```text
 +-------------------------------------------------------------------------------------------------------------+
@@ -59,8 +60,8 @@ While consolidating these files under a single `databases/` folder makes discove
 * **Status:** Tracked in Git
 * **Python Interface:** `deeper_dhamma.lexicon.BuddhismLexiconDatabase`, `deeper_dhamma.terminology.TerminologyEditor`, `deeper_dhamma.build_lexicon`
 * **Key Tables:**
-  * `terms`: 2,447 doctrinal, canonical text/sutta, & monastic Vinaya entries with diacritics, plain Romanization, categories, foreign key `source_document_id`, per-item `source_url`, and teacher translation columns (`translation_bodhi`, `translation_sujato`, `translation_brahm`, `translation_brahmali`). Zero terms are hardcoded in Python; all entries are deterministically parsed from `databases/sources/`.
-  * `phrase_rules`: Contextual phonetic correction rules that intercept Whisper ASR misrecognitions.
+  * `terms`: 2,482 doctrinal, canonical text/sutta, & monastic Vinaya entries with diacritics, plain Romanization, categories, foreign key `source_document_id`, per-item `source_url`, and teacher translation columns (`translation_bodhi`, `translation_sujato`, `translation_brahm`, `translation_brahmali`). Zero terms are hardcoded in Python; all entries are deterministically parsed from `databases/sources/` and `databases/authoritative_ebt_compounds.db` (enforcing strict architectural separation of code, source material, and data).
+  * `phrase_rules`: Contextual phonetic correction rules that intercept Whisper ASR misrecognitions (loaded from `databases/authoritative_ebt_compounds.db`).
   * `source_documents`: 4 canonical offline authority reference documents with local mirror path (`mirror_url`), raw content (`content_text`), zlib compression (`content_compressed`), and SHA-256 integrity hashes of the pristine source files:
     1. **Pali Glossary for Bhikkhus Bodhi and Sujato** (1,063 terms comparative concordance table; local source: `sources/suttacentral_bodhi_sujato_glossary.json`; canonical URL: `https://discourse.suttacentral.net/t/pali-glossary-for-bhikkhus-bodhi-and-sujato/12008`).
     2. **SuttaCentral Vinaya Piṭaka: Monastic Law of the Theravāda School** by Bhikkhu Brahmali (1,302 unique terms monastic law table; local source: `sources/suttacentral_brahmali_vinaya_glossary.html`; canonical URL: `https://suttacentral.net/edition/pli-tv-vi/en/brahmali/appendix-glossary`).
@@ -68,6 +69,14 @@ While consolidating these files under a single `databases/` folder makes discove
     4. **SuttaCentral Tipiṭaka: Canonical Nikāyas & Discourses (DN & MN)** by Bhikkhu Sujato & Bhikkhu Bodhi (219 Piṭaka, Nikāya, and DN/MN sutta titles parsed from `sources/suttacentral_super_name_root.json`, `sources/suttacentral_super_name_en_sujato.json`, `sources/suttacentral_suttaplex_dn.json`, and `sources/suttacentral_suttaplex_mn.json`; canonical URL: `https://suttacentral.net/pitaka/sutta`).
   * `v_terms`: SQL view joining `terms` with `source_documents` (`COALESCE(t.source_url, s.url) AS source_url`, `s.mirror_url AS source_mirror_url`) for zero-overhead client retrieval.
   * `fts_terms`: SQLite FTS5 virtual table for sub-millisecond full-text lexical search.
+
+### 1b. `authoritative_ebt_compounds.db`
+* **File:** `databases/authoritative_ebt_compounds.db` (~56 KB)
+* **Status:** Tracked in Git
+* **Python Interface:** `deeper_dhamma.build_lexicon.load_authoritative_ebt_compounds`, `deeper_dhamma.build_lexicon.load_standard_phrase_rules`, `deeper_dhamma.config.AUTHORITATIVE_EBT_COMPOUNDS_DB_PATH`
+* **Key Tables:**
+  * `ebt_compounds`: 36 authoritative Early Buddhist Text doctrinal compounds (e.g., `cittaviveka`, `kayaviveka`, `upadhiviveka`, `pitisukha`, `cittasankhara`) with teacher translations, `context_keywords`, `phonetic_variants`, and canonical SuttaCentral `source_url` links.
+  * `phrase_rules`: 30 contextual regex substitution rules (`pattern`, `canonical_pali`, `category`, `explanation`, `context_requirement`) compiled into `buddhism_lexicon.db` for ASR disambiguation.
 
 ### 2. `voiceprints.db`
 * **File:** `databases/voiceprints.db` (~324 KB)
