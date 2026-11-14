@@ -2,8 +2,8 @@
 Podbean Podcast Feed Sync, Catalog Crawler, and High-Resilience Audio Downloader.
 
 Crawls the BSWA Deeper Dhamma podcast feed, maintains local catalog.json,
-and downloads audio talks into structured year/series directories with embedded
-ID3v2 APIC cover thumbnails and custom metadata via yt-dlp, aria2c, and ffmpeg.
+and downloads pristine 1:1 audio talks into structured year/series directories
+without sidecar cover thumbnails or ID3 re-muxing via yt-dlp and aria2c.
 """
 
 import html
@@ -176,8 +176,6 @@ class CatalogEpisodePP(yt_dlp.postprocessor.PostProcessor):
         info["custom_year"] = str(self.ep_meta["year"])
         info["custom_series"] = self.ep_meta["series"]
         info["custom_filename"] = self.ep_meta["filename"]
-        if self.ep_meta.get("logo") and not info.get("thumbnails"):
-            info["thumbnails"] = [{"url": self.ep_meta["logo"], "id": "0"}]
         return [], info
 
 
@@ -845,7 +843,7 @@ def run_sync(
                 "external_downloader_args": {"aria2c": aria2_args},
                 "ratelimit": (rate_limit_mb * 1024 * 1024) if rate_limit_mb else None,
                 "download_archive": str(archive_path),
-                "writethumbnail": True,
+                "writethumbnail": False,
                 "logger": ydl_adapter,
                 "windowsfilenames": True,
                 "retries": 10,

@@ -65,3 +65,28 @@ def test_downloader_aria2c_fallback_and_paths_present():
     assert "aria2c failed" in src
     assert "native_opts" in src
 
+
+def test_downloader_disables_thumbnail_downloads():
+    """Verifies that run_sync disables sidecar thumbnail downloads and CatalogEpisodePP does not inject thumbnails."""
+    src = inspect.getsource(downloader.run_sync)
+    assert '"writethumbnail": False' in src
+    assert '"writethumbnail": True' not in src
+
+    pp = downloader.CatalogEpisodePP(
+        None,
+        {
+            "title": "Sample Talk",
+            "upload_date": "2026-01-15",
+            "year": "2026",
+            "series": "standalone",
+            "filename": "2026-01-15_sample_talk",
+            "logo": "https://pbcdn1.podbean.com/imglogo/image-logo/sample.jpg",
+        },
+    )
+    _, updated_info = pp.run({})
+    assert "thumbnails" not in updated_info
+    assert updated_info["custom_year"] == "2026"
+    assert updated_info["custom_series"] == "standalone"
+    assert updated_info["custom_filename"] == "2026-01-15_sample_talk"
+
+
