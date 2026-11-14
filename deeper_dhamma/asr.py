@@ -496,6 +496,13 @@ class Transcriber:
                                 "prob": w_prob,
                             })
 
+                words = [w for w in words if w.get("word", "").strip()]
+                # Guard against faster-whisper segment text/word divergence (e.g. corrupt UTF-8 /
+                # multi-script decode glitches in s.text that are dropped or clean in s.words) so
+                # whitespace-delimited tokens in text stay 1:1 with coalesced word timings.
+                if words and len(clean_text.split()) != len(words):
+                    clean_text = " ".join(" ".join(w["word"].split()) for w in words)
+
                 # Guard against faster-whisper's add_word_timestamps lead-in boundary bug where
                 # an unpunctuated first word (e.g. "This" before "evening") is anchored onto a
                 # pre-speech rustle/breath several seconds before actual speech onset.

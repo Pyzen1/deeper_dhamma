@@ -89,6 +89,8 @@ def collect_status(
     db_resolved_teachers: Dict[str, str] = {}
     db_errors: List[Dict[str, Any]] = []
     error_years = Counter()
+    error_history_counts: Dict[str, int] = {"active": 0, "cleared": 0}
+    cleared_errors: List[Dict[str, Any]] = []
 
     if db_path.exists():
         try:
@@ -144,6 +146,9 @@ def collect_status(
                     db_errors.append(ed)
                     if ey:
                         error_years[ey] += 1
+
+            error_history_counts = pipeline_db.get_error_history_counts()
+            cleared_errors = pipeline_db.list_error_history(status="cleared", limit=50)
 
             for ep in db_episodes:
                 ep_id = ep["id"]
@@ -374,6 +379,8 @@ def collect_status(
         "errors": db_errors,
         "errors_count": len(db_errors),
         "errors_by_year": dict(error_years),
+        "error_history_counts": error_history_counts,
+        "cleared_errors": cleared_errors,
     }
 
 
@@ -407,10 +414,14 @@ def print_summary(data: Dict[str, Any]) -> None:
     print(f"  - Disk Archive Coverage:    {arch['transcribed_on_disk']:,} / {arch['total_files']:,} talks transcribed {tr_bar}")
     print(f"  - Ready for Transcription:  {arch['pending_transcription_on_disk']:,} audio talks available on disk")
     err_count = data.get("errors_count", len(data.get("errors", [])))
+    hist_counts = data.get("error_history_counts") or {}
+    cleared_count = int(hist_counts.get("cleared", 0))
     if err_count > 0:
         print(f"  - Files with Active Errors: {err_count:,} file(s) with recorded errors (inspect: python main.py status -e)")
     else:
         print("  - Files with Active Errors: 0 files with errors (all clean)")
+    if cleared_count > 0:
+        print(f"  - Cleared Error History:    {cleared_count:,} resolved error(s) tracked (inspect: python main.py status -e)")
 
     print("-" * 80)
     print("Acoustic Era Distribution (In-Scope Catalog):")
@@ -643,5 +654,22 @@ def print_errors(data: Dict[str, Any], limit: int = 25) -> None:
     print("\n  -> To retry failed operations: python main.py sync --retry-errors")
     print("  -> Or for transcription:      python main.py transcribe --all --retry-errors")
     print("  -> Retranscribe by Podbean ID: python main.py transcribe --id pbXXXX")
+
+    cleared_errors = data.get("cleared_errors") or []
+    cleared_total = int((data.get("error_history_counts") or {}).get("cleared", len(cleared_errors)))
+    if cleared_errors:
+        print("\n" + "-" * 80)
+        print(f"Resolved / Cleared Error History ({cleared_total:,} total resolved, showing {min(limit, len(cleared_errors))})")
+        print("-" * 80)
+        for idx, item in enumerate(cleared_errors[:limit], 1):
+            op = (item.get("operation") or "unknown").upper()
+            res_at = (item.get("resolved_at") or "")[:19]
+            res_note = item.get("resolution") or "resolved"
+            uid = item.get("episode_uid") or "unknown"
+            msg = item.get("error_message") or ""
+            if len(msg) > 85:
+                msg = msg[:82] + "..."
+            print(f"  {idx:>2}. [{res_at}] [CLEARED:{res_note}] Operation: {op:<10} | ID: {uid}")
+            print(f"      Prior Issue: {msg}")
     print("=" * 80)
 

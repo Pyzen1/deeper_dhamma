@@ -205,6 +205,15 @@ def extract_vbr_trailer(words_blob: Optional[bytes]) -> bytes:
     return b""
 
 
+def count_words_in_blob(words_blob: Optional[bytes]) -> int:
+    """Returns the indexed word count stored in a packed word-timing binary BLOB header."""
+    import struct
+
+    if not words_blob or len(words_blob) < 4:
+        return 0
+    return int(struct.unpack_from("<I", words_blob, 0)[0])
+
+
 def unpack_words_blob_to_segments(words_blob: Optional[bytes], segments: List[Dict]) -> bool:
     """
     Reconstructs per-segment `words` lists from a compact `words_blob` when segments

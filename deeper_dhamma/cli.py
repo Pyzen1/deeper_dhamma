@@ -654,22 +654,52 @@ def cmd_status(args):
 def cmd_audit(args):
     """Executes audio archive inspection, scrubbing, and reporting."""
     import time
-    from deeper_dhamma.audit import scan_archive, clean_archive, print_audit_report
+    from deeper_dhamma.audit import (
+        audit_database_transcripts,
+        clean_archive,
+        print_audit_report,
+        scan_archive,
+        sync_audit_results_to_db,
+    )
     from deeper_dhamma.config import ARCHIVE_DIR, LOGS_DIR
 
     t0 = time.time()
     archive_dir = Path(args.target_dir) if getattr(args, "target_dir", None) else ARCHIVE_DIR
 
-    all_files_count = len(list(archive_dir.rglob("*")))
+    all_files = list(archive_dir.rglob("*"))
+    all_files_count = len(all_files)
     issues = scan_archive(
         archive_dir=archive_dir,
         workers=args.workers,
         deep_probe=not args.quick,
         progress=True,
+        verify_decode=getattr(args, "verify_decode", False),
     )
+    checked_identifiers: List[str] = [
+        f.stem for f in all_files if f.is_file() and f.suffix.lower() in (".mp3", ".m4a")
+    ]
+    checked_db_ids: List[str] = []
+    if getattr(args, "check_db", False):
+        db_issues, db_checked = audit_database_transcripts(archive_dir=archive_dir)
+        issues.extend(db_issues)
+        checked_db_ids.extend(db_checked)
+
     elapsed = time.time() - t0
 
     print_audit_report(issues, total_scanned=all_files_count, elapsed_sec=elapsed)
+
+    if getattr(args, "sync_db", False):
+        checked_decode_ids = checked_identifiers if getattr(args, "verify_decode", False) else []
+        sync_stats = sync_audit_results_to_db(
+            issues,
+            checked_identifiers=checked_identifiers,
+            checked_decode_ids=checked_decode_ids,
+            checked_db_ids=checked_db_ids,
+        )
+        print(
+            f"[*] Pipeline Error DB synced: {sync_stats['recorded']} recorded, "
+            f"{sync_stats['cleared']} cleared."
+        )
 
     # Save JSON report if requested or default
     report_path = Path(args.report) if getattr(args, "report", None) else (LOGS_DIR / "archive_audit_report.json")
@@ -962,6 +992,9 @@ def main(argv=None):
         help="Inspect, audit integrity, and clean/scrub archive audio files",
     )
     p_audit.add_argument("--scan", "-s", action="store_true", help="Scan archive and report health issues")
+    p_audit.add_argument("--verify-decode", action="store_true", help="Run full FFmpeg null decode pass across archive audio files")
+    p_audit.add_argument("--check-db", action="store_true", help="Verify transcript DB word-sync parity and decoded audio duration completeness")
+    p_audit.add_argument("--sync-db", action="store_true", help="Record detected issues and clear resolved audit errors in pipeline_state.db")
     p_audit.add_argument("--clean", "-c", action="store_true", help="Purge 0-byte ghost files, transient fragments, and corrupt files")
     p_audit.add_argument("--quick", "-q", action="store_true", help="Skip deep ffprobe decode checks (fast file scan only)")
     p_audit.add_argument("--fix-extensions", action="store_true", help="Auto-fix container/codec mismatches (e.g. AAC in .mp3 -> .m4a)")

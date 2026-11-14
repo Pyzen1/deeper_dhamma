@@ -109,17 +109,19 @@ class TranscriptionPipeline:
         waveform_16k, _ = load_audio_segment(
             audio_path,
             start_sec=0.0,
-            end_sec=process_dur,
+            end_sec=max_duration_sec,
             target_sr=16000,
+            info=info,
         )
         audio_np = waveform_16k.squeeze(0).numpy()
-        if len(audio_np) > 0:
-            actual_decoded_dur = round(float(len(audio_np)) / 16000.0, 3)
-            process_dur = (
-                actual_decoded_dur
-                if not max_duration_sec
-                else min(actual_decoded_dur, max_duration_sec)
-            )
+        if len(audio_np) == 0:
+            raise RuntimeError(f"Decoded 0 audio samples from {audio_path.name}")
+        actual_decoded_dur = round(float(len(audio_np)) / 16000.0, 3)
+        if not max_duration_sec:
+            total_dur = actual_decoded_dur
+            process_dur = actual_decoded_dur
+        else:
+            process_dur = min(actual_decoded_dur, max_duration_sec)
 
         prepared_asr = None
         if self.transcriber.batch_size == 1:
@@ -237,11 +239,22 @@ class TranscriptionPipeline:
 
                 # 1. Single In-Memory Audio Loading & Resample (zero repeated disk I/O)
                 logger.info(f"    Loading {process_dur:.1f}s audio at 16kHz mono into RAM...")
-                waveform_16k, _ = load_audio_segment(audio_path, start_sec=0.0, end_sec=process_dur, target_sr=16000)
+                waveform_16k, _ = load_audio_segment(
+                    audio_path,
+                    start_sec=0.0,
+                    end_sec=max_duration_sec,
+                    target_sr=16000,
+                    info=info,
+                )
                 audio_np = waveform_16k.squeeze(0).numpy()
-                if len(audio_np) > 0:
-                    actual_decoded_dur = round(float(len(audio_np)) / 16000.0, 3)
-                    process_dur = actual_decoded_dur if not max_duration_sec else min(actual_decoded_dur, max_duration_sec)
+                if len(audio_np) == 0:
+                    raise RuntimeError(f"Decoded 0 audio samples from {audio_path.name}")
+                actual_decoded_dur = round(float(len(audio_np)) / 16000.0, 3)
+                if not max_duration_sec:
+                    total_dur = actual_decoded_dur
+                    process_dur = actual_decoded_dur
+                else:
+                    process_dur = min(actual_decoded_dur, max_duration_sec)
                 prepared_asr = None
                 prefetched_vbr_trailer = None
 

@@ -180,8 +180,12 @@ class TerminologyEditor:
                 src_slice = words[i1:i2]
                 m_len = i2 - i1
                 k_len = j2 - j1
-                if tag == "equal" or m_len == k_len:
+                if tag == "equal":
                     synced.extend(src_slice)
+                elif m_len == k_len and m_len > 0:
+                    for offset, src_w in enumerate(src_slice):
+                        prefix = " " if src_w["word"].startswith(" ") else ""
+                        synced.append({**src_w, "word": f"{prefix}{target_tokens[j1 + offset]}"})
                 elif m_len > k_len and k_len >= 1:
                     if k_len == 1:
                         synced.append({
@@ -226,8 +230,45 @@ class TerminologyEditor:
                             "start": src_slice[k_len - 1]["start"],
                             "end": src_slice[-1]["end"],
                         })
-                else:
-                    synced.extend(src_slice)
+                elif k_len == 0:
+                    # Deleted/collapsed source tokens: omit deleted words instead of copying them,
+                    # extending the preceding word's end boundary so contiguous speech spans stay intact.
+                    if synced and src_slice:
+                        synced[-1] = {
+                            **synced[-1],
+                            "end": max(float(synced[-1]["end"]), float(src_slice[-1]["end"])),
+                        }
+                elif k_len > m_len:
+                    span_start = (
+                        float(src_slice[0]["start"])
+                        if src_slice
+                        else (float(synced[-1]["end"]) if synced else 0.0)
+                    )
+                    span_end = (
+                        float(src_slice[-1]["end"])
+                        if src_slice
+                        else (
+                            float(words[i2]["start"])
+                            if i2 < len(words)
+                            else span_start + 0.1 * k_len
+                        )
+                    )
+                    span_end = max(span_end, span_start)
+                    step = (span_end - span_start) / k_len
+                    base_prob = (
+                        min(float(w.get("prob", 1.0)) for w in src_slice)
+                        if src_slice
+                        else 1.0
+                    )
+                    for offset in range(k_len):
+                        w_start = round(span_start + offset * step, 3)
+                        w_end = round(span_start + (offset + 1) * step, 3)
+                        synced.append({
+                            "word": f" {target_tokens[j1 + offset]}",
+                            "start": w_start,
+                            "end": max(w_start, w_end),
+                            "prob": round(base_prob, 3),
+                        })
             if len(synced) == len(target_tokens):
                 return synced
 

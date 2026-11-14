@@ -283,3 +283,47 @@ def test_transcript_database_additional_operations(tmp_path: Path):
     retry_ok, retry_msg = tdb.check_preflight("pb77777", operation="transcribe", retry_errors=True)
     assert retry_ok is True
     assert "cleared" in retry_msg.lower()
+
+
+def test_pipeline_error_history_scoped_clearing_and_audit_trail(tmp_path: Path):
+    """Verifies pipeline_error_history PK compliance, scoped clear_error, and audit transitions."""
+    pdb = PipelineStateDatabase(tmp_path / "history_pipe.db")
+    with pdb._get_connection() as conn:
+        pk_info = conn.execute("PRAGMA table_info(pipeline_error_history)").fetchall()
+        pk_col = next(r[1] for r in pk_info if r[5] == 1)
+        assert pk_col == "id"
+
+    # Active download 404 must survive an unrelated audit clear_error
+    pdb.record_error(
+        episode_id="pb8320643",
+        error_message="HTTP Error 404: Removed from CDN by host",
+        operation="download",
+        title="Unavailable Talk",
+        error_code="http_404",
+    )
+    pdb.clear_error("pb8320643", resolution="audit_verified_clean", operation="audit")
+    still_active = pdb.get_error("pb8320643")
+    assert still_active is not None
+    assert still_active["last_error_op"] == "download"
+
+    # Audit error transitions cleanly to cleared with resolution note
+    pdb.record_error(
+        episode_id="pb22141219",
+        error_message="Transcript duration (145.8s) truncated vs decoded PCM (3617.9s)",
+        operation="audit",
+        filepath="/archive/2012/retreat_07_10.mp3",
+        error_code="duration_truncation",
+    )
+    counts = pdb.get_error_history_counts()
+    assert counts["active"] == 2
+    assert counts["cleared"] == 0
+
+    pdb.clear_error("pb22141219", resolution="retranscribed_via_ffmpeg", operation="audit")
+    assert pdb.get_error("pb22141219") is None
+    counts_after = pdb.get_error_history_counts()
+    assert counts_after["active"] == 1
+    assert counts_after["cleared"] == 1
+    cleared_rows = pdb.list_error_history(status="cleared")
+    assert len(cleared_rows) == 1
+    assert cleared_rows[0]["episode_uid"] == "pb22141219"
+    assert cleared_rows[0]["resolution"] == "retranscribed_via_ffmpeg"

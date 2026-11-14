@@ -5,7 +5,14 @@ Unit tests for Audio Archive Inspection, Integrity Auditing, and Scrubbing Engin
 from pathlib import Path
 import pytest
 
-from deeper_dhamma.audit import clean_archive, probe_single_file
+from deeper_dhamma.audit import (
+    audit_database_transcripts,
+    clean_archive,
+    probe_single_file,
+    sync_audit_results_to_db,
+)
+from deeper_dhamma.postprocess import pack_words_blob
+from deeper_dhamma.storage import TranscriptDatabase
 
 
 def test_probe_single_file_detects_zero_byte_ghost(tmp_path: Path):
@@ -103,3 +110,75 @@ def test_clean_archive_dry_run_vs_active(tmp_path: Path):
     assert not ghost.exists()
     assert not frag.exists()
     assert good_audio.exists()
+
+
+def test_audit_database_transcripts_tracks_and_clears_word_sync_mismatch(tmp_path: Path):
+    """Verifies DB audit catches word_sync_mismatch, logs to pipeline_state.db, and clears once fixed."""
+    db_path = tmp_path / "transcripts.db"
+    pipe_db_path = tmp_path / "pipeline_state.db"
+    tdb = TranscriptDatabase(db_path=db_path, pipeline_db_path=pipe_db_path)
+
+    tdb.save_episode(
+        episode_metadata={
+            "id": "pb12345",
+            "title": "Sample Talk",
+            "date": "2020-01-01",
+            "primary_teacher": "ajahn_brahm",
+            "primary_display": "Ajahn Brahm",
+        },
+        attributed_segments=[
+            {"start": 0.0, "end": 2.0, "speaker": "ajahn_brahm", "speaker_display": "Ajahn Brahm", "text": "one two three"}
+        ],
+        duration_sec=2.0,
+        year="2020",
+        filename_stem="sample_talk",
+    )
+    # Intentionally save mismatched word BLOB (2 words vs 3 tokens)
+    bad_blob = pack_words_blob([
+        {"word": " one", "start": 0.0, "end": 0.5},
+        {"word": " two", "start": 0.5, "end": 1.0},
+    ])
+    tdb.save_episode_words("pb12345", bad_blob)
+
+    issues, checked_ids = audit_database_transcripts(
+        db_path=db_path,
+        archive_dir=tmp_path,
+        check_durations=False,
+        pipeline_db_path=pipe_db_path,
+    )
+    assert len(issues) == 1
+    assert issues[0]["issue"] == "word_sync_mismatch"
+
+    stats1 = sync_audit_results_to_db(
+        issues,
+        checked_db_ids=checked_ids,
+        db_path=db_path,
+        pipeline_db_path=pipe_db_path,
+    )
+    assert stats1["recorded"] == 1
+    assert tdb.get_error("pb12345") is not None
+
+    # Repair BLOB to match 3 tokens -> re-audit clears the audit error
+    good_blob = pack_words_blob([
+        {"word": " one", "start": 0.0, "end": 0.5},
+        {"word": " two", "start": 0.5, "end": 1.0},
+        {"word": " three", "start": 1.0, "end": 1.5},
+    ])
+    tdb.save_episode_words("pb12345", good_blob)
+
+    issues2, checked_ids2 = audit_database_transcripts(
+        db_path=db_path,
+        archive_dir=tmp_path,
+        check_durations=False,
+        pipeline_db_path=pipe_db_path,
+    )
+    assert issues2 == []
+    stats2 = sync_audit_results_to_db(
+        issues2,
+        checked_db_ids=checked_ids2,
+        db_path=db_path,
+        pipeline_db_path=pipe_db_path,
+    )
+    assert stats2["cleared"] == 1
+    assert tdb.get_error("pb12345") is None
+    assert tdb.get_error_history_counts()["cleared"] == 1

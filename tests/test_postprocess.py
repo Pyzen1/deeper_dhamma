@@ -374,4 +374,35 @@ def test_protected_common_english_words_and_turbo_default():
     assert len(changes) == 0
 
 
+def test_sync_word_timings_handles_collocation_delete_and_insert_opcodes():
+    """
+    Regression test for pb9433171: SequenceMatcher delete/insert opcodes alongside
+    collocation merges must still keep 1:1 token-to-word-timing parity.
+    """
+    from deeper_dhamma.terminology import TerminologyEditor
+
+    editor = TerminologyEditor()
+    orig_text = "feeling the kaya sankara here sankara in breathing"
+    words = [
+        {"word": " feeling", "start": 0.0, "end": 0.4, "prob": 0.99},
+        {"word": " the", "start": 0.4, "end": 0.6, "prob": 0.99},
+        {"word": " kaya", "start": 0.6, "end": 0.9, "prob": 0.85},
+        {"word": " sankara", "start": 0.9, "end": 1.4, "prob": 0.85},
+        {"word": " here", "start": 1.4, "end": 1.7, "prob": 0.99},
+        {"word": " sankara", "start": 1.7, "end": 2.1, "prob": 0.80},
+        {"word": " in", "start": 2.1, "end": 2.3, "prob": 0.99},
+        {"word": " breathing", "start": 2.3, "end": 2.9, "prob": 0.99},
+    ]
+    cleaned_text = "feeling the kayasankhara here in breathing"
+    synced = editor._sync_word_timings(words, cleaned_text, orig_text)
+    assert synced is not None
+    assert len(synced) == len(cleaned_text.split()) == 6
+
+    # Expansion (insert / m_len < k_len) also maintains 1:1 parity
+    expanded_text = "feeling the kaya and sankhara here in mindful breathing"
+    synced_exp = editor._sync_word_timings(words, expanded_text, orig_text)
+    assert synced_exp is not None
+    assert len(synced_exp) == len(expanded_text.split()) == 9
+
+
 

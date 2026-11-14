@@ -3,6 +3,7 @@ Unified SQLite Canonical Storage & On-Demand Format Exporter.
 """
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import json
 import logging
 import sqlite3
@@ -88,6 +89,37 @@ class PipelineStateDatabase:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_episode_raw_asr_uid ON episode_raw_asr(episode_uid);
+
+                CREATE TABLE IF NOT EXISTS pipeline_error_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_uid TEXT NOT NULL,
+                    filepath TEXT,
+                    operation TEXT NOT NULL,
+                    error_code TEXT,
+                    error_message TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    resolution TEXT,
+                    detected_at TEXT NOT NULL,
+                    resolved_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_peh_uid_op_status
+                    ON pipeline_error_history(episode_uid, operation, status);
+                CREATE INDEX IF NOT EXISTS idx_peh_status
+                    ON pipeline_error_history(status);
+
+                INSERT INTO pipeline_error_history (
+                    episode_uid, filepath, operation, error_code, error_message, status, detected_at
+                )
+                SELECT es.episode_uid, es.filepath, COALESCE(es.last_error_op, 'unknown'), NULL,
+                       es.last_error, 'active', COALESCE(es.last_error_at, CURRENT_TIMESTAMP)
+                FROM episode_states es
+                WHERE es.last_error IS NOT NULL AND es.last_error != ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pipeline_error_history h
+                      WHERE h.episode_uid = es.episode_uid AND h.status = 'active'
+                        AND h.error_message = es.last_error
+                  );
                 """
             )
 
@@ -189,6 +221,12 @@ class PipelineStateDatabase:
                         """,
                         (episode_uid, title, filepath, stem, year, trans_val),
                     )
+                    self._mark_history_cleared(
+                        conn,
+                        episode_id=episode_uid,
+                        resolution="episode_saved",
+                        operation=None,
+                    )
                 else:
                     conn.execute(
                         """
@@ -250,6 +288,42 @@ class PipelineStateDatabase:
             ).fetchone()
             return row["episode_uid"] if row else None
 
+    def _resolve_candidate_uids(self, conn: sqlite3.Connection, identifier: str) -> List[str]:
+        rows = conn.execute(
+            """
+            SELECT episode_uid FROM episode_states
+            WHERE episode_uid = ? OR filename_stem = ?;
+            """,
+            (identifier, identifier),
+        ).fetchall()
+        uids = [r["episode_uid"] for r in rows]
+        if identifier not in uids:
+            uids.append(identifier)
+        return uids
+
+    def _mark_history_cleared(
+        self,
+        conn: sqlite3.Connection,
+        episode_id: str,
+        resolution: Optional[str] = None,
+        operation: Optional[str] = None,
+    ) -> int:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        res_text = (resolution or "resolved").strip()
+        uids = self._resolve_candidate_uids(conn, episode_id)
+        placeholders = ", ".join(["?"] * len(uids))
+        sql = (
+            f"UPDATE pipeline_error_history SET status = 'cleared', "
+            f"resolution = ?, resolved_at = ? "
+            f"WHERE episode_uid IN ({placeholders}) AND status = 'active'"
+        )
+        params: List[Any] = [res_text, now_iso, *uids]
+        if operation:
+            sql += " AND operation = ?"
+            params.append(operation)
+        cur = conn.execute(sql, params)
+        return cur.rowcount
+
     def record_error(
         self,
         episode_id: str,
@@ -258,10 +332,11 @@ class PipelineStateDatabase:
         filepath: Optional[str] = None,
         title: Optional[str] = None,
         year: Optional[int] = None,
+        error_code: Optional[str] = None,
     ) -> None:
-        from datetime import datetime, timezone
         now_iso = datetime.now(timezone.utc).isoformat()
         clean_err = str(error_message).strip()
+        op_name = (operation or "unknown").strip()
         stem = Path(filepath).stem if filepath else None
         if not year and filepath:
             for part in Path(filepath).parts:
@@ -289,6 +364,43 @@ class PipelineStateDatabase:
                     """,
                     (episode_id, title or episode_id, filepath, stem, year, clean_err, now_iso, operation),
                 )
+                canonical_uid = episode_id
+                row = conn.execute(
+                    "SELECT episode_uid FROM episode_states WHERE episode_uid = ? OR filename_stem = ? LIMIT 1;",
+                    (episode_id, episode_id),
+                ).fetchone()
+                if row:
+                    canonical_uid = row["episode_uid"]
+
+                existing = conn.execute(
+                    """
+                    SELECT id FROM pipeline_error_history
+                    WHERE episode_uid = ? AND operation = ? AND COALESCE(error_code, '') = ?
+                      AND error_message = ? AND status = 'active'
+                    LIMIT 1;
+                    """,
+                    (canonical_uid, op_name, error_code or "", clean_err),
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        """
+                        UPDATE pipeline_error_history
+                        SET detected_at = ?,
+                            filepath = COALESCE(NULLIF(?, ''), filepath)
+                        WHERE id = ?;
+                        """,
+                        (now_iso, filepath, existing["id"]),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO pipeline_error_history (
+                            episode_uid, filepath, operation, error_code, error_message,
+                            status, detected_at
+                        ) VALUES (?, ?, ?, ?, ?, 'active', ?);
+                        """,
+                        (canonical_uid, filepath, op_name, error_code, clean_err, now_iso),
+                    )
 
     def get_error(self, episode_id: str) -> Optional[Dict[str, Any]]:
         with self._get_connection() as conn:
@@ -305,19 +417,44 @@ class PipelineStateDatabase:
             ).fetchone()
             return dict(row) if row else None
 
-    def clear_error(self, episode_id: str) -> None:
+    def clear_error(
+        self,
+        episode_id: str,
+        resolution: Optional[str] = None,
+        operation: Optional[str] = None,
+    ) -> None:
         with self._get_connection() as conn:
             with conn:
-                conn.execute(
-                    """
-                    UPDATE episode_states
-                    SET last_error = NULL,
-                        last_error_at = NULL,
-                        last_error_op = NULL,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE episode_uid = ? OR filename_stem = ?;
-                    """,
-                    (episode_id, episode_id),
+                if operation:
+                    conn.execute(
+                        """
+                        UPDATE episode_states
+                        SET last_error = NULL,
+                            last_error_at = NULL,
+                            last_error_op = NULL,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE (episode_uid = ? OR filename_stem = ?)
+                          AND last_error_op = ?;
+                        """,
+                        (episode_id, episode_id, operation),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE episode_states
+                        SET last_error = NULL,
+                            last_error_at = NULL,
+                            last_error_op = NULL,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE episode_uid = ? OR filename_stem = ?;
+                        """,
+                        (episode_id, episode_id),
+                    )
+                self._mark_history_cleared(
+                    conn,
+                    episode_id=episode_id,
+                    resolution=resolution,
+                    operation=operation,
                 )
 
     def list_errors(self, operation: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -344,6 +481,50 @@ class PipelineStateDatabase:
                     """
                 )
             return [dict(r) for r in cur.fetchall()]
+
+    def list_error_history(
+        self,
+        status: Optional[str] = None,
+        operation: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Lists chronological active and cleared error audit entries from pipeline_error_history."""
+        clauses: List[str] = []
+        params: List[Any] = []
+        if status:
+            clauses.append("h.status = ?")
+            params.append(status)
+        if operation:
+            clauses.append("h.operation = ?")
+            params.append(operation)
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        limit_sql = f"LIMIT {int(limit)}" if limit is not None else ""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT h.id, h.episode_uid, h.filepath, h.operation, h.error_code,
+                       h.error_message, h.status, h.resolution, h.detected_at, h.resolved_at,
+                       es.title, es.year
+                FROM pipeline_error_history h
+                LEFT JOIN episode_states es ON es.episode_uid = h.episode_uid
+                {where_sql}
+                ORDER BY COALESCE(h.resolved_at, h.detected_at) DESC, h.id DESC
+                {limit_sql};
+                """,
+                params,
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_error_history_counts(self) -> Dict[str, int]:
+        """Returns aggregate counts of active and cleared error entries in pipeline_error_history."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) AS cnt FROM pipeline_error_history GROUP BY status;"
+            ).fetchall()
+            counts = {"active": 0, "cleared": 0}
+            for r in rows:
+                counts[r["status"]] = int(r["cnt"])
+            return counts
 
 
 class TranscriptDatabase:
@@ -753,6 +934,8 @@ class TranscriptDatabase:
 
                     if new_blob is not None:
                         self.save_episode_words(ep_id, new_blob)
+                        self.clear_error(ep_id, resolution="reprocessed_postprocess", operation="word_sync")
+                        self.clear_error(ep_id, resolution="reprocessed_postprocess", operation="audit")
 
         return {
             "episodes_scanned": episodes_scanned,
@@ -1567,6 +1750,7 @@ class TranscriptDatabase:
         operation: Optional[str] = None,
         filepath: Optional[str] = None,
         title: Optional[str] = None,
+        error_code: Optional[str] = None,
     ) -> None:
         """
         Records or updates the most recent error associated with an episode/archive file
@@ -1578,6 +1762,7 @@ class TranscriptDatabase:
             operation=operation,
             filepath=filepath,
             title=title,
+            error_code=error_code,
         )
 
     def get_error(self, episode_id: str) -> Optional[Dict[str, Any]]:
@@ -1630,13 +1815,39 @@ class TranscriptDatabase:
 
         return False, f"Active error recorded ({last_op} on {last_at[:10]}): {last_msg}"
 
-    def clear_error(self, episode_id: str) -> None:
-        """Clears the last_error tracking fields when an operation succeeds for an episode."""
-        self.pipeline_db.clear_error(episode_id)
+    def clear_error(
+        self,
+        episode_id: str,
+        resolution: Optional[str] = None,
+        operation: Optional[str] = None,
+    ) -> None:
+        """Clears active error tracking fields and marks matching audit history entries cleared."""
+        self.pipeline_db.clear_error(
+            episode_id,
+            resolution=resolution,
+            operation=operation,
+        )
 
     def list_errors(self, operation: Optional[str] = None) -> List[Dict[str, Any]]:
         """Returns all episodes that currently have recorded errors in pipeline_state.db."""
         return self.pipeline_db.list_errors(operation=operation)
+
+    def list_error_history(
+        self,
+        status: Optional[str] = None,
+        operation: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Lists chronological active and cleared error audit entries from pipeline_state.db."""
+        return self.pipeline_db.list_error_history(
+            status=status,
+            operation=operation,
+            limit=limit,
+        )
+
+    def get_error_history_counts(self) -> Dict[str, int]:
+        """Returns aggregate active/cleared counts from pipeline_error_history."""
+        return self.pipeline_db.get_error_history_counts()
 
     def generate_markdown(self, episode_id: str) -> str:
         data = self.get_episode(episode_id)
