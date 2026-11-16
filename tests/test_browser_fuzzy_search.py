@@ -23,7 +23,20 @@ import pytest
 from deeper_dhamma.config import PROJECT_ROOT
 
 DIST_DB_PATH = PROJECT_ROOT / "dist" / "dhamma_web.db"
+DIST_CORE_GZ_PATH = PROJECT_ROOT / "dist" / "core.db.gz"
 STATIC_DIR = PROJECT_ROOT / "deeper_dhamma" / "web" / "static"
+
+
+def _open_search_vocab_conn(tmp_path: Path):
+    """Opens a read-only sqlite3 connection to core.db.gz (or legacy dhamma_web.db)."""
+    import gzip
+    if DIST_CORE_GZ_PATH.exists():
+        tmp_core = tmp_path / "core_test.db"
+        tmp_core.write_bytes(gzip.decompress(DIST_CORE_GZ_PATH.read_bytes()))
+        return sqlite3.connect(tmp_core)
+    if DIST_DB_PATH.exists():
+        return sqlite3.connect(DIST_DB_PATH)
+    return None
 
 
 # ==============================================================================
@@ -109,15 +122,15 @@ def py_generate_quorum_queries(words: list[str]) -> str | None:
 # 1. SQLite Database Schema & search_vocab Table Integrity Tests
 # ==============================================================================
 
-def test_search_vocab_table_schema_and_pk():
+def test_search_vocab_table_schema_and_pk(tmp_path: Path):
     """Verifies search_vocab table adheres to RDBMS Integer Primary Key rule."""
-    if not DIST_DB_PATH.exists():
-        pytest.skip("dhamma_web.db not yet compiled in dist/")
+    conn = _open_search_vocab_conn(tmp_path)
+    if conn is None:
+        pytest.skip("Compiled web database not present in dist/")
 
-    conn = sqlite3.connect(DIST_DB_PATH)
     try:
         schema = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'search_vocab';").fetchone()
-        assert schema is not None, "search_vocab table missing from dhamma_web.db"
+        assert schema is not None, "search_vocab table missing from web DB"
         sql = schema[0].upper()
         assert "ID INTEGER PRIMARY KEY AUTOINCREMENT" in sql or "ID INTEGER PRIMARY KEY" in sql
         assert "WORD TEXT UNIQUE NOT NULL" in sql
@@ -126,12 +139,12 @@ def test_search_vocab_table_schema_and_pk():
         conn.close()
 
 
-def test_search_vocab_contents_and_pali_coverage():
+def test_search_vocab_contents_and_pali_coverage(tmp_path: Path):
     """Verifies search_vocab contains high-volume English and canonical Pali terminology."""
-    if not DIST_DB_PATH.exists():
-        pytest.skip("dhamma_web.db not yet compiled in dist/")
+    conn = _open_search_vocab_conn(tmp_path)
+    if conn is None:
+        pytest.skip("Compiled web database not present in dist/")
 
-    conn = sqlite3.connect(DIST_DB_PATH)
     try:
         total = conn.execute("SELECT COUNT(*) FROM search_vocab;").fetchone()[0]
         assert total > 2000, f"Expected >2000 words in search_vocab, got {total}"
@@ -365,6 +378,12 @@ def test_headless_browser_worker_fuzzy_logic():
                 const c7 = correctFuzzyWord('succeed'); // distance 2 to 'success' on 7-letter word -> untouched ('succeed')
                 const c8 = correctFuzzyWord('mind');    // 4-letter word <= 4 chars -> untouched ('mind')
 
+                // 7. Stopword filtering & prefix term safety in V8
+                const cw1 = getContentWords(['mindfulness', 'of', 'breathing']);
+                const p1 = toPrefixTerm('of');
+                const p2 = toPrefixTerm('4');
+                const p3 = toPrefixTerm('breathing');
+
                 await fetch('/report', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
@@ -372,7 +391,8 @@ def test_headless_browser_worker_fuzzy_logic():
                         f1, f2, f3, f4, f5,
                         d1, d2, d3, d4, d5,
                         qCombos,
-                        c1, c2, c3, c4, c5, c6, c7, c8
+                        c1, c2, c3, c4, c5, c6, c7, c8,
+                        cw1, p1, p2, p3
                     }})
                 }});
             }}
@@ -432,6 +452,11 @@ def test_headless_browser_worker_fuzzy_logic():
         assert report.get("c6") == "brake"
         assert report.get("c7") == "succeed"
         assert report.get("c8") == "mind"
+
+        assert report.get("cw1") == {"contentWords": ["mindfulness", "breathing"], "hasContentWords": True}
+        assert report.get("p1") == "of"
+        assert report.get("p2") == "4"
+        assert report.get("p3") == "breathing*"
 
     finally:
         server.shutdown()

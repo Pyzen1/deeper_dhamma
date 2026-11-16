@@ -8,17 +8,22 @@ Compiles an immutable, serverless static web application into dist/:
 4. Pre-renders index.html with relative asset links and version stamps.
 """
 
+from collections import Counter
+from datetime import datetime
+import gzip
+import hashlib
 import http.server
+import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import sys
 import time
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 import urllib.request
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from deeper_dhamma.config import (
     BUDDHISM_LEXICON_DB_PATH,
@@ -28,6 +33,7 @@ from deeper_dhamma.config import (
     PROJECT_ROOT,
     TRANSCRIPTS_DB_PATH,
 )
+from deeper_dhamma.status import make_progress_bar
 
 logger = logging.getLogger("export_web")
 
@@ -56,6 +62,197 @@ def ensure_wasm_assets(target_dir: Path) -> None:
         logger.info(f"[✓] Downloaded sqlite3.js ({js_path.stat().st_size:,} bytes)")
 
 
+def _copy_lexicon_to_conn(conn: sqlite3.Connection) -> None:
+    """Imports reference lexicon tables, views, and FTS5 index from BUDDHISM_LEXICON_DB_PATH."""
+    lex_uri = BUDDHISM_LEXICON_DB_PATH.resolve().as_uri()
+    logger.debug(f"Importing lexicon reference tables from {lex_uri} ...")
+    lex_conn = sqlite3.connect(f"{lex_uri}?mode=ro", uri=True)
+    try:
+        lex_conn.execute("PRAGMA query_only = ON;")
+        # Strip large compressed binary document blobs to keep web bundles light
+        conn.execute("DROP TABLE IF EXISTS main.source_documents;")
+        conn.execute("""
+            CREATE TABLE main.source_documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT UNIQUE NOT NULL,
+                mirror_url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                author TEXT NOT NULL,
+                publisher TEXT NOT NULL,
+                retrieved_date TEXT NOT NULL,
+                content_format TEXT NOT NULL,
+                uncompressed_bytes INTEGER NOT NULL,
+                compressed_bytes INTEGER NOT NULL,
+                sha256 TEXT NOT NULL,
+                content_compressed BLOB,
+                content_text TEXT
+            );
+        """)
+        src_rows = lex_conn.execute(
+            "SELECT id, url, mirror_url, title, author, publisher, retrieved_date, content_format, "
+            "uncompressed_bytes, compressed_bytes, sha256, NULL, content_text FROM source_documents;"
+        ).fetchall()
+        conn.executemany("INSERT INTO main.source_documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", src_rows)
+
+        for tbl in ["terms", "phrase_rules"]:
+            schema_row = lex_conn.execute(
+                f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{tbl}';"
+            ).fetchone()
+            if schema_row and schema_row[0]:
+                conn.execute(f"DROP TABLE IF EXISTS main.{tbl};")
+                conn.execute(schema_row[0])
+                rows = lex_conn.execute(f"SELECT * FROM {tbl};").fetchall()
+                if rows:
+                    placeholders = ",".join(["?"] * len(rows[0]))
+                    conn.executemany(f"INSERT INTO main.{tbl} VALUES ({placeholders});", rows)
+    finally:
+        lex_conn.close()
+
+    conn.execute("DROP VIEW IF EXISTS main.v_terms;")
+    conn.execute("""
+        CREATE VIEW main.v_terms AS
+        SELECT
+            t.id,
+            t.pali_plain,
+            t.pali_diacritic,
+            t.category,
+            t.translation_bodhi,
+            t.translation_sujato,
+            t.translation_brahm,
+            t.translation_brahmali,
+            t.english_description,
+            t.context_keywords,
+            t.phonetic_variants,
+            t.source,
+            t.source_document_id,
+            COALESCE(t.source_url, s.url) AS source_url,
+            s.mirror_url AS source_mirror_url,
+            s.title AS source_title,
+            s.author AS source_author
+        FROM main.terms t
+        LEFT JOIN main.source_documents s ON t.source_document_id = s.id;
+    """)
+
+    conn.execute("DROP TABLE IF EXISTS main.fts_terms;")
+    conn.execute("""
+        CREATE VIRTUAL TABLE main.fts_terms USING fts5(
+            pali_plain,
+            pali_diacritic,
+            english_description,
+            context_keywords,
+            translation_bodhi,
+            translation_sujato,
+            translation_brahm,
+            translation_brahmali,
+            content='terms',
+            content_rowid='id'
+        );
+    """)
+    conn.execute("INSERT INTO main.fts_terms(fts_terms) VALUES('rebuild');")
+
+
+def _build_search_vocab_into_conn(
+    conn: sqlite3.Connection,
+    seg_rows: Iterable[Tuple[Optional[str]]],
+    progress_cb: Optional[Callable[[int], None]] = None,
+) -> None:
+    """Populates search_vocab from transcript segment rows and imported lexicon terms."""
+    conn.execute("DROP TABLE IF EXISTS main.search_vocab;")
+    conn.execute("""
+        CREATE TABLE search_vocab (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            word TEXT UNIQUE NOT NULL,
+            count INTEGER NOT NULL
+        );
+    """)
+    vocab_counter: Counter = Counter()
+    word_re = re.compile(r"[a-zA-Z]{3,}")
+    processed = 0
+    for row in seg_rows:
+        if row and row[0]:
+            vocab_counter.update(word_re.findall(row[0].lower()))
+        processed += 1
+        if progress_cb and (processed % 2500 == 0):
+            progress_cb(processed)
+    if progress_cb:
+        progress_cb(processed)
+    term_rows = conn.execute("SELECT pali_plain, english_description FROM terms;").fetchall()
+    for row in term_rows:
+        if row[0]:
+            vocab_counter.update(word_re.findall(row[0].lower()))
+        if row[1]:
+            vocab_counter.update(word_re.findall(row[1].lower()))
+
+    conn.executemany(
+        "INSERT OR IGNORE INTO search_vocab (word, count) VALUES (?, ?);",
+        vocab_counter.most_common(),
+    )
+
+
+class _BuildProgress:
+    """Renders single-line CLI build progress across SQLite compilation and gzip sharding."""
+
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled
+        self.is_tty = bool(sys.stdout.isatty()) if enabled else False
+        self.last_emit = 0.0
+        self.last_stage = ""
+
+    def update(self, pct: float, label: str, force: bool = False) -> None:
+        if not self.enabled:
+            return
+        now = time.monotonic()
+        clamped = max(0, min(100, int(round(pct))))
+        if self.is_tty:
+            if not force and label == self.last_stage and (now - self.last_emit) < 0.08:
+                return
+            bar = make_progress_bar(clamped, 100, width=20)
+            line = f"[*] {bar} | {label}"
+            sys.stdout.write(f"\r{line:<92}")
+            sys.stdout.flush()
+        else:
+            if not force and label == self.last_stage:
+                return
+            bar = make_progress_bar(clamped, 100, width=20)
+            print(f"[*] {bar} | {label}", flush=True)
+        self.last_emit = now
+        self.last_stage = label
+
+    def finish(self) -> None:
+        if not self.enabled:
+            return
+        if self.is_tty:
+            sys.stdout.write("\r" + " " * 94 + "\r")
+            sys.stdout.flush()
+
+
+def _assign_balanced_shards(weighted_ids: List[Tuple[str, int]], num_shards: int) -> Dict[str, int]:
+    """Deterministically packs episodes across 1..num_shards balancing byte payload."""
+    totals = [0] * num_shards
+    assignments: Dict[str, int] = {}
+    for ep_id, weight in sorted(weighted_ids, key=lambda item: (-item[1], item[0])):
+        min_idx = min(range(num_shards), key=lambda idx: (totals[idx], idx))
+        assignments[ep_id] = min_idx + 1
+        totals[min_idx] += max(1, int(weight))
+    return assignments
+
+
+def _compress_db_gzip(raw_db_path: Path, gz_path: Path) -> Tuple[int, int, str]:
+    """Computes SHA-256 of raw SQLite bytes and writes deterministic gzip level-6 output."""
+    hasher = hashlib.sha256()
+    raw_bytes = 0
+    with open(raw_db_path, "rb") as src_f, open(gz_path, "wb") as dst_f:
+        with gzip.GzipFile(filename="", mode="wb", compresslevel=6, fileobj=dst_f, mtime=0) as gz_f:
+            while True:
+                chunk = src_f.read(1024 * 1024)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+                gz_f.write(chunk)
+                raw_bytes += len(chunk)
+    return raw_bytes, gz_path.stat().st_size, hasher.hexdigest()
+
+
 def compile_static_database(output_db_path: Path, version_int: int) -> dict:
     """
     Consolidates transcripts and Buddhist lexicon tables into a single vacuumed SQLite database,
@@ -70,7 +267,6 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
             # unlink fails, but SQLite backup API (src.backup(dst)) can still safely overwrite.
             pass
 
-    # 1. Clone base transcripts database
     logger.info(f"Cloning transcripts database from {TRANSCRIPTS_DB_PATH} ...")
     src = sqlite3.connect(TRANSCRIPTS_DB_PATH)
     dst = sqlite3.connect(output_db_path)
@@ -80,52 +276,10 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         src.close()
         dst.close()
 
-    # 2. Import lexicon reference tables (source_documents, terms, phrase_rules)
-    lex_uri = BUDDHISM_LEXICON_DB_PATH.resolve().as_uri()
-    logger.info(f"Importing lexicon reference tables from {lex_uri} ...")
     conn = sqlite3.connect(output_db_path)
     try:
         conn.execute("PRAGMA foreign_keys = OFF;")
-        lex_conn = sqlite3.connect(f"{lex_uri}?mode=ro", uri=True)
-        try:
-            lex_conn.execute("PRAGMA query_only = ON;")
-            # 2.1 source_documents (stripping large compressed text/PDF blobs)
-            conn.execute("DROP TABLE IF EXISTS main.source_documents;")
-            conn.execute("""
-                CREATE TABLE main.source_documents (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url TEXT UNIQUE NOT NULL,
-                    mirror_url TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    author TEXT NOT NULL,
-                    publisher TEXT NOT NULL,
-                    retrieved_date TEXT NOT NULL,
-                    content_format TEXT NOT NULL,
-                    uncompressed_bytes INTEGER NOT NULL,
-                    compressed_bytes INTEGER NOT NULL,
-                    sha256 TEXT NOT NULL,
-                    content_compressed BLOB,
-                    content_text TEXT
-                );
-            """)
-            src_rows = lex_conn.execute(
-                "SELECT id, url, mirror_url, title, author, publisher, retrieved_date, content_format, "
-                "uncompressed_bytes, compressed_bytes, sha256, NULL, content_text FROM source_documents;"
-            ).fetchall()
-            conn.executemany("INSERT INTO main.source_documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", src_rows)
-
-            # 2.2 terms & phrase_rules
-            for tbl in ["terms", "phrase_rules"]:
-                schema_row = lex_conn.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{tbl}';").fetchone()
-                if schema_row and schema_row[0]:
-                    conn.execute(f"DROP TABLE IF EXISTS main.{tbl};")
-                    conn.execute(schema_row[0])
-                    rows = lex_conn.execute(f"SELECT * FROM {tbl};").fetchall()
-                    if rows:
-                        placeholders = ",".join(["?"] * len(rows[0]))
-                        conn.executemany(f"INSERT INTO main.{tbl} VALUES ({placeholders});", rows)
-        finally:
-            lex_conn.close()
+        _copy_lexicon_to_conn(conn)
 
         # Safety guard: ensure only playable or transcribed talks remain in the exported web DB
         conn.execute(
@@ -137,79 +291,8 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         )
         conn.execute("DELETE FROM main.episode_teachers WHERE episode_id NOT IN (SELECT id FROM main.episodes);")
 
-        # Recreate lexical join view
-        conn.execute("DROP VIEW IF EXISTS main.v_terms;")
-        conn.execute("""
-            CREATE VIEW main.v_terms AS
-            SELECT
-                t.id,
-                t.pali_plain,
-                t.pali_diacritic,
-                t.category,
-                t.translation_bodhi,
-                t.translation_sujato,
-                t.translation_brahm,
-                t.translation_brahmali,
-                t.english_description,
-                t.context_keywords,
-                t.phonetic_variants,
-                t.source,
-                t.source_document_id,
-                COALESCE(t.source_url, s.url) AS source_url,
-                s.mirror_url AS source_mirror_url,
-                s.title AS source_title,
-                s.author AS source_author
-            FROM main.terms t
-            LEFT JOIN main.source_documents s ON t.source_document_id = s.id;
-        """)
+        _build_search_vocab_into_conn(conn, conn.execute("SELECT text FROM speech_segments;"))
 
-        # Rebuild lexical FTS5 search table
-        conn.execute("DROP TABLE IF EXISTS main.fts_terms;")
-        conn.execute("""
-            CREATE VIRTUAL TABLE main.fts_terms USING fts5(
-                pali_plain,
-                pali_diacritic,
-                english_description,
-                context_keywords,
-                translation_bodhi,
-                translation_sujato,
-                translation_brahm,
-                translation_brahmali,
-                content='terms',
-                content_rowid='id'
-            );
-        """)
-        conn.execute("INSERT INTO main.fts_terms(fts_terms) VALUES('rebuild');")
-
-        # 3. Build search_vocab table for ultra-fast in-browser fuzzy search & spell correction
-        conn.execute("DROP TABLE IF EXISTS main.search_vocab;")
-        conn.execute("""
-            CREATE TABLE search_vocab (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                word TEXT UNIQUE NOT NULL,
-                count INTEGER NOT NULL
-            );
-        """)
-        import re
-        from collections import Counter
-        vocab_counter = Counter()
-        seg_rows = conn.execute("SELECT text FROM speech_segments;").fetchall()
-        for row in seg_rows:
-            if row[0]:
-                vocab_counter.update(re.findall(r"[a-zA-Z]{3,}", row[0].lower()))
-        term_rows = conn.execute("SELECT pali_plain, english_description FROM terms;").fetchall()
-        for row in term_rows:
-            if row[0]:
-                vocab_counter.update(re.findall(r"[a-zA-Z]{3,}", row[0].lower()))
-            if row[1]:
-                vocab_counter.update(re.findall(r"[a-zA-Z]{3,}", row[1].lower()))
-
-        conn.executemany(
-            "INSERT OR IGNORE INTO search_vocab (word, count) VALUES (?, ?);",
-            vocab_counter.most_common(),
-        )
-
-        # Ensure episode_words table exists and is indexed
         conn.execute("""
             CREATE TABLE IF NOT EXISTS episode_words (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -221,13 +304,11 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_episode_words_episode_id ON episode_words(episode_id);")
         conn.commit()
 
-        # 4. Clean and set header version outside transaction
         conn.isolation_level = None
         conn.execute("PRAGMA journal_mode = DELETE;")
         conn.execute(f"PRAGMA user_version = {version_int};")
         conn.execute("VACUUM;")
 
-        # Gather metrics
         episodes_count = conn.execute("SELECT COUNT(*) FROM episodes;").fetchone()[0]
         segments_count = conn.execute("SELECT COUNT(*) FROM speech_segments;").fetchone()[0]
         terms_count = conn.execute("SELECT COUNT(*) FROM terms;").fetchone()[0]
@@ -246,6 +327,408 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
     }
 
 
+def compile_sharded_static_databases(
+    output_dir: Path | str,
+    version_int: int,
+    num_talks_shards: int = 4,
+    num_words_shards: int = 2,
+    transcripts_db_path: Path | str = TRANSCRIPTS_DB_PATH,
+    show_progress: bool = True,
+) -> dict:
+    """
+    Compiles a PWA-ready sharded & gzipped database bundle atomically via staging dir inside ``output_dir``:
+    - core.db.gz: episodes (with talks_shard / words_shard routing), teachers, lexicon, search_vocab
+    - talks_1..N.db.gz: speech_segments + FTS5 transcripts_fts shards
+    - words_1..M.db.gz: episode_words (binary word timings + VBR1 seek trailers) shards
+    - db_manifest.json: per-shard byte sizes and SHA-256 digests for incremental updates
+    """
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stage_dir = out_dir / f".build_stage_{os.getpid()}"
+    if stage_dir.exists():
+        shutil.rmtree(stage_dir, ignore_errors=True)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+
+    progress = _BuildProgress(enabled=show_progress)
+    src_uri = Path(transcripts_db_path).resolve().as_uri()
+    src_conn = sqlite3.connect(f"{src_uri}?mode=ro", uri=True)
+    src_conn.execute("PRAGMA query_only = ON;")
+
+    try:
+        progress.update(2, "Scanning catalog & computing shard balance", force=True)
+        valid_ep_rows = src_conn.execute(
+            """
+            SELECT * FROM episodes
+            WHERE is_transcribed = 1 OR (media_url IS NOT NULL AND media_url != '');
+            """
+        ).fetchall()
+        ep_cols = [desc[0] for desc in src_conn.execute("SELECT * FROM episodes LIMIT 0;").description]
+        ep_id_idx = ep_cols.index("id")
+        valid_ep_ids = {r[ep_id_idx] for r in valid_ep_rows}
+
+        seg_weights = [
+            (ep_id, weight)
+            for ep_id, weight in src_conn.execute(
+                "SELECT episode_id, COALESCE(SUM(LENGTH(CAST(text AS BLOB))), 0) FROM speech_segments GROUP BY episode_id;"
+            ).fetchall()
+            if ep_id in valid_ep_ids
+        ]
+        talks_shard_map = _assign_balanced_shards(seg_weights, num_talks_shards)
+        total_seg_rows_est = src_conn.execute("SELECT COUNT(*) FROM speech_segments;").fetchone()[0] or 1
+
+        word_weights = [
+            (ep_id, weight)
+            for ep_id, weight in src_conn.execute(
+                "SELECT episode_id, LENGTH(words_blob) FROM episode_words;"
+            ).fetchall()
+            if ep_id in valid_ep_ids
+        ]
+        words_shard_map = _assign_balanced_shards(word_weights, num_words_shards)
+        total_words_est = len(word_weights) or 1
+
+        # 1. Build core.db -> core.db.gz in staging directory
+        progress.update(6, "Building core.db & importing Pali lexicon", force=True)
+        core_raw_path = stage_dir / "core.db"
+        core_gz_path = stage_dir / "core.db.gz"
+        core_conn = sqlite3.connect(core_raw_path)
+        try:
+            core_conn.execute("PRAGMA foreign_keys = OFF;")
+            for tbl in ("episodes", "teachers", "episode_teachers"):
+                ddl = src_conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?;", (tbl,)
+                ).fetchone()
+                if ddl and ddl[0]:
+                    core_conn.execute(ddl[0])
+
+            core_conn.execute("ALTER TABLE episodes ADD COLUMN talks_shard INTEGER;")
+            core_conn.execute("ALTER TABLE episodes ADD COLUMN words_shard INTEGER;")
+
+            idx_rows = src_conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' "
+                "AND tbl_name IN ('episodes', 'teachers', 'episode_teachers') AND sql IS NOT NULL;"
+            ).fetchall()
+            for (idx_sql,) in idx_rows:
+                core_conn.execute(idx_sql)
+            core_conn.execute("CREATE INDEX IF NOT EXISTS idx_episodes_talks_shard ON episodes(talks_shard);")
+            core_conn.execute("CREATE INDEX IF NOT EXISTS idx_episodes_words_shard ON episodes(words_shard);")
+
+            all_core_ep_cols = ep_cols + ["talks_shard", "words_shard"]
+            ep_placeholders = ",".join(["?"] * len(all_core_ep_cols))
+            ep_col_sql = ",".join(all_core_ep_cols)
+            core_ep_rows = [
+                tuple(r) + (talks_shard_map.get(r[ep_id_idx]), words_shard_map.get(r[ep_id_idx]))
+                for r in valid_ep_rows
+            ]
+            core_conn.executemany(
+                f"INSERT INTO episodes ({ep_col_sql}) VALUES ({ep_placeholders});",
+                core_ep_rows,
+            )
+
+            teacher_rows = src_conn.execute("SELECT * FROM teachers;").fetchall()
+            if teacher_rows:
+                t_ph = ",".join(["?"] * len(teacher_rows[0]))
+                core_conn.executemany(f"INSERT INTO teachers VALUES ({t_ph});", teacher_rows)
+
+            et_rows = [
+                r for r in src_conn.execute("SELECT * FROM episode_teachers;").fetchall()
+                if r[1] in valid_ep_ids
+            ]
+            if et_rows:
+                et_ph = ",".join(["?"] * len(et_rows[0]))
+                core_conn.executemany(f"INSERT INTO episode_teachers VALUES ({et_ph});", et_rows)
+
+            view_row = src_conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='view' AND name='v_episode_teachers';"
+            ).fetchone()
+            if view_row and view_row[0]:
+                core_conn.execute(view_row[0])
+
+            _copy_lexicon_to_conn(core_conn)
+
+            progress.update(10, "Indexing search_vocab from segments", force=True)
+            seg_vocab_cursor = src_conn.execute(
+                """
+                SELECT s.text FROM speech_segments s
+                JOIN episodes e ON s.episode_id = e.id
+                WHERE e.is_transcribed = 1 OR (e.media_url IS NOT NULL AND e.media_url != '');
+                """
+            )
+            _build_search_vocab_into_conn(
+                core_conn,
+                seg_vocab_cursor,
+                progress_cb=lambda n: progress.update(
+                    10.0 + 18.0 * min(1.0, n / total_seg_rows_est),
+                    "Indexing search_vocab",
+                ),
+            )
+            core_conn.commit()
+
+            progress.update(28, "VACUUM & compressing core.db.gz", force=True)
+            core_conn.isolation_level = None
+            core_conn.execute("PRAGMA journal_mode = DELETE;")
+            core_conn.execute(f"PRAGMA user_version = {version_int};")
+            core_conn.execute("VACUUM;")
+
+            episodes_count = core_conn.execute("SELECT COUNT(*) FROM episodes;").fetchone()[0]
+            transcribed_count = core_conn.execute("SELECT COUNT(*) FROM episodes WHERE is_transcribed = 1;").fetchone()[0]
+            terms_count = core_conn.execute("SELECT COUNT(*) FROM terms;").fetchone()[0]
+        finally:
+            core_conn.close()
+
+        core_raw_bytes, core_gz_bytes, core_sha = _compress_db_gzip(core_raw_path, core_gz_path)
+        core_raw_path.unlink(missing_ok=True)
+
+        # 2. Build talks_1..N.db -> .db.gz in one sequential scan
+        talks_conns: Dict[int, sqlite3.Connection] = {}
+        talks_paths: Dict[int, Tuple[Path, Path]] = {}
+        talks_batches: Dict[int, List[Tuple]] = {k: [] for k in range(1, num_talks_shards + 1)}
+        talks_ep_counts: Dict[int, set] = {k: set() for k in range(1, num_talks_shards + 1)}
+        segments_count = 0
+
+        for k in range(1, num_talks_shards + 1):
+            t_raw = stage_dir / f"talks_{k}.db"
+            t_gz = stage_dir / f"talks_{k}.db.gz"
+            t_conn = sqlite3.connect(t_raw)
+            t_conn.execute("""
+                CREATE TABLE speech_segments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_id TEXT NOT NULL,
+                    turn_index INTEGER NOT NULL,
+                    start_sec REAL NOT NULL,
+                    end_sec REAL NOT NULL,
+                    speaker_slug TEXT NOT NULL,
+                    speaker_display TEXT NOT NULL,
+                    text TEXT NOT NULL
+                );
+            """)
+            talks_conns[k] = t_conn
+            talks_paths[k] = (t_raw, t_gz)
+
+        progress.update(32, f"Distributing speech segments across {num_talks_shards} shards", force=True)
+        seg_cur = src_conn.execute(
+            "SELECT episode_id, turn_index, start_sec, end_sec, speaker_slug, speaker_display, text "
+            "FROM speech_segments ORDER BY id;"
+        )
+        scanned_segs = 0
+        try:
+            for row in seg_cur:
+                scanned_segs += 1
+                shard_k = talks_shard_map.get(row[0])
+                if not shard_k:
+                    continue
+                talks_batches[shard_k].append(row)
+                talks_ep_counts[shard_k].add(row[0])
+                segments_count += 1
+                if len(talks_batches[shard_k]) >= 5000:
+                    talks_conns[shard_k].executemany(
+                        "INSERT INTO speech_segments (episode_id, turn_index, start_sec, end_sec, speaker_slug, speaker_display, text) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?);",
+                        talks_batches[shard_k],
+                    )
+                    talks_batches[shard_k].clear()
+                if scanned_segs % 4000 == 0:
+                    progress.update(
+                        32.0 + 14.0 * min(1.0, scanned_segs / total_seg_rows_est),
+                        "Distributing speech segments",
+                    )
+
+            talks_meta = []
+            for k in range(1, num_talks_shards + 1):
+                t_conn = talks_conns[k]
+                t_raw, t_gz = talks_paths[k]
+                base_pct = 46.0 + (k - 1) * (30.0 / num_talks_shards)
+                progress.update(base_pct, f"Building FTS5 index for talks_{k}.db", force=True)
+                if talks_batches[k]:
+                    t_conn.executemany(
+                        "INSERT INTO speech_segments (episode_id, turn_index, start_sec, end_sec, speaker_slug, speaker_display, text) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?);",
+                        talks_batches[k],
+                    )
+                    talks_batches[k].clear()
+                t_conn.execute("CREATE INDEX idx_segments_ep_turn ON speech_segments(episode_id, turn_index);")
+                t_conn.execute("""
+                    CREATE VIRTUAL TABLE transcripts_fts USING fts5(
+                        speaker_display,
+                        text,
+                        content='speech_segments',
+                        content_rowid='id'
+                    );
+                """)
+                t_conn.execute("INSERT INTO transcripts_fts(transcripts_fts) VALUES('rebuild');")
+                t_conn.execute("INSERT INTO transcripts_fts(transcripts_fts) VALUES('optimize');")
+                t_conn.commit()
+                t_conn.isolation_level = None
+                t_conn.execute("PRAGMA journal_mode = DELETE;")
+                t_conn.execute(f"PRAGMA user_version = {version_int};")
+                t_conn.execute("VACUUM;")
+                t_conn.close()
+                talks_conns.pop(k, None)
+
+                progress.update(
+                    base_pct + (18.0 / num_talks_shards),
+                    f"Compressing talks_{k}.db.gz",
+                    force=True,
+                )
+                raw_b, gz_b, sha = _compress_db_gzip(t_raw, t_gz)
+                t_raw.unlink(missing_ok=True)
+                talks_meta.append({
+                    "id": f"talks_{k}",
+                    "shard": k,
+                    "file": t_gz.name,
+                    "raw_file": t_raw.name,
+                    "raw_bytes": raw_b,
+                    "gz_bytes": gz_b,
+                    "sha256": sha,
+                    "episodes": len(talks_ep_counts[k]),
+                })
+        finally:
+            for c_rem in talks_conns.values():
+                try:
+                    c_rem.close()
+                except Exception:
+                    pass
+
+        # 3. Build words_1..M.db -> .db.gz in one sequential scan
+        words_conns: Dict[int, sqlite3.Connection] = {}
+        words_paths: Dict[int, Tuple[Path, Path]] = {}
+        words_ep_counts: Dict[int, int] = {k: 0 for k in range(1, num_words_shards + 1)}
+        words_count = 0
+
+        for k in range(1, num_words_shards + 1):
+            w_raw = stage_dir / f"words_{k}.db"
+            w_gz = stage_dir / f"words_{k}.db.gz"
+            w_conn = sqlite3.connect(w_raw)
+            w_conn.execute("""
+                CREATE TABLE episode_words (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_id TEXT UNIQUE NOT NULL,
+                    words_blob BLOB NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            words_conns[k] = w_conn
+            words_paths[k] = (w_raw, w_gz)
+
+        progress.update(76, f"Distributing word timings across {num_words_shards} shards", force=True)
+        w_cur = src_conn.execute("SELECT episode_id, words_blob, created_at FROM episode_words ORDER BY id;")
+        words_batches: Dict[int, List[Tuple]] = {k: [] for k in range(1, num_words_shards + 1)}
+        try:
+            for row in w_cur:
+                shard_k = words_shard_map.get(row[0])
+                if not shard_k:
+                    continue
+                words_batches[shard_k].append(row)
+                words_ep_counts[shard_k] += 1
+                words_count += 1
+                if len(words_batches[shard_k]) >= 100:
+                    words_conns[shard_k].executemany(
+                        "INSERT INTO episode_words (episode_id, words_blob, created_at) VALUES (?, ?, ?);",
+                        words_batches[shard_k],
+                    )
+                    words_batches[shard_k].clear()
+                if words_count % 250 == 0:
+                    progress.update(
+                        76.0 + 6.0 * min(1.0, words_count / total_words_est),
+                        "Distributing word timings",
+                    )
+
+            words_meta = []
+            for k in range(1, num_words_shards + 1):
+                w_conn = words_conns[k]
+                w_raw, w_gz = words_paths[k]
+                base_pct = 82.0 + (k - 1) * (16.0 / num_words_shards)
+                progress.update(base_pct, f"Compressing words_{k}.db.gz", force=True)
+                if words_batches[k]:
+                    w_conn.executemany(
+                        "INSERT INTO episode_words (episode_id, words_blob, created_at) VALUES (?, ?, ?);",
+                        words_batches[k],
+                    )
+                    words_batches[k].clear()
+                w_conn.execute("CREATE INDEX idx_episode_words_episode_id ON episode_words(episode_id);")
+                w_conn.commit()
+                w_conn.isolation_level = None
+                w_conn.execute("PRAGMA journal_mode = DELETE;")
+                w_conn.execute(f"PRAGMA user_version = {version_int};")
+                w_conn.execute("VACUUM;")
+                w_conn.close()
+                words_conns.pop(k, None)
+
+                raw_b, gz_b, sha = _compress_db_gzip(w_raw, w_gz)
+                w_raw.unlink(missing_ok=True)
+                words_meta.append({
+                    "id": f"words_{k}",
+                    "shard": k,
+                    "file": w_gz.name,
+                    "raw_file": w_raw.name,
+                    "raw_bytes": raw_b,
+                    "gz_bytes": gz_b,
+                    "sha256": sha,
+                    "episodes": words_ep_counts[k],
+                })
+        finally:
+            for c_rem in words_conns.values():
+                try:
+                    c_rem.close()
+                except Exception:
+                    pass
+
+        progress.update(98, "Publishing manifest & sharded bundle", force=True)
+        total_raw_bytes = core_raw_bytes + sum(s["raw_bytes"] for s in talks_meta) + sum(s["raw_bytes"] for s in words_meta)
+        total_gz_bytes = core_gz_bytes + sum(s["gz_bytes"] for s in talks_meta) + sum(s["gz_bytes"] for s in words_meta)
+
+        manifest = {
+            "format": "sharded_v1",
+            "version": version_int,
+            "core": {
+                "id": "core",
+                "file": core_gz_path.name,
+                "raw_file": core_raw_path.name,
+                "raw_bytes": core_raw_bytes,
+                "gz_bytes": core_gz_bytes,
+                "sha256": core_sha,
+            },
+            "talks": talks_meta,
+            "words": words_meta,
+            "episodes": episodes_count,
+            "transcribed_episodes": transcribed_count,
+            "segments": segments_count,
+            "terms": terms_count,
+            "words_count": words_count,
+            "total_raw_bytes": total_raw_bytes,
+            "total_gz_bytes": total_gz_bytes,
+        }
+        (stage_dir / "db_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+        # Promote staged artifacts atomically so an interrupted build never wipes prior dist/ DBs
+        for pattern in ("dhamma_web.db*", "core.db*", "talks_*.db*", "words_*.db*", "db_manifest.json"):
+            for old_p in out_dir.glob(pattern):
+                try:
+                    old_p.unlink()
+                except OSError:
+                    pass
+
+        for staged_file in stage_dir.iterdir():
+            staged_file.replace(out_dir / staged_file.name)
+
+        progress.update(100, "Sharded bundle ready", force=True)
+        progress.finish()
+    finally:
+        src_conn.close()
+        shutil.rmtree(stage_dir, ignore_errors=True)
+
+    return {
+        "version": version_int,
+        "size_bytes": total_gz_bytes,
+        "raw_size_bytes": total_raw_bytes,
+        "episodes": episodes_count,
+        "transcribed_episodes": transcribed_count,
+        "segments": segments_count,
+        "terms": terms_count,
+        "words": words_count,
+        "manifest": manifest,
+    }
+
+
 def _resolve_repo_path(path_or_str: Path | str) -> Path:
     """Resolves relative paths against PROJECT_ROOT so nothing leaks into parent CWD."""
     p = Path(path_or_str)
@@ -254,7 +737,7 @@ def _resolve_repo_path(path_or_str: Path | str) -> Path:
     return p.resolve()
 
 
-def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
+def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = True) -> Path:
     """
     Builds the complete self-contained static site and SQLite WASM bundle.
     """
@@ -285,11 +768,19 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
     print(f"[*] Build Date:          {date_str}")
     print("-" * 80)
 
-    # 1. Compile consolidated SQLite database
-    db_out = out_path / "dhamma_web.db"
-    metrics = compile_static_database(db_out, version_int=version_int)
-    print(f"[✓] Compiled dhamma_web.db: {metrics['size_bytes'] / (1024 * 1024):.2f} MB")
-    print(f"    - Episodes indexed:      {metrics['episodes']:,}")
+    # 1. Compile sharded & gzipped SQLite PWA bundle (core + talks_1..4 + words_1..2)
+    metrics = compile_sharded_static_databases(out_path, version_int=version_int, show_progress=show_progress)
+    manifest = metrics["manifest"]
+    print(
+        f"[✓] Compiled sharded PWA bundle: {metrics['size_bytes'] / (1024 * 1024):.2f} MB gzipped "
+        f"({metrics['raw_size_bytes'] / (1024 * 1024):.2f} MB raw)"
+    )
+    print(f"    - core.db.gz:            {manifest['core']['gz_bytes'] / (1024 * 1024):.2f} MB gz ({manifest['core']['raw_bytes'] / (1024 * 1024):.2f} MB raw)")
+    for s in manifest["talks"]:
+        print(f"    - {s['file']:22s} {s['gz_bytes'] / (1024 * 1024):.2f} MB gz ({s['raw_bytes'] / (1024 * 1024):.2f} MB raw, {s['episodes']:,} talks)")
+    for s in manifest["words"]:
+        print(f"    - {s['file']:22s} {s['gz_bytes'] / (1024 * 1024):.2f} MB gz ({s['raw_bytes'] / (1024 * 1024):.2f} MB raw, {s['episodes']:,} talks)")
+    print(f"    - Episodes indexed:      {metrics['episodes']:,} ({metrics['transcribed_episodes']:,} transcribed)")
     print(f"    - Speech segments:       {metrics['segments']:,}")
     print(f"    - Buddhist Pali terms:   {metrics['terms']:,}")
     print(f"    - Word-synced talks:     {metrics.get('words', 0):,}")
@@ -312,7 +803,7 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
         if icons_dst.exists():
             shutil.rmtree(icons_dst)
         shutil.copytree(icons_src, icons_dst)
-        copied_files += len(list(icons_src.glob("*.svg")))
+        copied_files += len([f for f in icons_src.iterdir() if f.is_file()])
 
 
     # Mirror pristine local document sources into dist/sources/ for user verification
@@ -388,9 +879,10 @@ def export_static_site(output_dir: Path | str = DIST_DIR) -> Path:
 def _is_dist_stale(dist_path: Path) -> bool:
     """Checks whether any source asset or database is newer than the built dist/index.html."""
     index_out = dist_path / "index.html"
-    if not index_out.exists():
+    manifest_out = dist_path / "db_manifest.json"
+    if not index_out.exists() or not manifest_out.exists():
         return True
-    dist_mtime = index_out.stat().st_mtime
+    dist_mtime = min(index_out.stat().st_mtime, manifest_out.stat().st_mtime)
     candidates = [
         VIEWS_SRC_DIR / "index.html",
         STATIC_SRC_DIR / "app.js",
@@ -399,6 +891,9 @@ def _is_dist_stale(dist_path: Path) -> bool:
         STATIC_SRC_DIR / "style.css",
         STATIC_SRC_DIR / "db_worker.js",
         STATIC_SRC_DIR / "svc_worker.js",
+        STATIC_SRC_DIR / "manifest.json",
+        STATIC_SRC_DIR / "icons" / "icon_192.png",
+        STATIC_SRC_DIR / "icons" / "icon_512.png",
         STATIC_SRC_DIR / "adapters" / "wasm_client.js",
         TRANSCRIPTS_DB_PATH,
         BUDDHISM_LEXICON_DB_PATH,
@@ -451,6 +946,16 @@ class StaticPreviewHandler(http.server.SimpleHTTPRequestHandler):
         if clean_path.startswith("/static/"):
             clean_path = "/" + clean_path[8:]
         return super().translate_path(clean_path)
+
+    def guess_type(self, path: str) -> str:
+        lower = path.lower().split("?", 1)[0]
+        if lower.endswith(".db") or lower.endswith(".db.gz"):
+            return "application/octet-stream"
+        if lower.endswith(".wasm"):
+            return "application/wasm"
+        if lower.endswith(".json"):
+            return "application/json"
+        return super().guess_type(path)
 
     def send_head(self):
         path = self.translate_path(self.path)

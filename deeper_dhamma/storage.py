@@ -14,6 +14,32 @@ from deeper_dhamma.config import ARCHIVE_DIR, PIPELINE_DB_PATH, TRANSCRIPTS_DB_P
 
 logger = logging.getLogger("storage")
 
+SEARCH_STOPWORDS = frozenset({
+    "a", "about", "after", "all", "also", "am", "an", "and", "any", "are", "as", "at",
+    "be", "been", "being", "but", "by",
+    "can", "could",
+    "did", "do", "does", "doing", "down",
+    "for", "from",
+    "had", "has", "have", "having", "he", "her", "here", "hers", "him", "his", "how",
+    "if", "in", "into", "is", "it", "its",
+    "just",
+    "like",
+    "me", "more", "most", "my",
+    "no", "nor", "not", "now",
+    "of", "on", "only", "or", "other", "our", "ours", "out", "over",
+    "same", "she", "should", "so", "some", "such",
+    "than", "that", "the", "their", "them", "then", "there", "these", "they", "this", "those", "through", "to", "too",
+    "under", "up",
+    "very",
+    "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why", "will", "with", "would",
+    "you", "your", "yours",
+})
+
+
+def _to_prefix_term(word: str) -> str:
+    """Appends FTS5 prefix wildcard only to non-numeric tokens of length >= 3."""
+    return f"{word}*" if len(word) >= 3 and not word.isdigit() else word
+
 
 def format_timestamp_hhmmss(seconds: float) -> str:
     """Formats seconds into HH:MM:SS or MM:SS."""
@@ -1649,20 +1675,25 @@ class TranscriptDatabase:
         """
         Executes full-text search with automatic tiered query expansion:
           Tier 1: Explicit syntax (if AND, OR, NOT, NEAR used) or Exact phrase
-          Tier 2: Proximity match (NEAR - words within 15 words of each other)
-          Tier 3: Prefix / stem matching (word*)
-          Tier 4: Typo auto-correction (Levenshtein / difflib against transcript vocabulary)
-          Tier 5: BM25 ranked 'any word' match (word1 OR word2)
+          Tier 2: Content-word proximity match (NEAR - within 15 words)
+          Tier 3: Content-word prefix / stem matching (word*)
+          Tier 4: Typo auto-correction (difflib against transcript vocabulary)
+          Tier 5: Quorum / BM25 ranked 'any content word' match (excludes stopwords)
 
         If `exact=True`, bypasses Tiers 2-5 and performs strict literal matching only.
         """
         import difflib
+        import itertools
         import re
 
         clean_query = query.replace('\\"', '"').strip()
-        words = re.findall(r"[a-zA-Z0-9]+", clean_query.lower())
+        words = re.findall(r"[^\W_]+", clean_query.lower())
         if not words:
             return ([], {"tier": "none", "effective_query": query, "corrected": False}) if return_meta else []
+
+        filtered_content = [w for w in words if w not in SEARCH_STOPWORDS]
+        has_content_words = bool(filtered_content)
+        content_words = filtered_content if has_content_words else words
 
         with self._get_connection() as conn:
             sql = """
@@ -1719,64 +1750,92 @@ class TranscriptDatabase:
                     return rows, meta
                 return rows
 
-            # Tier 1: Exact phrase (if >1 word) or exact word
-            t1_q = f'"{clean_query}"' if len(words) > 1 else words[0]
+            # Tier 1: Exact phrase (preserves stopwords) or exact word
+            t1_q = f'"{" ".join(words)}"' if len(words) > 1 else words[0]
             rows = _try_query(t1_q)
             if rows or exact:
                 meta["tier"] = "exact_phrase" if len(words) > 1 else "exact_word"
                 meta["effective_query"] = t1_q
                 return (rows, meta) if return_meta else rows
 
-            # Tier 2: Proximity match (NEAR - words in reasonable proximity)
+            # Tier 2: Content-only proximity match (NEAR) or exact single content word
             if len(words) > 1:
-                t2_q = f"NEAR({' '.join(words)}, 15)"
-                rows = _try_query(t2_q)
-                if rows:
-                    meta["tier"] = "proximity"
-                    meta["effective_query"] = t2_q
-                    return (rows, meta) if return_meta else rows
+                if len(content_words) > 1:
+                    t2_q = f"NEAR({' '.join(content_words)}, 15)"
+                    rows = _try_query(t2_q)
+                    if rows:
+                        meta["tier"] = "proximity"
+                        meta["effective_query"] = t2_q
+                        return (rows, meta) if return_meta else rows
+                elif has_content_words:
+                    rows = _try_query(content_words[0])
+                    if rows:
+                        meta["tier"] = "exact_word"
+                        meta["effective_query"] = content_words[0]
+                        return (rows, meta) if return_meta else rows
 
-            # Tier 3: Prefix / Stem matching (word1* AND word2*)
-            t3_q = " AND ".join(f"{w}*" for w in words)
+            # Tier 3: Prefix / Stem matching on content words only
+            t3_q = " AND ".join(_to_prefix_term(w) for w in content_words)
             rows = _try_query(t3_q)
             if rows:
                 meta["tier"] = "prefix"
                 meta["effective_query"] = t3_q
                 return (rows, meta) if return_meta else rows
 
-            # Tier 4: Typo auto-correction (against transcript vocabulary)
+            # Tier 4: Typo auto-correction (against transcript vocabulary, content words only)
             vocab_rows = conn.execute("SELECT text FROM speech_segments LIMIT 1000;").fetchall()
             vocab = set(re.findall(r"[a-zA-Z]{3,}", " ".join(r[0] for r in vocab_rows).lower()))
-            corrected = []
-            for w in words:
-                if w not in vocab and len(w) >= 4:
+            corrected_content = []
+            for w in content_words:
+                if w not in vocab and len(w) >= 4 and w not in SEARCH_STOPWORDS:
                     matches = difflib.get_close_matches(w, vocab, n=1, cutoff=0.72)
-                    corrected.append(matches[0] if matches else w)
+                    corrected_content.append(matches[0] if matches else w)
                 else:
-                    corrected.append(w)
+                    corrected_content.append(w)
 
-            if corrected != words:
-                corr_phrase = " ".join(corrected)
-                # Try exact corrected
-                t4_exact = f'"{corr_phrase}"' if len(corrected) > 1 else corrected[0]
+            is_corrected = corrected_content != content_words
+            if is_corrected:
+                c_iter = iter(corrected_content)
+                corrected_all = [
+                    w if (has_content_words and w in SEARCH_STOPWORDS) else next(c_iter, w)
+                    for w in words
+                ]
+                corr_phrase = " ".join(corrected_all)
+                t4_exact = f'"{corr_phrase}"' if len(corrected_all) > 1 else corrected_all[0]
                 rows = _try_query(t4_exact)
-                if not rows and len(corrected) > 1:
-                    # Try proximity corrected
-                    t4_near = f"NEAR({' '.join(corrected)}, 15)"
-                    rows = _try_query(t4_near)
+                if not rows and len(corrected_content) > 1:
+                    rows = _try_query(f"NEAR({' '.join(corrected_content)}, 15)")
+                if not rows:
+                    rows = _try_query(" AND ".join(_to_prefix_term(w) for w in corrected_content))
                 if rows:
                     meta["tier"] = "auto_corrected"
                     meta["effective_query"] = corr_phrase
                     meta["corrected"] = True
                     return (rows, meta) if return_meta else rows
 
-            # Tier 5: Ranked BM25 'any word' match
-            if len(words) > 1:
-                t5_q = " OR ".join(words)
+            # Tier 5: Quorum (>=3 content words) then BM25 ranked 'any content word' match
+            active_content = corrected_content if is_corrected else content_words
+            if len(active_content) >= 3:
+                k = len(active_content) - 1 if len(active_content) <= 4 else max(2, int(len(active_content) * 0.75))
+                combos = list(itertools.combinations(active_content, k))[:10]
+                if combos:
+                    quorum_q = " OR ".join("(" + " AND ".join(_to_prefix_term(w) for w in c) + ")" for c in combos)
+                    rows = _try_query(quorum_q)
+                    if rows:
+                        meta["tier"] = "quorum"
+                        meta["effective_query"] = f"{k} of {len(active_content)} key terms"
+                        if is_corrected:
+                            meta["corrected"] = True
+                        return (rows, meta) if return_meta else rows
+
+            if len(active_content) > 1:
+                t5_q = " OR ".join(_to_prefix_term(w) for w in active_content)
                 rows = _try_query(t5_q)
                 if rows:
                     meta["tier"] = "any_word"
                     meta["effective_query"] = t5_q
+                    if is_corrected:
+                        meta["corrected"] = True
                     return (rows, meta) if return_meta else rows
 
             meta["tier"] = "none"

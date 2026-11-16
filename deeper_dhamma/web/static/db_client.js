@@ -41,6 +41,12 @@ class WasmDatabaseClient {
             }
             return;
           }
+          if (type === 'db_sync_progress') {
+            if (typeof this.onSyncProgress === 'function') {
+              this.onSyncProgress(data);
+            }
+            return;
+          }
           if (this.pending.has(id)) {
             const { resolve: res, reject: rej } = this.pending.get(id);
             this.pending.delete(id);
@@ -55,7 +61,7 @@ class WasmDatabaseClient {
           this.errorMessage = 'Failed to load SQLite WASM worker engine.';
         };
 
-        this.send('init', { dbUrl: './dhamma_web.db' })
+        this.send('init', { manifestUrl: './db_manifest.json', dbUrl: './dhamma_web.db' })
           .then((res) => {
             console.log('[WASM Client] SQLite WASM Worker initialized successfully:', res);
             resolve(true);

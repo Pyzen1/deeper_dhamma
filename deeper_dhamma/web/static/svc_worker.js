@@ -30,6 +30,9 @@ const CORE_ASSETS = [
   './db_worker.js',
   './sqlite3.js',
   './sqlite3.wasm',
+  './icons/icon_192.png',
+  './icons/icon_512.png',
+  './icons/apple_touch_icon.png',
   './icons/fluent_play.svg',
   './icons/fluent_pause.svg',
   './icons/fluent_play_pause.svg',
@@ -154,15 +157,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Server Version Checks & Database Fetches (EXCEPTIONS to cache)
-  // Range probes (bytes=0-99), database downloads (.db), and API stats explicitly check live server status.
+  // 2. Server Version Checks & Database/Manifest Fetches (EXCEPTIONS to cache)
+  // Range probes (bytes=0-99), manifest checks (db_manifest.json), DB shards (.db / .db.gz), and API stats check live server status.
   const isRangeProbe = req.headers.get('Range') === 'bytes=0-99';
-  const isDbFetch = url.pathname.endsWith('.db') || url.pathname.includes('dhamma_web.db');
+  const isManifestFetch = url.pathname.endsWith('db_manifest.json');
+  const isDbFetch =
+    url.pathname.endsWith('.db') ||
+    url.pathname.endsWith('.db.gz') ||
+    isManifestFetch ||
+    url.pathname.includes('dhamma_web.db');
   const isServerProbe = isRangeProbe || isDbFetch || url.pathname.startsWith('/api/');
 
   if (isServerProbe) {
-    const isFullDb = isDbFetch && !isRangeProbe;
-    const timeoutMs = isFullDb ? 15000 : 400;
+    const isFullDb = isDbFetch && !isRangeProbe && !isManifestFetch;
+    // Manifest & header probes fail fast offline; compressed DB shard transfers must never abort at 15s on slow links.
+    const timeoutMs = isFullDb ? 300000 : (isManifestFetch ? 2500 : 400);
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     event.respondWith(

@@ -12,9 +12,19 @@ importScripts('sqlite3.js');
 let sqlite3 = null;
 let db = null;
 let currentDbVersion = 0;
+let activeManifest = null;
+let activeManifestUrl = './db_manifest.json';
+let isShardedMode = false;
+let opfsPool = null;
+let opfsInitAttempted = false;
+
+const shardHandles = new Map();
+const shardPromises = new Map();
+const shardCachedShas = new Map();
+let episodesMetaMap = new Map();
 
 // ============================================================================
-// IndexedDB Persistence Helpers
+// IndexedDB & OPFS Persistence Helpers
 // ============================================================================
 
 const IDB_NAME = 'deeper_dhamma_cache';
@@ -49,22 +59,165 @@ async function getCachedDatabase(key = 'dhamma_web') {
   }
 }
 
-async function setCachedDatabase(key, version, buffer) {
+async function setCachedDatabase(key, version, buffer, extra = {}) {
   try {
     const idb = await openIdb();
     return new Promise((resolve, reject) => {
       const tx = idb.transaction(IDB_STORE, 'readwrite');
-      const req = tx.objectStore(IDB_STORE).put({ key, version, buffer, updatedAt: Date.now() });
+      const req = tx.objectStore(IDB_STORE).put({
+        key,
+        version,
+        buffer,
+        ...extra,
+        updatedAt: Date.now(),
+      });
       req.onsuccess = () => resolve(true);
       req.onerror = () => reject(req.error);
     });
   } catch (err) {
     console.warn('[DB Worker] IndexedDB write failed:', err);
+    return false;
   }
 }
 
+function isGzipBytes(u8) {
+  return u8 && u8.byteLength >= 2 && u8[0] === 0x1f && u8[1] === 0x8b;
+}
+
+function assertValidSqliteHeader(buffer) {
+  if (!buffer || buffer.byteLength < 64) {
+    throw new Error(`Database buffer invalid or truncated (${buffer ? buffer.byteLength : 0} bytes)`);
+  }
+  const magic = new Uint8Array(buffer.slice(0, 16));
+  const magicStr = String.fromCharCode(...magic);
+  if (!magicStr.startsWith('SQLite format 3')) {
+    throw new Error('Downloaded payload failed SQLite magic header validation.');
+  }
+}
+
+async function decodeMaybeGzipBuffer(rawBuffer) {
+  const u8 = new Uint8Array(rawBuffer);
+  if (!isGzipBytes(u8)) {
+    return rawBuffer;
+  }
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('Browser does not support DecompressionStream("gzip") required for compressed PWA shards.');
+  }
+  const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return await new Response(stream).arrayBuffer();
+}
+
+async function fetchAndDecodeDbPayload(url) {
+  const sep = url.includes('?') ? '&' : '?';
+  const fetchUrl = `${url}${sep}t=${Date.now()}`;
+  const res = await fetch(fetchUrl, { cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch database from ${url} (HTTP ${res.status})`);
+  }
+  const buf = await res.arrayBuffer();
+  return await decodeMaybeGzipBuffer(buf);
+}
+
+async function fetchManifestJson(manifestUrl) {
+  try {
+    const sep = manifestUrl.includes('?') ? '&' : '?';
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
+    const res = await fetch(`${manifestUrl}${sep}t=${Date.now()}`, {
+      cache: 'no-store',
+      signal: controller ? controller.signal : undefined,
+    });
+    if (timeoutId) clearTimeout(timeoutId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.format === 'sharded_v1') {
+        return data;
+      }
+    }
+  } catch (_) {
+    // Offline or server down
+  }
+  return null;
+}
+
+async function tryInitOpfsPool(requiredCapacity = 12) {
+  if (opfsPool) return opfsPool;
+  if (opfsInitAttempted) return null;
+  opfsInitAttempted = true;
+  if (!sqlite3 || typeof sqlite3.installOpfsSAHPoolVfs !== 'function') {
+    return null;
+  }
+  try {
+    const pool = await sqlite3.installOpfsSAHPoolVfs({
+      initialCapacity: requiredCapacity,
+      directory: '/deeper-dhamma-opfs',
+      verbosity: 0,
+    });
+    if (typeof pool.reserveMinimumCapacity === 'function') {
+      await pool.reserveMinimumCapacity(requiredCapacity);
+    }
+    opfsPool = pool;
+    console.log('[DB Worker] OPFS SAHPool VFS enabled for zero-RAM shard storage.');
+    return opfsPool;
+  } catch (err) {
+    console.warn('[DB Worker] OPFS unavailable, using IndexedDB shard cache fallback:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
+function queryAllOn(targetDb, sql, bind = []) {
+  if (!targetDb) throw new Error('Database is not initialized');
+  const rows = [];
+  targetDb.exec({
+    sql,
+    bind,
+    rowMode: 'object',
+    resultRows: rows,
+  });
+  return rows;
+}
+
+function queryOneOn(targetDb, sql, bind = []) {
+  const rows = queryAllOn(targetDb, sql, bind);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+function rebuildEpisodesMetaCache() {
+  const nextMap = new Map();
+  if (!db) {
+    episodesMetaMap = nextMap;
+    return;
+  }
+  try {
+    const rows = queryAllOn(
+      db,
+      `SELECT id, title, date, year, primary_teacher, primary_display, identified_teachers,
+              media_url, permalink, duration_sec, is_transcribed, talks_shard, words_shard
+       FROM episodes;`
+    );
+    for (let i = 0; i < rows.length; i++) {
+      nextMap.set(rows[i].id, rows[i]);
+    }
+  } catch (_) {
+    // Legacy monolithic DB lacks talks_shard / words_shard columns
+    try {
+      const rows = queryAllOn(
+        db,
+        `SELECT id, title, date, year, primary_teacher, primary_display, identified_teachers,
+                media_url, permalink, duration_sec, is_transcribed
+         FROM episodes;`
+      );
+      for (let i = 0; i < rows.length; i++) {
+        nextMap.set(rows[i].id, rows[i]);
+      }
+    } catch (_) {}
+  }
+  episodesMetaMap = nextMap;
+  searchCache = null;
+}
+
 // ============================================================================
-// Database Initialization & Deserialization
+// Database Initialization, Shards & Deserialization
 // ============================================================================
 
 async function fetchRemoteVersion(dbUrl) {
@@ -102,12 +255,13 @@ async function fetchRemoteVersion(dbUrl) {
 
 let isUpdatingInBackground = false;
 
-function deserializeAndAttachDb(buffer, version) {
+function deserializeDbHandle(buffer, sanitySql = 'SELECT COUNT(*) FROM episodes;') {
+  assertValidSqliteHeader(buffer);
   const uint8Array = new Uint8Array(buffer);
   const pBuffer = sqlite3.wasm.allocFromTypedArray(uint8Array);
-  const newDb = new sqlite3.oo1.DB();
+  const candidateDb = new sqlite3.oo1.DB();
   const rc = sqlite3.capi.sqlite3_deserialize(
-    newDb.pointer,
+    candidateDb.pointer,
     'main',
     pBuffer,
     uint8Array.byteLength,
@@ -116,10 +270,21 @@ function deserializeAndAttachDb(buffer, version) {
   );
 
   if (rc !== 0) {
-    try { newDb.close(); } catch (_) {}
+    try { candidateDb.close(); } catch (_) {}
     throw new Error(`sqlite3_deserialize failed with code ${rc}`);
   }
 
+  try {
+    candidateDb.exec({ sql: sanitySql, rowMode: 'array' });
+  } catch (queryErr) {
+    try { candidateDb.close(); } catch (_) {}
+    throw queryErr;
+  }
+  return { handle: candidateDb, byteLength: uint8Array.byteLength };
+}
+
+function deserializeAndAttachDb(buffer, version) {
+  const { handle: newDb, byteLength } = deserializeDbHandle(buffer, 'SELECT COUNT(*) FROM episodes;');
   const oldDb = db;
   db = newDb;
   if (oldDb) {
@@ -127,65 +292,294 @@ function deserializeAndAttachDb(buffer, version) {
   }
 
   currentDbVersion = version;
+  vocabCacheInitialized = false;
+  rebuildEpisodesMetaCache();
   setTimeout(ensureVocabCache, 50);
-  return uint8Array.byteLength;
+  return byteLength;
 }
 
-async function checkAndUpdateInBackground(dbUrl, activeCached) {
+function closeShardHandle(shardId) {
+  const existing = shardHandles.get(shardId);
+  if (existing) {
+    try { existing.close(); } catch (_) {}
+    shardHandles.delete(shardId);
+  }
+}
+
+function evictWordsHandlesForIdbFallback(keepShardId) {
+  if (opfsPool) return;
+  for (const [sid] of shardHandles) {
+    if (sid.startsWith('words_') && sid !== keepShardId) {
+      closeShardHandle(sid);
+    }
+  }
+}
+
+function getAllManifestShards(manifest) {
+  if (!manifest) return [];
+  return [...(manifest.talks || []), ...(manifest.words || [])];
+}
+
+function findManifestShard(shardId) {
+  if (!activeManifest) return null;
+  const all = getAllManifestShards(activeManifest);
+  return all.find((s) => s.id === shardId) || null;
+}
+
+function emitSyncProgress(manifest, phase = 'syncing', currentShard = null) {
+  if (!manifest) return;
+  const all = getAllManifestShards(manifest);
+  const talksTotal = (manifest.talks || []).length;
+  const talksReady = (manifest.talks || []).filter((s) => shardCachedShas.get(s.id) === s.sha256).length;
+  const wordsTotal = (manifest.words || []).length;
+  const wordsReady = (manifest.words || []).filter((s) => shardCachedShas.get(s.id) === s.sha256).length;
+  const loadedGzBytes = all.reduce(
+    (sum, s) => sum + (shardCachedShas.get(s.id) === s.sha256 ? (s.gz_bytes || 0) : 0),
+    manifest.core ? (manifest.core.gz_bytes || 0) : 0
+  );
+  const totalGzBytes = manifest.total_gz_bytes || all.reduce((sum, s) => sum + (s.gz_bytes || 0), 0);
+
+  self.postMessage({
+    type: 'db_sync_progress',
+    data: {
+      phase,
+      currentShard,
+      talksReady,
+      talksTotal,
+      wordsReady,
+      wordsTotal,
+      loadedBytes: loadedGzBytes,
+      totalBytes: totalGzBytes,
+      textSearchReady: talksTotal > 0 && talksReady === talksTotal,
+      fullOfflineReady: talksReady === talksTotal && wordsReady === wordsTotal,
+    },
+  });
+}
+
+async function mountShardFromLocalCache(shardMeta) {
+  const sanitySql = shardMeta.id.startsWith('talks_')
+    ? 'SELECT COUNT(*) FROM speech_segments;'
+    : 'SELECT COUNT(*) FROM episode_words;';
+
+  // 1. Check OPFS pool first
+  if (opfsPool) {
+    const opfsPath = '/' + shardMeta.id + '.db';
+    const metaRec = await getCachedDatabase('shard_meta_' + shardMeta.id);
+    const hasFile = typeof opfsPool.getFileNames === 'function' && opfsPool.getFileNames().includes(opfsPath);
+    if (hasFile && metaRec && (!shardMeta.sha256 || metaRec.sha256 === shardMeta.sha256)) {
+      try {
+        closeShardHandle(shardMeta.id);
+        const sDb = new opfsPool.OpfsSAHPoolDb(opfsPath);
+        try {
+          sDb.exec('PRAGMA temp_store=MEMORY; PRAGMA cache_size=-4096;');
+        } catch (_) {}
+        sDb.exec({ sql: sanitySql, rowMode: 'array' });
+        shardHandles.set(shardMeta.id, sDb);
+        shardCachedShas.set(shardMeta.id, metaRec.sha256 || shardMeta.sha256);
+        return true;
+      } catch (err) {
+        console.warn(`[DB Worker] OPFS mount failed for ${shardMeta.id}, trying IDB/network:`, err);
+      }
+    }
+  }
+
+  // 2. IndexedDB buffer fallback
+  const cached = await getCachedDatabase('shard_' + shardMeta.id);
+  if (cached && cached.buffer && cached.buffer.byteLength >= 64) {
+    if (!shardMeta.sha256 || cached.sha256 === shardMeta.sha256) {
+      evictWordsHandlesForIdbFallback(shardMeta.id);
+      const { handle } = deserializeDbHandle(cached.buffer, sanitySql);
+      closeShardHandle(shardMeta.id);
+      shardHandles.set(shardMeta.id, handle);
+      shardCachedShas.set(shardMeta.id, cached.sha256 || shardMeta.sha256);
+      return true;
+    }
+  }
+  return false;
+}
+
+async function installShardFromBuffer(shardMeta, rawBuffer) {
+  const sanitySql = shardMeta.id.startsWith('talks_')
+    ? 'SELECT COUNT(*) FROM speech_segments;'
+    : 'SELECT COUNT(*) FROM episode_words;';
+
+  // Validate SQLite integrity before mutating local persistent storage
+  const { handle: validatedHandle } = deserializeDbHandle(rawBuffer, sanitySql);
+
+  if (opfsPool) {
+    try { validatedHandle.close(); } catch (_) {}
+    closeShardHandle(shardMeta.id);
+    const opfsPath = '/' + shardMeta.id + '.db';
+    opfsPool.importDb(opfsPath, new Uint8Array(rawBuffer));
+    await setCachedDatabase('shard_meta_' + shardMeta.id, activeManifest.version, null, {
+      sha256: shardMeta.sha256,
+      raw_bytes: rawBuffer.byteLength,
+    });
+    const sDb = new opfsPool.OpfsSAHPoolDb(opfsPath);
+    try {
+      sDb.exec('PRAGMA temp_store=MEMORY; PRAGMA cache_size=-4096;');
+    } catch (_) {}
+    sDb.exec({ sql: sanitySql, rowMode: 'array' });
+    shardHandles.set(shardMeta.id, sDb);
+    shardCachedShas.set(shardMeta.id, shardMeta.sha256);
+    return;
+  }
+
+  evictWordsHandlesForIdbFallback(shardMeta.id);
+  closeShardHandle(shardMeta.id);
+  shardHandles.set(shardMeta.id, validatedHandle);
+  shardCachedShas.set(shardMeta.id, shardMeta.sha256);
+  await setCachedDatabase('shard_' + shardMeta.id, activeManifest.version, rawBuffer, {
+    sha256: shardMeta.sha256,
+  });
+}
+
+async function ensureShardReady(shardId) {
+  if (!isShardedMode || !activeManifest) return null;
+  const shardMeta = findManifestShard(shardId);
+  if (!shardMeta) return null;
+
+  if (shardHandles.has(shardId) && shardCachedShas.get(shardId) === shardMeta.sha256) {
+    return shardHandles.get(shardId);
+  }
+  if (shardPromises.has(shardId)) {
+    return await shardPromises.get(shardId);
+  }
+
+  const workPromise = (async () => {
+    const mountedLocal = await mountShardFromLocalCache(shardMeta);
+    if (mountedLocal) {
+      emitSyncProgress(activeManifest, 'cached', shardId);
+      return shardHandles.get(shardId);
+    }
+
+    const baseDir = activeManifestUrl.includes('/')
+      ? activeManifestUrl.slice(0, activeManifestUrl.lastIndexOf('/') + 1)
+      : './';
+    const rawBuffer = await fetchAndDecodeDbPayload(`${baseDir}${shardMeta.file}`);
+    await installShardFromBuffer(shardMeta, rawBuffer);
+    emitSyncProgress(activeManifest, 'syncing', shardId);
+    return shardHandles.get(shardId);
+  })();
+
+  shardPromises.set(shardId, workPromise);
+  try {
+    return await workPromise;
+  } finally {
+    shardPromises.delete(shardId);
+  }
+}
+
+async function ensureAllTalksShardsReady() {
+  if (!isShardedMode || !activeManifest) return [];
+  const talks = activeManifest.talks || [];
+  const handles = [];
+  for (let i = 0; i < talks.length; i++) {
+    const h = await ensureShardReady(talks[i].id);
+    if (h) handles.push(h);
+  }
+  return handles;
+}
+
+async function syncRemainingShardsInBackground(manifest) {
+  const talks = manifest.talks || [];
+  const words = manifest.words || [];
+  emitSyncProgress(manifest, 'syncing', null);
+
+  for (let i = 0; i < talks.length; i++) {
+    try {
+      await ensureShardReady(talks[i].id);
+    } catch (err) {
+      console.warn(`[DB Worker] Background sync skipped ${talks[i].id}:`, err);
+    }
+  }
+  for (let i = 0; i < words.length; i++) {
+    try {
+      await ensureShardReady(words[i].id);
+    } catch (err) {
+      console.warn(`[DB Worker] Background sync skipped ${words[i].id}:`, err);
+    }
+  }
+  emitSyncProgress(manifest, 'complete', null);
+}
+
+async function checkAndUpdateInBackground(targetUrl, activeCachedCore, cachedManifestRecord) {
   if (isUpdatingInBackground) return;
   isUpdatingInBackground = true;
 
   try {
-    // 1. Probe remote version and content size via fast Range probe
+    // 1. Check sharded manifest first
+    if (isShardedMode || (targetUrl && targetUrl.endsWith('db_manifest.json'))) {
+      const manifestUrl = (targetUrl && targetUrl.endsWith('db_manifest.json')) ? targetUrl : activeManifestUrl;
+      const remoteManifest = await fetchManifestJson(manifestUrl);
+      if (!remoteManifest) {
+        if (activeManifest) {
+          await syncRemainingShardsInBackground(activeManifest);
+        }
+        return;
+      }
+
+      await tryInitOpfsPool(2 + (remoteManifest.talks || []).length + (remoteManifest.words || []).length);
+      const oldSha = cachedManifestRecord && cachedManifestRecord.manifest && cachedManifestRecord.manifest.core
+        ? cachedManifestRecord.manifest.core.sha256
+        : null;
+      const coreChanged = !oldSha || oldSha !== remoteManifest.core.sha256 || remoteManifest.version !== activeCachedCore.version;
+
+      let coreBytes = activeCachedCore.buffer.byteLength;
+      if (coreChanged) {
+        const baseDir = manifestUrl.includes('/') ? manifestUrl.slice(0, manifestUrl.lastIndexOf('/') + 1) : './';
+        const newBuffer = await fetchAndDecodeDbPayload(`${baseDir}${remoteManifest.core.file}`);
+        assertValidSqliteHeader(newBuffer);
+        const view = new DataView(newBuffer);
+        const newVersion = view.getUint32(60, false) || remoteManifest.version;
+        const { handle: candidateDb, byteLength } = deserializeDbHandle(newBuffer, 'SELECT COUNT(*) FROM episodes;');
+        coreBytes = byteLength;
+
+        await setCachedDatabase('dhamma_web', newVersion, newBuffer);
+        const oldDb = db;
+        db = candidateDb;
+        if (oldDb) {
+          try { oldDb.close(); } catch (_) {}
+        }
+        currentDbVersion = newVersion;
+        vocabCacheInitialized = false;
+        rebuildEpisodesMetaCache();
+        setTimeout(ensureVocabCache, 50);
+      }
+
+      isShardedMode = true;
+      activeManifest = remoteManifest;
+      await setCachedDatabase('sharded_manifest', remoteManifest.version, null, { manifest: remoteManifest });
+      await syncRemainingShardsInBackground(remoteManifest);
+
+      if (coreChanged) {
+        self.postMessage({
+          type: 'db_hot_swapped',
+          data: { version: currentDbVersion, size: coreBytes },
+        });
+      }
+      return;
+    }
+
+    // Legacy monolithic fallback check
+    const dbUrl = targetUrl || './dhamma_web.db';
     const { version: remoteVersion, totalBytes: remoteTotalBytes, fullBuffer: probeBuffer } = await fetchRemoteVersion(dbUrl);
-    if (!remoteVersion || remoteVersion === 0) {
-      // Remote server unavailable or offline - keep active cached DB without disruption
-      return;
-    }
+    if (!remoteVersion || remoteVersion === 0) return;
 
-    const isVersionDifferent = remoteVersion !== activeCached.version;
-    const isSizeDifferent = remoteTotalBytes > 0 && Math.abs(activeCached.buffer.byteLength - remoteTotalBytes) > 1024;
+    const isVersionDifferent = remoteVersion !== activeCachedCore.version;
+    const isSizeDifferent = remoteTotalBytes > 0 && Math.abs(activeCachedCore.buffer.byteLength - remoteTotalBytes) > 1024;
+    if (!isVersionDifferent && !isSizeDifferent) return;
 
-    if (!isVersionDifferent && !isSizeDifferent) {
-      // Cache is strictly current; no update needed
-      return;
-    }
-
-    console.log(`[DB Worker] Background update detected: cached v${activeCached.version} (${activeCached.buffer.byteLength}B) vs remote v${remoteVersion} (${remoteTotalBytes}B). Downloading atomically...`);
-
-    // 2. Download new database in the background (active DB remains 100% functional)
     let newBuffer = null;
     if (probeBuffer && probeBuffer.byteLength > 100000) {
       newBuffer = probeBuffer;
     } else {
-      const fetchUrl = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
-      const res = await fetch(fetchUrl, { cache: 'no-store' });
-      if (!res.ok) {
-        console.warn(`[DB Worker] Background download failed (HTTP ${res.status}). Retaining active cached DB.`);
-        return;
-      }
-      newBuffer = await res.arrayBuffer();
+      newBuffer = await fetchAndDecodeDbPayload(dbUrl);
     }
-
-    // 3. ATOMIC INTEGRITY VALIDATION
-    // If the download was interrupted, corrupt, or truncated: ABORT cleanly without modifying cache or active DB!
-    if (!newBuffer || newBuffer.byteLength < 64) {
-      console.warn('[DB Worker] Background download incomplete or truncated. Retaining active cached DB.');
-      return;
-    }
-
-    const magic = new Uint8Array(newBuffer.slice(0, 16));
-    const magicStr = String.fromCharCode(...magic);
-    if (!magicStr.startsWith('SQLite format 3')) {
-      console.warn('[DB Worker] Downloaded payload failed SQLite magic header validation. Retaining active cached DB.');
-      return;
-    }
-
+    assertValidSqliteHeader(newBuffer);
     const view = new DataView(newBuffer);
-    const bufferVersion = view.getUint32(60, false);
-    const newVersion = bufferVersion || remoteVersion;
+    const newVersion = view.getUint32(60, false) || remoteVersion;
 
-    // Verify candidate DB can deserialize and execute basic sanity query
     const uint8Array = new Uint8Array(newBuffer);
     const pTest = sqlite3.wasm.allocFromTypedArray(uint8Array);
     const candidateDb = new sqlite3.oo1.DB();
@@ -197,42 +591,31 @@ async function checkAndUpdateInBackground(dbUrl, activeCached) {
       uint8Array.byteLength,
       sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
     );
-
     if (testRc !== 0) {
       try { candidateDb.close(); } catch (_) {}
-      console.warn(`[DB Worker] Candidate DB failed deserialization (code ${testRc}). Retaining active cached DB.`);
       return;
     }
-
     try {
       candidateDb.exec({ sql: 'SELECT COUNT(*) FROM episodes;', rowMode: 'array' });
-    } catch (queryErr) {
+    } catch (_) {
       try { candidateDb.close(); } catch (_) {}
-      console.warn('[DB Worker] Candidate DB failed sanity query. Retaining active cached DB:', queryErr);
       return;
     }
 
-    // 4. ATOMIC PERSISTENCE: Now and only now update IndexedDB
     await setCachedDatabase('dhamma_web', newVersion, newBuffer);
-
-    // 5. SEAMLESS HOT-SWAP: Replace running DB instance with validated candidateDb
     const oldDb = db;
     db = candidateDb;
     if (oldDb) {
-      try { oldDb.close(); } catch (e) { console.warn('[DB Worker] Error closing superseded DB:', e); }
+      try { oldDb.close(); } catch (_) {}
     }
     currentDbVersion = newVersion;
+    vocabCacheInitialized = false;
+    rebuildEpisodesMetaCache();
     setTimeout(ensureVocabCache, 50);
 
-    console.log(`[DB Worker] Database hot-swapped seamlessly in background: v${newVersion} (${uint8Array.byteLength} bytes).`);
-
-    // 6. NOTIFY CLIENT FOR ZERO-REFRESH UI UPDATE
     self.postMessage({
       type: 'db_hot_swapped',
-      data: {
-        version: newVersion,
-        size: uint8Array.byteLength,
-      },
+      data: { version: newVersion, size: uint8Array.byteLength },
     });
   } catch (err) {
     console.warn('[DB Worker] Background update encountered unexpected error. Retaining active cached DB:', err);
@@ -241,8 +624,7 @@ async function checkAndUpdateInBackground(dbUrl, activeCached) {
   }
 }
 
-async function initDatabase(dbUrl = 'dhamma_web.db') {
-  // 1. Initialize SQLite WASM Module if not already loaded
+async function initDatabase(initArg = { manifestUrl: './db_manifest.json' }) {
   if (!sqlite3) {
     sqlite3 = await sqlite3InitModule({
       print: (text) => console.log('[SQLite]', text),
@@ -250,66 +632,99 @@ async function initDatabase(dbUrl = 'dhamma_web.db') {
     });
   }
 
-  // 2. Check IndexedDB for existing cached snapshot
-  const cached = await getCachedDatabase('dhamma_web');
+  let manifestUrl = './db_manifest.json';
+  let legacyDbUrl = './dhamma_web.db';
+  if (typeof initArg === 'string') {
+    if (initArg.endsWith('.json')) manifestUrl = initArg;
+    else legacyDbUrl = initArg;
+  } else if (initArg) {
+    if (initArg.manifestUrl) manifestUrl = initArg.manifestUrl;
+    if (initArg.dbUrl) legacyDbUrl = initArg.dbUrl;
+  }
+  activeManifestUrl = manifestUrl;
+
+  const [cached, cachedManifest] = await Promise.all([
+    getCachedDatabase('dhamma_web'),
+    getCachedDatabase('sharded_manifest'),
+  ]);
   const hasValidCache = cached && cached.buffer && cached.buffer.byteLength >= 64;
 
   if (hasValidCache) {
-    // ATOMIC FAST STARTUP: Mount existing cached DB immediately so UI is 100% interactive (0ms wait)
     try {
       const bytesMounted = deserializeAndAttachDb(cached.buffer, cached.version || 0);
-      console.log(`[DB Worker] Fast startup: Using cached database (v${currentDbVersion}) from IndexedDB (${bytesMounted} bytes).`);
+      if (cachedManifest && cachedManifest.manifest && cachedManifest.manifest.format === 'sharded_v1') {
+        isShardedMode = true;
+        activeManifest = cachedManifest.manifest;
+        await tryInitOpfsPool(2 + (activeManifest.talks || []).length + (activeManifest.words || []).length);
+        // Mount already-cached local shards immediately so offline reads/search hit 0ms
+        const allShards = getAllManifestShards(activeManifest);
+        for (let i = 0; i < allShards.length; i++) {
+          await mountShardFromLocalCache(allShards[i]).catch(() => {});
+        }
+        emitSyncProgress(activeManifest, 'cached', null);
+      }
 
-      // Spawn non-blocking background check for atomic updates
       setTimeout(() => {
-        checkAndUpdateInBackground(dbUrl, cached).catch((err) => {
+        checkAndUpdateInBackground(
+          isShardedMode || !legacyDbUrl ? manifestUrl : manifestUrl,
+          cached,
+          cachedManifest
+        ).catch((err) => {
           console.warn('[DB Worker] Background update check failed gracefully:', err);
         });
       }, 100);
 
-      return { version: currentDbVersion, cached: true, size: bytesMounted };
+      return { version: currentDbVersion, cached: true, size: bytesMounted, sharded: isShardedMode };
     } catch (cacheErr) {
-      console.warn('[DB Worker] Cached database corrupted or failed to mount, falling back to full download:', cacheErr);
-      // Fall through to initial download
+      console.warn('[DB Worker] Cached database corrupted, falling back to download:', cacheErr);
     }
   }
 
-  // 3. First-time load or corrupted cache fallback: synchronous initial download
-  console.log(`[DB Worker] No valid cached snapshot found. Performing initial download from ${dbUrl}...`);
-  const { version: remoteVersion, fullBuffer: probeBuffer } = await fetchRemoteVersion(dbUrl);
+  // First-time cold load: prefer sharded manifest bundle
+  const remoteManifest = await fetchManifestJson(manifestUrl);
+  if (remoteManifest && remoteManifest.format === 'sharded_v1') {
+    isShardedMode = true;
+    activeManifest = remoteManifest;
+    await tryInitOpfsPool(2 + (remoteManifest.talks || []).length + (remoteManifest.words || []).length);
 
+    const baseDir = manifestUrl.includes('/') ? manifestUrl.slice(0, manifestUrl.lastIndexOf('/') + 1) : './';
+    const coreBuffer = await fetchAndDecodeDbPayload(`${baseDir}${remoteManifest.core.file}`);
+    assertValidSqliteHeader(coreBuffer);
+
+    const view = new DataView(coreBuffer);
+    const versionToStore = view.getUint32(60, false) || remoteManifest.version || 1;
+    const bytesMounted = deserializeAndAttachDb(coreBuffer, versionToStore);
+    await setCachedDatabase('dhamma_web', versionToStore, coreBuffer);
+    await setCachedDatabase('sharded_manifest', versionToStore, null, { manifest: remoteManifest });
+
+    // Trigger non-blocking offline download of talks_1..4 then words_1..2
+    setTimeout(() => {
+      syncRemainingShardsInBackground(remoteManifest).catch((err) => {
+        console.warn('[DB Worker] Initial offline shard sync error:', err);
+      });
+    }, 25);
+
+    return { version: versionToStore, cached: false, size: bytesMounted, sharded: true };
+  }
+
+  // Fallback legacy monolithic load
+  isShardedMode = false;
+  const { version: remoteVersion, fullBuffer: probeBuffer } = await fetchRemoteVersion(legacyDbUrl);
   let dbBuffer = null;
   if (probeBuffer && probeBuffer.byteLength > 100000) {
     dbBuffer = probeBuffer;
   } else {
-    const fetchUrl = dbUrl + (dbUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
-    const res = await fetch(fetchUrl, { cache: 'no-store' });
-    if (!res.ok) {
-      throw new Error(`Failed to fetch database from ${dbUrl} (HTTP ${res.status})`);
-    }
-    dbBuffer = await res.arrayBuffer();
+    dbBuffer = await fetchAndDecodeDbPayload(legacyDbUrl);
   }
+  assertValidSqliteHeader(dbBuffer);
 
-  if (!dbBuffer || dbBuffer.byteLength < 64) {
-    throw new Error(`Downloaded database buffer invalid (${dbBuffer ? dbBuffer.byteLength : 0} bytes)`);
-  }
-
-  const magic = new Uint8Array(dbBuffer.slice(0, 16));
-  const magicStr = String.fromCharCode(...magic);
-  if (!magicStr.startsWith('SQLite format 3')) {
-    throw new Error('Downloaded payload is not a valid SQLite database.');
-  }
-
-  let bufferVersion = 0;
   const view = new DataView(dbBuffer);
-  bufferVersion = view.getUint32(60, false);
+  const bufferVersion = view.getUint32(60, false);
   const versionToStore = remoteVersion || bufferVersion || 1;
 
   const bytesMounted = deserializeAndAttachDb(dbBuffer, versionToStore);
   await setCachedDatabase('dhamma_web', versionToStore, dbBuffer);
-  console.log(`[DB Worker] Initial database ready and cached: v${versionToStore} (${bytesMounted} bytes).`);
-
-  return { version: versionToStore, cached: false, size: bytesMounted };
+  return { version: versionToStore, cached: false, size: bytesMounted, sharded: false };
 }
 
 // ============================================================================
@@ -317,20 +732,11 @@ async function initDatabase(dbUrl = 'dhamma_web.db') {
 // ============================================================================
 
 function queryAll(sql, bind = []) {
-  if (!db) throw new Error('Database is not initialized');
-  const rows = [];
-  db.exec({
-    sql,
-    bind,
-    rowMode: 'object',
-    resultRows: rows,
-  });
-  return rows;
+  return queryAllOn(db, sql, bind);
 }
 
 function queryOne(sql, bind = []) {
-  const rows = queryAll(sql, bind);
-  return rows.length > 0 ? rows[0] : null;
+  return queryOneOn(db, sql, bind);
 }
 
 // ============================================================================
@@ -340,7 +746,17 @@ function queryOne(sql, bind = []) {
 function handleGetStats() {
   const totalEp = queryOne('SELECT COUNT(*) AS c FROM episodes;');
   const transEp = queryOne('SELECT COUNT(*) AS c FROM episodes WHERE is_transcribed = 1;');
-  const segs = queryOne('SELECT COUNT(*) AS c FROM speech_segments;');
+  let segsCount = 0;
+  if (isShardedMode && activeManifest) {
+    segsCount = activeManifest.segments || 0;
+  } else {
+    try {
+      const segs = queryOne('SELECT COUNT(*) AS c FROM speech_segments;');
+      segsCount = segs ? segs.c : 0;
+    } catch (_) {
+      segsCount = 0;
+    }
+  }
   const dur = queryOne('SELECT SUM(duration_sec) AS s FROM episodes WHERE is_transcribed = 1;');
 
   const teachersList = queryAll(`
@@ -376,7 +792,7 @@ function handleGetStats() {
     total_episodes: totalEp ? totalEp.c : 0,
     transcribed_episodes: transEp ? transEp.c : 0,
     transcribed_hours: dur && dur.s ? Math.round((dur.s / 3600.0) * 10) / 10 : 0.0,
-    total_segments: segs ? segs.c : 0,
+    total_segments: segsCount,
     teachers: teachersList.filter((r) => r.default_role !== 'unregistered' && r.slug !== 'unknown_teacher').map((r) => r.display_name),
     teacher_map: teacherMap,
     years,
@@ -453,9 +869,47 @@ function handleGetEpisodes({ teacher, year, startDate, endDate, sort = 'date_des
   };
 }
 
-function handleGetEpisode(episodeId) {
+async function handleGetEpisode(episodeId) {
   const ep = queryOne('SELECT * FROM episodes WHERE id = ?;', [episodeId]);
   if (!ep) return null;
+
+  if (isShardedMode) {
+    let segments = [];
+    if (ep.talks_shard) {
+      const talksDb = await ensureShardReady(`talks_${ep.talks_shard}`);
+      if (talksDb) {
+        segments = queryAllOn(
+          talksDb,
+          `SELECT turn_index, start_sec, end_sec, speaker_slug, speaker_display, text
+           FROM speech_segments
+           WHERE episode_id = ?
+           ORDER BY turn_index ASC;`,
+          [episodeId]
+        );
+      }
+    }
+
+    let wordsBlob = null;
+    if (ep.words_shard) {
+      const wordsKey = `words_${ep.words_shard}`;
+      if (shardHandles.has(wordsKey)) {
+        try {
+          const wRow = queryOneOn(
+            shardHandles.get(wordsKey),
+            'SELECT words_blob FROM episode_words WHERE episode_id = ?;',
+            [episodeId]
+          );
+          if (wRow && wRow.words_blob) wordsBlob = wRow.words_blob;
+        } catch (_) {}
+      }
+    }
+
+    return {
+      ...ep,
+      segments,
+      words_blob: wordsBlob,
+    };
+  }
 
   const segments = queryAll(`
     SELECT turn_index, start_sec, end_sec, speaker_slug, speaker_display, text 
@@ -479,8 +933,16 @@ function handleGetEpisode(episodeId) {
   };
 }
 
-function handleGetEpisodeWords(episodeId) {
+async function handleGetEpisodeWords(episodeId) {
   try {
+    if (isShardedMode) {
+      const ep = queryOne('SELECT words_shard FROM episodes WHERE id = ?;', [episodeId]);
+      if (!ep || !ep.words_shard) return null;
+      const wordsDb = await ensureShardReady(`words_${ep.words_shard}`);
+      if (!wordsDb) return null;
+      const row = queryOneOn(wordsDb, 'SELECT words_blob FROM episode_words WHERE episode_id = ?;', [episodeId]);
+      return row && row.words_blob ? row.words_blob : null;
+    }
     const row = queryOne('SELECT words_blob FROM episode_words WHERE episode_id = ?;', [episodeId]);
     return row && row.words_blob ? row.words_blob : null;
   } catch (_) {
@@ -658,12 +1120,89 @@ function correctFuzzyWord(w) {
   return bestCandidate;
 }
 
+let searchCache = null;
+
 const SEARCH_STOPWORDS = new Set([
-  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'for',
-  'in', 'into', 'is', 'it', 'no', 'not', 'of', 'on', 'or', 'such',
-  'that', 'the', 'their', 'then', 'there', 'these', 'they', 'this',
-  'to', 'was', 'will', 'with', 'you', 'your'
+  'a', 'about', 'after', 'all', 'also', 'am', 'an', 'and', 'any', 'are', 'as', 'at',
+  'be', 'been', 'being', 'but', 'by',
+  'can', 'could',
+  'did', 'do', 'does', 'doing', 'down',
+  'for', 'from',
+  'had', 'has', 'have', 'having', 'he', 'her', 'here', 'hers', 'him', 'his', 'how',
+  'if', 'in', 'into', 'is', 'it', 'its',
+  'just',
+  'like',
+  'me', 'more', 'most', 'my',
+  'no', 'nor', 'not', 'now',
+  'of', 'on', 'only', 'or', 'other', 'our', 'ours', 'out', 'over',
+  'same', 'she', 'should', 'so', 'some', 'such',
+  'than', 'that', 'the', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'to', 'too',
+  'under', 'up',
+  'very',
+  'was', 'we', 'were', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'will', 'with', 'would',
+  'you', 'your', 'yours'
 ]);
+
+function toPrefixTerm(w) {
+  if (!w) return '';
+  return w.length >= 3 && !/^\d+$/.test(w) ? `${w}*` : w;
+}
+
+function getContentWords(words) {
+  const filtered = words.filter((w) => !SEARCH_STOPWORDS.has(w));
+  return {
+    contentWords: filtered.length > 0 ? filtered : words,
+    hasContentWords: filtered.length > 0,
+  };
+}
+
+function escapeRegExp(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchesEpisodeFilters(ep, { teacher, year, startDate, endDate }) {
+  if (!ep) return false;
+  if (teacher) {
+    const tf = teacher.trim().toLowerCase();
+    const primary = (ep.primary_display || '').toLowerCase();
+    const identifiedRaw = (ep.identified_teachers || '').toLowerCase();
+    const identifiedList = identifiedRaw ? identifiedRaw.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    const wordBoundaryRe = new RegExp(`\\b${escapeRegExp(tf)}\\b`, 'i');
+    const matchesTeacher =
+      primary === tf ||
+      identifiedList.includes(tf) ||
+      wordBoundaryRe.test(ep.primary_display || '') ||
+      wordBoundaryRe.test(ep.identified_teachers || '');
+    if (!matchesTeacher) return false;
+  }
+  if (year) {
+    const yStr = String(year);
+    if (!(ep.date || '').startsWith(yStr)) return false;
+  }
+  if (startDate && (ep.date || '') < startDate) return false;
+  if (endDate && (ep.date || '') > endDate) return false;
+  return true;
+}
+
+function extractExplicitHighlightInfo(cleanQuery) {
+  const strippedNot = cleanQuery.replace(/\bNOT\s+(?:"[^"]+"|\S+)/gi, ' ');
+  const quotedPhrases = [];
+  const quoteRe = /"([^"]+)"/g;
+  let m;
+  while ((m = quoteRe.exec(strippedNot)) !== null) {
+    const phraseTokens = (m[1].match(/[\p{L}\p{N}]+/gu) || []).map((w) => foldDiacritics(w)).filter(Boolean);
+    if (phraseTokens.length > 1) quotedPhrases.push(phraseTokens.join(' '));
+  }
+  const tokens = (strippedNot.replace(/\bNEAR\s*\(/gi, ' ').match(/[\p{L}\p{N}]+/gu) || [])
+    .map((w) => foldDiacritics(w))
+    .filter((w) => w && !['and', 'or', 'not', 'near'].includes(w) && !/^\d+$/.test(w));
+  const nonStop = tokens.filter((w) => !SEARCH_STOPWORDS.has(w));
+  return {
+    highlightTerms: Array.from(new Set(nonStop.length > 0 ? nonStop : tokens)),
+    hasContentWords: nonStop.length > 0,
+    phrase: quotedPhrases.length === 1 ? quotedPhrases[0] : null,
+  };
+}
 
 function generateQuorumQueries(words) {
   if (words.length < 3) return null;
@@ -685,184 +1224,437 @@ function generateQuorumQueries(words) {
   const combos = getCombos(words, k);
   if (!combos.length) return null;
   const topCombos = combos.slice(0, 10);
-  return topCombos.map((clause) => `(${clause.map((w) => `${w}*`).join(' AND ')})`).join(' OR ');
+  return topCombos.map((clause) => `(${clause.map((w) => toPrefixTerm(w)).join(' AND ')})`).join(' OR ');
 }
 
-function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDate, sort = 'rank', limit = 500 }) {
+async function handleSearchFTS({
+  query,
+  exact = false,
+  teacher,
+  year,
+  startDate,
+  endDate,
+  sort = 'rank',
+  limit = 500,
+  episodeLimit = null,
+  offset = 0,
+} = {}) {
   const t0 = performance.now();
   const cleanQuery = (query || '').replace(/\\"/g, '"').trim();
-  if (!cleanQuery) {
-    return { query: cleanQuery, results: [], count: 0, elapsed_ms: 0, meta: { tier: 'none' } };
-  }
+  const useEpisodePagination = episodeLimit !== null && episodeLimit !== undefined && Number(episodeLimit) > 0;
+  const pageSize = useEpisodePagination ? Math.max(1, Number(episodeLimit)) : null;
+  const safeOffset = Math.max(0, Number(offset) || 0);
+
+  const emptyResponse = (tier = 'none') => ({
+    query: cleanQuery,
+    results: [],
+    count: 0,
+    total_episodes: 0,
+    total_segments: 0,
+    offset: safeOffset,
+    limit: pageSize || limit,
+    all_episode_ids: [],
+    elapsed_ms: 0,
+    meta: { tier },
+  });
+
+  if (!cleanQuery) return emptyResponse('none');
 
   // Unicode-aware word tokenization
   const rawTokens = cleanQuery.match(/[\p{L}\p{N}]+/gu) || [];
-  if (!rawTokens.length) {
-    return { query: cleanQuery, results: [], count: 0, elapsed_ms: 0, meta: { tier: 'none' } };
-  }
+  if (!rawTokens.length) return emptyResponse('none');
 
   const words = rawTokens.map((w) => foldDiacritics(w)).filter(Boolean);
-  if (!words.length) {
-    return { query: cleanQuery, results: [], count: 0, elapsed_ms: 0, meta: { tier: 'none' } };
+  if (!words.length) return emptyResponse('none');
+
+  const { contentWords, hasContentWords } = getContentWords(words);
+
+  if (isShardedMode) {
+    await ensureAllTalksShardsReady();
   }
 
-  const baseSql = `
-    SELECT 
-      e.id AS episode_id,
-      e.title,
-      e.date,
-      e.duration_sec,
-      e.primary_teacher AS teacher_slug,
-      e.primary_display AS teacher,
-      e.identified_teachers,
-      e.media_url,
-      e.permalink,
+  const candidateSql = `
+    SELECT
+      s.id AS seg_id,
+      s.episode_id,
+      s.turn_index,
+      s.start_sec,
+      bm25(transcripts_fts) AS rank_score
+    FROM transcripts_fts
+    JOIN speech_segments s ON transcripts_fts.rowid = s.id
+    WHERE transcripts_fts MATCH ?;
+  `;
+
+  const hydratePrefix = `
+    SELECT
+      s.id AS seg_id,
+      s.episode_id,
       s.turn_index,
       s.speaker_slug,
       s.speaker_display,
       s.start_sec,
       s.end_sec,
       s.text,
-      snippet(transcripts_fts, 1, '<b>', '</b>', '...', 15) AS snippet_text
+      snippet(transcripts_fts, 1, '<b>', '</b>', '...', 15) AS snippet_text,
+      bm25(transcripts_fts) AS rank_score
     FROM transcripts_fts
     JOIN speech_segments s ON transcripts_fts.rowid = s.id
-    JOIN episodes e ON s.episode_id = e.id
-    WHERE transcripts_fts MATCH ?
-    ORDER BY rank
-    LIMIT ?;
+    WHERE transcripts_fts MATCH ? AND transcripts_fts.rowid IN
   `;
 
-  function tryFtsQuery(qStr) {
-    try {
-      return queryAll(baseSql, [qStr, limit]);
-    } catch (_) {
-      return [];
+  const hasEpFilters = Boolean(teacher || year || startDate || endDate);
+  const filterCriteria = { teacher, year, startDate, endDate };
+  const talksList = (activeManifest && activeManifest.talks) ? activeManifest.talks : [];
+  const mountedCount = isShardedMode ? talksList.filter((t) => shardHandles.has(t.id)).length : 1;
+
+  const cacheKey = JSON.stringify({
+    v: currentDbVersion,
+    m: mountedCount,
+    sharded: isShardedMode,
+    q: cleanQuery,
+    exact: Boolean(exact),
+    teacher: teacher || '',
+    year: year || '',
+    startDate: startDate || '',
+    endDate: endDate || '',
+    sort: sort || 'rank',
+  });
+
+  function queryCandidates(qStr) {
+    const out = [];
+    const collectFromHandle = (handle, shardId) => {
+      try {
+        const rows = queryAllOn(handle, candidateSql, [qStr]);
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i];
+          if (hasEpFilters) {
+            const ep = episodesMetaMap.get(r.episode_id);
+            if (!matchesEpisodeFilters(ep, filterCriteria)) continue;
+          }
+          out.push({
+            shardId,
+            seg_id: r.seg_id,
+            episode_id: r.episode_id,
+            turn_index: r.turn_index,
+            start_sec: r.start_sec,
+            rank_score: r.rank_score,
+          });
+        }
+      } catch (_) {}
+    };
+
+    if (!isShardedMode) {
+      collectFromHandle(db, null);
+      return out;
     }
+
+    for (let i = 0; i < talksList.length; i++) {
+      const shardId = talksList[i].id;
+      const sHandle = shardHandles.get(shardId);
+      if (sHandle) collectFromHandle(sHandle, shardId);
+    }
+    return out;
   }
 
-  let results = [];
-  let meta = {
-    tier: 'exact',
-    original_query: cleanQuery,
-    effective_query: cleanQuery,
-    corrected: false,
-  };
-
-  // 0. Explicit operators check
-  const hasExplicitSyntax = [' AND ', ' OR ', ' NOT ', 'NEAR('].some((op) => cleanQuery.includes(op)) ||
-    (cleanQuery.startsWith('"') && cleanQuery.endsWith('"') && cleanQuery.length > 2);
-
-  if (hasExplicitSyntax) {
-    results = tryFtsQuery(cleanQuery);
-    if (!results.length) {
-      results = tryFtsQuery(`"${cleanQuery.replace(/"/g, '""')}"`);
-    }
-    meta.tier = 'explicit';
-  } else {
-    // Tier 1: Exact Phrase / Exact Word
-    const t1 = words.length > 1 ? `"${words.join(' ')}"` : words[0];
-    results = tryFtsQuery(t1);
-    meta.tier = words.length > 1 ? 'exact_phrase' : 'exact_word';
-
-    // Tier 2: Proximity (NEAR) - words within 15 words of each other
-    if (!results.length && !exact && words.length > 1) {
-      const t2 = `NEAR(${words.join(' ')}, 15)`;
-      results = tryFtsQuery(t2);
-      if (results.length) {
-        meta.tier = 'proximity';
-        meta.effective_query = t2;
-      }
+  function hydrateCandidates(candidates, ftsQuery) {
+    if (!candidates.length || !ftsQuery) return [];
+    const byShard = new Map();
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      const key = c.shardId || '__main__';
+      if (!byShard.has(key)) byShard.set(key, []);
+      byShard.get(key).push(c.seg_id);
     }
 
-    // Tier 3: Prefix AND matching (word1* AND word2*)
-    if (!results.length && !exact) {
-      const t3 = words.map((w) => `${w}*`).join(' AND ');
-      results = tryFtsQuery(t3);
-      if (results.length) {
-        meta.tier = 'prefix';
-        meta.effective_query = t3;
+    const hydrated = [];
+    for (const [key, segIds] of byShard.entries()) {
+      const handle = key === '__main__' ? db : shardHandles.get(key);
+      if (!handle) continue;
+      for (let start = 0; start < segIds.length; start += 400) {
+        const chunk = segIds.slice(start, start + 400);
+        const placeholders = chunk.map(() => '?').join(',');
+        try {
+          const rows = queryAllOn(handle, `${hydratePrefix} (${placeholders});`, [ftsQuery, ...chunk]);
+          for (let j = 0; j < rows.length; j++) {
+            const r = rows[j];
+            const ep = episodesMetaMap.get(r.episode_id) || {};
+            hydrated.push({
+              seg_id: r.seg_id,
+              episode_id: r.episode_id,
+              title: ep.title || r.episode_id,
+              date: ep.date || '',
+              duration_sec: ep.duration_sec || 0,
+              teacher_slug: ep.primary_teacher || '',
+              teacher: ep.primary_display || '',
+              identified_teachers: ep.identified_teachers || '',
+              media_url: ep.media_url || '',
+              permalink: ep.permalink || '',
+              turn_index: r.turn_index,
+              speaker_slug: r.speaker_slug,
+              speaker_display: r.speaker_display,
+              start_sec: r.start_sec,
+              end_sec: r.end_sec,
+              text: r.text,
+              snippet_text: r.snippet_text,
+              rank_score: r.rank_score,
+            });
+          }
+        } catch (_) {}
       }
     }
+    return hydrated;
+  }
 
-    // Tier 4: Fuzzy Auto-Correction (Damerau-Levenshtein in browser worker)
-    const correctedWords = words.map((w) => correctFuzzyWord(w));
-    const isCorrected = correctedWords.some((cw, i) => cw !== words[i]);
-    const correctedPhrase = correctedWords.join(' ');
+  let cachedEntry = searchCache && searchCache.key === cacheKey ? searchCache : null;
 
-    if (!results.length && !exact && isCorrected) {
-      // 4a: Corrected exact phrase
-      const t4Phrase = words.length > 1 ? `"${correctedPhrase}"` : correctedWords[0];
-      results = tryFtsQuery(t4Phrase);
+  if (!cachedEntry) {
+    let candidates = [];
+    let winningFtsQuery = '';
+    const meta = {
+      tier: 'exact',
+      original_query: cleanQuery,
+      effective_query: cleanQuery,
+      corrected: false,
+      highlight_terms: contentWords,
+      all_words: words,
+      has_content_words: hasContentWords,
+      phrase: words.length > 1 ? words.join(' ') : null,
+    };
 
-      // 4b: Corrected proximity
-      if (!results.length && words.length > 1) {
-        const t4Near = `NEAR(${correctedPhrase}, 15)`;
-        results = tryFtsQuery(t4Near);
+    const runTier = (qStr) => {
+      const hits = queryCandidates(qStr);
+      if (hits.length > 0) winningFtsQuery = qStr;
+      return hits;
+    };
+
+    // 0. Explicit operators check
+    const hasExplicitSyntax = [' AND ', ' OR ', ' NOT ', 'NEAR('].some((op) => cleanQuery.includes(op)) ||
+      (cleanQuery.startsWith('"') && cleanQuery.endsWith('"') && cleanQuery.length > 2);
+
+    if (hasExplicitSyntax) {
+      candidates = runTier(cleanQuery);
+      if (!candidates.length) {
+        candidates = runTier(`"${cleanQuery.replace(/"/g, '""')}"`);
+      }
+      const explicitInfo = extractExplicitHighlightInfo(cleanQuery);
+      meta.tier = 'explicit';
+      meta.highlight_terms = explicitInfo.highlightTerms;
+      meta.has_content_words = explicitInfo.hasContentWords;
+      meta.phrase = explicitInfo.phrase;
+    } else {
+      // Tier 1: Exact Phrase (preserves stopwords so titles/phrases stay exact) / Exact Word
+      const t1 = words.length > 1 ? `"${words.join(' ')}"` : words[0];
+      candidates = runTier(t1);
+      meta.tier = words.length > 1 ? 'exact_phrase' : 'exact_word';
+
+      // Tier 2: Content-only Proximity (NEAR) or Exact Single Content Word
+      if (!candidates.length && !exact && words.length > 1) {
+        if (contentWords.length > 1) {
+          const t2 = `NEAR(${contentWords.join(' ')}, 15)`;
+          candidates = runTier(t2);
+          if (candidates.length) {
+            meta.tier = 'proximity';
+            meta.effective_query = t2;
+            meta.phrase = null;
+          }
+        } else if (hasContentWords) {
+          const t2Single = contentWords[0];
+          candidates = runTier(t2Single);
+          if (candidates.length) {
+            meta.tier = 'exact_word';
+            meta.effective_query = t2Single;
+            meta.phrase = null;
+          }
+        }
       }
 
-      // 4c: Corrected prefix
-      if (!results.length) {
-        const t4Prefix = correctedWords.map((w) => `${w}*`).join(' AND ');
-        results = tryFtsQuery(t4Prefix);
+      // Tier 3: Prefix AND matching on content words only (never wildcard-expand stopwords)
+      if (!candidates.length && !exact) {
+        const t3 = contentWords.map((w) => toPrefixTerm(w)).join(' AND ');
+        candidates = runTier(t3);
+        if (candidates.length) {
+          meta.tier = 'prefix';
+          meta.effective_query = t3;
+          meta.phrase = null;
+        }
       }
 
-      if (results.length) {
-        meta.tier = 'fuzzy';
-        meta.corrected = true;
-        meta.effective_query = correctedPhrase;
+      // Tier 4: Fuzzy Auto-Correction (content words only)
+      const correctedContentWords = contentWords.map((w) => (SEARCH_STOPWORDS.has(w) ? w : correctFuzzyWord(w)));
+      const isCorrected = correctedContentWords.some((cw, i) => cw !== contentWords[i]);
+      let correctedAllWords = words;
+      if (isCorrected) {
+        let cIdx = 0;
+        correctedAllWords = words.map((w) => {
+          if (hasContentWords && SEARCH_STOPWORDS.has(w)) return w;
+          const cw = correctedContentWords[cIdx] || w;
+          cIdx++;
+          return cw;
+        });
       }
-    }
+      const correctedPhrase = correctedAllWords.join(' ');
 
-    // Tier 5: Multi-Word Soft AND / Quorum Matching (e.g. 2 of 3 words)
-    if (!results.length && !exact && words.length >= 3) {
-      const wordsToQuorum = isCorrected ? correctedWords : words;
-      const quorumQuery = generateQuorumQueries(wordsToQuorum);
-      if (quorumQuery) {
-        results = tryFtsQuery(quorumQuery);
-        if (results.length) {
-          meta.tier = 'quorum';
-          meta.effective_query = `${wordsToQuorum.length - 1} of ${wordsToQuorum.length} words`;
+      if (!candidates.length && !exact && isCorrected) {
+        // 4a: Corrected exact phrase
+        const t4Phrase = correctedAllWords.length > 1 ? `"${correctedPhrase}"` : correctedAllWords[0];
+        candidates = runTier(t4Phrase);
+
+        // 4b: Corrected content proximity
+        if (!candidates.length && correctedContentWords.length > 1) {
+          const t4Near = `NEAR(${correctedContentWords.join(' ')}, 15)`;
+          candidates = runTier(t4Near);
+        }
+
+        // 4c: Corrected content prefix AND
+        if (!candidates.length) {
+          const t4Prefix = correctedContentWords.map((w) => toPrefixTerm(w)).join(' AND ');
+          candidates = runTier(t4Prefix);
+        }
+
+        if (candidates.length) {
+          meta.tier = 'fuzzy';
+          meta.corrected = true;
+          meta.effective_query = correctedPhrase;
+          meta.highlight_terms = correctedContentWords;
+          meta.phrase = correctedAllWords.length > 1 ? correctedPhrase : null;
+        }
+      }
+
+      // Tier 5: Multi-Word Soft AND / Quorum Matching (ONLY when >= 3 content words!)
+      const activeContentWords = isCorrected ? correctedContentWords : contentWords;
+      if (!candidates.length && !exact && activeContentWords.length >= 3) {
+        const quorumQuery = generateQuorumQueries(activeContentWords);
+        if (quorumQuery) {
+          candidates = runTier(quorumQuery);
+          if (candidates.length) {
+            meta.tier = 'quorum';
+            const k = activeContentWords.length <= 4
+              ? activeContentWords.length - 1
+              : Math.max(2, Math.floor(activeContentWords.length * 0.75));
+            meta.effective_query = `${k} of ${activeContentWords.length} key terms`;
+            meta.highlight_terms = activeContentWords;
+            meta.phrase = null;
+            if (isCorrected) meta.corrected = true;
+          }
+        }
+      }
+
+      // Tier 6: Filtered Any-Word Match (content words only)
+      if (!candidates.length && !exact && activeContentWords.length > 1) {
+        const t6 = activeContentWords.map((w) => toPrefixTerm(w)).join(' OR ');
+        candidates = runTier(t6);
+        if (candidates.length) {
+          meta.tier = 'any_word';
+          meta.effective_query = t6;
+          meta.highlight_terms = activeContentWords;
+          meta.phrase = null;
           if (isCorrected) meta.corrected = true;
         }
       }
     }
 
-    // Tier 6: Filtered Any-Word Match (Filtered OR)
-    if (!results.length && !exact && words.length > 1) {
-      const baseWords = isCorrected ? correctedWords : words;
-      const contentWords = baseWords.filter((w) => !SEARCH_STOPWORDS.has(w));
-      const wordsToUse = contentWords.length > 0 ? contentWords : baseWords;
-      const t6 = wordsToUse.map((w) => `${w}*`).join(' OR ');
-      results = tryFtsQuery(t6);
-      if (results.length) {
-        meta.tier = 'any_word';
-        meta.effective_query = t6;
-        if (isCorrected) meta.corrected = true;
+    // Group candidates by episode_id and compute episode-level sort scores
+    const epGroupMap = new Map();
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      let grp = epGroupMap.get(c.episode_id);
+      if (!grp) {
+        const ep = episodesMetaMap.get(c.episode_id) || {};
+        grp = {
+          episode_id: c.episode_id,
+          date: ep.date || '',
+          duration_sec: ep.duration_sec || 0,
+          bestRank: c.rank_score || 0,
+          segments: [],
+        };
+        epGroupMap.set(c.episode_id, grp);
+      }
+      if ((c.rank_score || 0) < grp.bestRank) {
+        grp.bestRank = c.rank_score || 0;
+      }
+      grp.segments.push(c);
+    }
+
+    const sortedEpisodes = Array.from(epGroupMap.values());
+    for (let i = 0; i < sortedEpisodes.length; i++) {
+      const g = sortedEpisodes[i];
+      g.segments.sort((a, b) => a.turn_index - b.turn_index);
+      // Combine strongest turn BM25 with logarithmic density boost (negative is better in FTS5)
+      g.episodeRankScore = g.bestRank - 0.35 * Math.log(1 + g.segments.length);
+    }
+
+    if (sort === 'date_asc') {
+      sortedEpisodes.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.episode_id.localeCompare(b.episode_id));
+    } else if (sort === 'date_desc') {
+      sortedEpisodes.sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.episode_id.localeCompare(a.episode_id));
+    } else if (sort === 'duration_desc') {
+      sortedEpisodes.sort((a, b) => (b.duration_sec || 0) - (a.duration_sec || 0) || (b.date || '').localeCompare(a.date || ''));
+    } else {
+      sortedEpisodes.sort((a, b) => (a.episodeRankScore - b.episodeRankScore) || (b.date || '').localeCompare(a.date || ''));
+    }
+
+    cachedEntry = {
+      key: cacheKey,
+      candidates,
+      sortedEpisodes,
+      totalSegments: candidates.length,
+      allEpisodeIds: sortedEpisodes.map((g) => g.episode_id),
+      meta,
+      winningFtsQuery,
+    };
+    searchCache = cachedEntry;
+  }
+
+  const totalEpisodes = cachedEntry.sortedEpisodes.length;
+  let results = [];
+
+  if (useEpisodePagination) {
+    const pageEpisodes = cachedEntry.sortedEpisodes.slice(safeOffset, safeOffset + pageSize);
+    const pageOrder = new Map();
+    const selectedCandidates = [];
+    for (let i = 0; i < pageEpisodes.length; i++) {
+      pageOrder.set(pageEpisodes[i].episode_id, i);
+      const segs = pageEpisodes[i].segments;
+      for (let j = 0; j < segs.length; j++) {
+        selectedCandidates.push(segs[j]);
       }
     }
-  }
-
-  // Filter in JS by teacher, year, or date range if requested
-  if (teacher) {
-    const tf = teacher.toLowerCase();
-    results = results.filter((r) => (r.teacher || '').toLowerCase().includes(tf));
-  }
-  if (year) {
-    const yStr = String(year);
-    results = results.filter((r) => (r.date || '').startsWith(yStr));
-  }
-  if (startDate) {
-    results = results.filter((r) => (r.date || '') >= startDate);
-  }
-  if (endDate) {
-    results = results.filter((r) => (r.date || '') <= endDate);
-  }
-
-  // Sort if requested
-  if (sort === 'date_asc') {
-    results.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.start_sec - b.start_sec);
-  } else if (sort === 'date_desc') {
-    results.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.start_sec - b.start_sec);
+    results = hydrateCandidates(selectedCandidates, cachedEntry.winningFtsQuery);
+    results.sort((a, b) => {
+      const oa = pageOrder.get(a.episode_id) ?? 0;
+      const ob = pageOrder.get(b.episode_id) ?? 0;
+      if (oa !== ob) return oa - ob;
+      return a.turn_index - b.turn_index;
+    });
+  } else {
+    // Legacy segment-capped behavior when caller provides only { limit }
+    const segPool = [...cachedEntry.candidates];
+    if (sort === 'date_asc') {
+      segPool.sort((a, b) => {
+        const da = (episodesMetaMap.get(a.episode_id) || {}).date || '';
+        const dbDate = (episodesMetaMap.get(b.episode_id) || {}).date || '';
+        return da.localeCompare(dbDate) || a.start_sec - b.start_sec;
+      });
+    } else if (sort === 'date_desc') {
+      segPool.sort((a, b) => {
+        const da = (episodesMetaMap.get(a.episode_id) || {}).date || '';
+        const dbDate = (episodesMetaMap.get(b.episode_id) || {}).date || '';
+        return dbDate.localeCompare(da) || a.start_sec - b.start_sec;
+      });
+    } else {
+      segPool.sort((a, b) => (a.rank_score || 0) - (b.rank_score || 0));
+    }
+    const segOrder = new Map();
+    const sliced = segPool.slice(0, limit);
+    for (let i = 0; i < sliced.length; i++) {
+      segOrder.set(`${sliced[i].episode_id}:${sliced[i].seg_id}`, i);
+    }
+    results = hydrateCandidates(sliced, cachedEntry.winningFtsQuery);
+    results.sort((a, b) => {
+      const oa = segOrder.get(`${a.episode_id}:${a.seg_id}`) ?? 0;
+      const ob = segOrder.get(`${b.episode_id}:${b.seg_id}`) ?? 0;
+      return oa - ob;
+    });
   }
 
   const elapsed_ms = Math.round((performance.now() - t0) * 100) / 100;
@@ -871,8 +1663,13 @@ function handleSearchFTS({ query, exact = false, teacher, year, startDate, endDa
     query: cleanQuery,
     results,
     count: results.length,
+    total_episodes: totalEpisodes,
+    total_segments: cachedEntry.totalSegments,
+    offset: safeOffset,
+    limit: pageSize || limit,
+    all_episode_ids: cachedEntry.allEpisodeIds,
     elapsed_ms,
-    meta,
+    meta: cachedEntry.meta,
   };
 }
 
@@ -1031,7 +1828,7 @@ self.onmessage = async (e) => {
   try {
     switch (type) {
       case 'init': {
-        const res = await initDatabase(payload && payload.dbUrl);
+        const res = await initDatabase(payload);
         self.postMessage({ id, success: true, data: res });
         break;
       }
@@ -1046,12 +1843,12 @@ self.onmessage = async (e) => {
         break;
       }
       case 'get_episode': {
-        const ep = handleGetEpisode(payload && payload.episodeId);
+        const ep = await handleGetEpisode(payload && payload.episodeId);
         self.postMessage({ id, success: true, data: ep });
         break;
       }
       case 'get_episode_words': {
-        const wordsBlob = handleGetEpisodeWords(payload && payload.episodeId);
+        const wordsBlob = await handleGetEpisodeWords(payload && payload.episodeId);
         self.postMessage({ id, success: true, data: wordsBlob });
         break;
       }
@@ -1061,7 +1858,7 @@ self.onmessage = async (e) => {
         break;
       }
       case 'search': {
-        const results = handleSearchFTS(payload || {});
+        const results = await handleSearchFTS(payload || {});
         self.postMessage({ id, success: true, data: results });
         break;
       }

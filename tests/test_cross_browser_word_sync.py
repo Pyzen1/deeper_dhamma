@@ -396,22 +396,44 @@ def test_static_dist_bundle_parity_staleness_and_no_local_audio_route():
     assert (dist_dir / "word_sync.js").read_bytes() == (static_dir / "word_sync.js").read_bytes()
     assert (dist_dir / "app.js").read_bytes() == (static_dir / "app.js").read_bytes()
 
-    # Verify episode_words table in dist/dhamma_web.db matches source database byte-for-byte
-    dist_db_path = dist_dir / "dhamma_web.db"
-    assert dist_db_path.exists()
+    # Verify episode_words in sharded dist/ (core.db.gz + words_*.db.gz) matches source database byte-for-byte
     src_db = TranscriptDatabase(TRANSCRIPTS_DB_PATH)
-    dist_conn = sqlite3.connect(dist_db_path)
-    try:
-        dist_words_count = dist_conn.execute("SELECT COUNT(*) FROM episode_words;").fetchone()[0]
-        assert dist_words_count >= 9
-        for ep_id in VBR_EPISODES | CBR_EPISODES:
-            src_bytes = src_db.get_episode_words(ep_id)
-            if src_bytes:
-                row = dist_conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = ?;", (ep_id,)).fetchone()
-                assert row is not None, f"Missing {ep_id} in dist/dhamma_web.db episode_words"
-                assert bytes(row[0]) == src_bytes, f"Byte mismatch for {ep_id} in dist/dhamma_web.db"
-    finally:
-        dist_conn.close()
+    manifest_path = dist_dir / "db_manifest.json"
+    assert manifest_path.exists(), "dist/db_manifest.json must exist in sharded static build"
+    assert not (dist_dir / "dhamma_web.db").exists(), "Monolithic dhamma_web.db (>100MB) must be removed from dist/"
+
+    import gzip
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        tmp_p = Path(tmp)
+        core_db_p = tmp_p / "core.db"
+        core_db_p.write_bytes(gzip.decompress((dist_dir / manifest["core"]["file"]).read_bytes()))
+        core_conn = sqlite3.connect(core_db_p)
+        words_conns = {}
+        try:
+            for w_meta in manifest["words"]:
+                w_p = tmp_p / f"{w_meta['id']}.db"
+                w_p.write_bytes(gzip.decompress((dist_dir / w_meta["file"]).read_bytes()))
+                words_conns[int(w_meta["shard"])] = sqlite3.connect(w_p)
+
+            total_dist_words = sum(
+                wc.execute("SELECT COUNT(*) FROM episode_words;").fetchone()[0]
+                for wc in words_conns.values()
+            )
+            assert total_dist_words >= 9
+            for ep_id in VBR_EPISODES | CBR_EPISODES:
+                src_bytes = src_db.get_episode_words(ep_id)
+                if src_bytes:
+                    route = core_conn.execute("SELECT words_shard FROM episodes WHERE id = ?;", (ep_id,)).fetchone()
+                    assert route is not None and route[0] is not None, f"Missing words_shard route for {ep_id}"
+                    w_conn = words_conns[int(route[0])]
+                    row = w_conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = ?;", (ep_id,)).fetchone()
+                    assert row is not None, f"Missing {ep_id} in dist/ words_{route[0]} shard"
+                    assert bytes(row[0]) == src_bytes, f"Byte mismatch for {ep_id} in dist/ words_{route[0]} shard"
+        finally:
+            core_conn.close()
+            for wc in words_conns.values():
+                wc.close()
 
     # Verify _is_dist_stale detects missing directory or outdated index.html mtime
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

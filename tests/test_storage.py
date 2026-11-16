@@ -383,3 +383,66 @@ def test_duplicate_filename_stem_resolves_transcribed_uid_deterministically(tmp_
     ep = tdb.get_episode(shared_stem)
     assert ep is not None
     assert ep["id"] == "pb_dup_transcribed"
+
+
+def test_search_fts_stopword_filtering_prevents_of_explosion(tmp_path: Path):
+    """Stopwords like 'of' must not cause irrelevant matches in fallback tiers while exact phrases still work."""
+    db_path = tmp_path / "test_stopword_search.db"
+    tdb = TranscriptDatabase(db_path=db_path, pipeline_db_path=tmp_path / "pipe.db")
+
+    episodes = [
+        (
+            "pb_exact",
+            "Anapanasati Exact",
+            "Today we practice mindfulness of breathing in stillness.",
+        ),
+        (
+            "pb_near",
+            "Anapanasati Near",
+            "Develop mindfulness while resting attention on the breathing process.",
+        ),
+        (
+            "pb_noise_of",
+            "Unrelated Talk Full of Of",
+            "A cup of tea of great quality is made of water and lots of leaves of various kinds.",
+        ),
+    ]
+    for idx, (ep_id, title, text) in enumerate(episodes, start=1):
+        tdb.save_episode(
+            episode_metadata={
+                "id": ep_id,
+                "title": title,
+                "date": f"2026-01-0{idx}",
+                "primary_teacher": "ajahn_brahm",
+                "primary_display": "Ajahn Brahm",
+            },
+            attributed_segments=[
+                {
+                    "turn_index": 0,
+                    "start": 0.0,
+                    "end": 10.0,
+                    "speaker": "ajahn_brahm",
+                    "speaker_display": "Ajahn Brahm",
+                    "text": text,
+                }
+            ],
+            duration_sec=10.0,
+            year="2026",
+            filename_stem=ep_id,
+        )
+
+    # 1. Exact phrase preserves 'of' and matches only pb_exact
+    exact_rows, exact_meta = tdb.search_fts("mindfulness of breathing", limit=20, return_meta=True)
+    assert exact_meta["tier"] == "exact_phrase"
+    assert [r["episode_id"] for r in exact_rows] == ["pb_exact"]
+
+    # 2. Query whose exact phrase fails must fall back via content words only, never matching pb_noise_of on 'of'
+    near_rows, near_meta = tdb.search_fts("mindfulness on breathing", limit=20, return_meta=True)
+    assert near_meta["tier"] == "proximity"
+    assert set(r["episode_id"] for r in near_rows) == {"pb_exact", "pb_near"}
+
+    # 3. Any-word fallback with stopwords must NEVER return pb_noise_of
+    any_rows, any_meta = tdb.search_fts("stillness of enlightenment", limit=20, return_meta=True)
+    assert any_meta["tier"] == "any_word"
+    assert [r["episode_id"] for r in any_rows] == ["pb_exact"]
+    assert "of" not in any_meta["effective_query"].lower().split()

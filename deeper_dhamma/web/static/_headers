@@ -3,9 +3,26 @@
   Content-Type: application/wasm
   Cache-Control: public, max-age=31536000, immutable
 
-# Binary SQLite database with HTTP Range support
+# Binary SQLite database & shards with HTTP Range support
 /dhamma_web.db
   Content-Type: application/vnd.sqlite3
+  Accept-Ranges: bytes
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/db_manifest.json
+  Content-Type: application/json
+  Access-Control-Allow-Origin: *
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/*.db
+  Content-Type: application/octet-stream
+  Accept-Ranges: bytes
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=3600, must-revalidate
+
+/*.db.gz
+  Content-Type: application/octet-stream
   Accept-Ranges: bytes
   Access-Control-Allow-Origin: *
   Cache-Control: public, max-age=3600, must-revalidate

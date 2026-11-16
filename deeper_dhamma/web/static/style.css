@@ -1371,6 +1371,7 @@ select:hover, select:focus {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.search-pagination,
 .lexicon-pagination {
   display: flex;
   justify-content: space-between;
@@ -1380,6 +1381,10 @@ select:hover, select:focus {
   padding: 1.25rem 0;
   margin-top: 1.5rem;
   border-top: 1px solid var(--border-subtle);
+}
+
+.search-pagination {
+  justify-content: center;
 }
 
 .page-nav-group {

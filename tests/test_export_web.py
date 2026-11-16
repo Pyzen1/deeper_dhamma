@@ -559,20 +559,23 @@ def test_atomic_database_update_and_hot_swap_integrity():
 
 def test_static_preview_handler_db_range_and_atomic_headers():
     """
-    Verifies that StaticPreviewHandler emits accurate Content-Range and Content-Length
-    headers for dhamma_web.db, enabling db_worker.js to detect remote file size differences.
+    Verifies that StaticPreviewHandler serves sharded .db.gz payloads with accurate
+    Content-Range, Content-Length, and binary Content-Type without transparent gzip stripping.
     """
+    import gzip
     import http.server
+    import json
     import threading
     import urllib.request
     from deeper_dhamma.config import DIST_DIR
     from deeper_dhamma.export_web import StaticPreviewHandler
 
-    db_path = DIST_DIR / "dhamma_web.db"
-    if not db_path.exists():
-        pytest.skip("dhamma_web.db not yet compiled in dist/")
+    manifest_path = DIST_DIR / "db_manifest.json"
+    core_gz_path = DIST_DIR / "core.db.gz"
+    if not manifest_path.exists() or not core_gz_path.exists():
+        pytest.skip("Sharded bundle not yet compiled in dist/")
 
-    expected_size = db_path.stat().st_size
+    expected_size = core_gz_path.stat().st_size
 
     server = http.server.ThreadingHTTPServer(
         ("127.0.0.1", 0),
@@ -584,7 +587,7 @@ def test_static_preview_handler_db_range_and_atomic_headers():
     try:
         # 1. Range probe bytes=0-99
         req_probe = urllib.request.Request(
-            f"http://127.0.0.1:{port}/dhamma_web.db",
+            f"http://127.0.0.1:{port}/core.db.gz",
             headers={"Range": "bytes=0-99"},
         )
         with urllib.request.urlopen(req_probe) as resp:
@@ -593,14 +596,245 @@ def test_static_preview_handler_db_range_and_atomic_headers():
             assert cr == f"bytes 0-99/{expected_size}"
             header_bytes = resp.read()
             assert len(header_bytes) == 100
-            assert header_bytes.startswith(b"SQLite format 3\x00")
+            assert header_bytes[:2] == b"\x1f\x8b"
 
-        # 2. Full fetch
-        req_full = urllib.request.Request(f"http://127.0.0.1:{port}/dhamma_web.db")
+        # 2. Full fetch + gzip decompression verification
+        req_full = urllib.request.Request(f"http://127.0.0.1:{port}/core.db.gz")
         with urllib.request.urlopen(req_full) as resp:
             assert resp.status == 200
+            assert resp.headers.get("Content-Type") == "application/octet-stream"
             cl = int(resp.headers.get("Content-Length", 0))
             assert cl == expected_size
+            raw_gz = resp.read()
+            raw_sqlite = gzip.decompress(raw_gz)
+            assert raw_sqlite.startswith(b"SQLite format 3\x00")
+
+        # 3. Manifest JSON fetch
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/db_manifest.json") as resp:
+            assert resp.status == 200
+            manifest = json.loads(resp.read().decode("utf-8"))
+            assert manifest["format"] == "sharded_v1"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_compile_sharded_static_databases_and_pwa_assets(tmp_path: Path, capsys):
+    """
+    Verifies sharded PWA compilation produces <100MB shards cleanly matching source data,
+    emits stage progress bars, removes stale monolithic dhamma_web.db, and ships PNG icons.
+    """
+    import gzip
+    import json
+    from deeper_dhamma.config import PROJECT_ROOT
+    from deeper_dhamma.export_web import compile_sharded_static_databases
+
+    if not (TRANSCRIPTS_DB_PATH.exists() and BUDDHISM_LEXICON_DB_PATH.exists()):
+        pytest.skip("Source databases not present")
+
+    # Pre-create stale monolithic db to verify cleanup
+    (tmp_path / "dhamma_web.db").write_bytes(b"stale")
+    res = compile_sharded_static_databases(tmp_path, version_int=20261115, show_progress=True)
+    captured = capsys.readouterr().out
+    assert "Building core.db & importing Pali lexicon" in captured
+    assert "Indexing search_vocab" in captured
+    assert "Sharded bundle ready" in captured
+    assert not any(p.name.startswith(".build_stage") for p in tmp_path.iterdir())
+    manifest = res["manifest"]
+
+    assert manifest["format"] == "sharded_v1"
+    assert not (tmp_path / "dhamma_web.db").exists()
+    assert (tmp_path / "db_manifest.json").exists()
+    assert len(manifest["talks"]) == 4
+    assert len(manifest["words"]) == 2
+
+    # Every file (both gzipped and uncompressed) must stay strictly below GitHub's 100 MB limit
+    max_raw = max(
+        [manifest["core"]["raw_bytes"]]
+        + [s["raw_bytes"] for s in manifest["talks"]]
+        + [s["raw_bytes"] for s in manifest["words"]]
+    )
+    max_gz = max(
+        [manifest["core"]["gz_bytes"]]
+        + [s["gz_bytes"] for s in manifest["talks"]]
+        + [s["gz_bytes"] for s in manifest["words"]]
+    )
+    assert max_raw < 100 * 1024 * 1024, f"Raw shard exceeds 100 MB: {max_raw}"
+    assert max_gz < 100 * 1024 * 1024, f"Gzipped shard exceeds 100 MB: {max_gz}"
+
+    # Verify pb28113880 routing from core -> talks & words shards
+    core_p = tmp_path / "verify_core.db"
+    core_p.write_bytes(gzip.decompress((tmp_path / manifest["core"]["file"]).read_bytes()))
+    c_conn = sqlite3.connect(core_p)
+    try:
+        row = c_conn.execute("SELECT talks_shard, words_shard FROM episodes WHERE id = 'pb28113880';").fetchone()
+        assert row is not None and row[0] in (1, 2, 3, 4) and row[1] in (1, 2)
+        talks_p = tmp_path / "verify_talks.db"
+        talks_p.write_bytes(gzip.decompress((tmp_path / f"talks_{row[0]}.db.gz").read_bytes()))
+        words_p = tmp_path / "verify_words.db"
+        words_p.write_bytes(gzip.decompress((tmp_path / f"words_{row[1]}.db.gz").read_bytes()))
+    finally:
+        c_conn.close()
+
+    t_conn = sqlite3.connect(talks_p)
+    w_conn = sqlite3.connect(words_p)
+    try:
+        seg_cnt = t_conn.execute("SELECT COUNT(*) FROM speech_segments WHERE episode_id = 'pb28113880';").fetchone()[0]
+        assert seg_cnt > 0
+        fts_hit = t_conn.execute(
+            "SELECT COUNT(*) FROM transcripts_fts WHERE transcripts_fts MATCH 'meditation';"
+        ).fetchone()[0]
+        assert fts_hit >= 0
+        wb = w_conn.execute("SELECT words_blob FROM episode_words WHERE episode_id = 'pb28113880';").fetchone()
+        assert wb is not None and len(wb[0]) > 4
+    finally:
+        t_conn.close()
+        w_conn.close()
+
+    # Verify PWA manifest PNG icons and long DB timeout in service worker
+    static_dir = PROJECT_ROOT / "deeper_dhamma" / "web" / "static"
+    pwa_manifest = json.loads((static_dir / "manifest.json").read_text(encoding="utf-8"))
+    sizes = {icon.get("sizes"): icon.get("src") for icon in pwa_manifest.get("icons", [])}
+    assert "192x192" in sizes and "512x512" in sizes
+    assert (static_dir / "icons" / "icon_192.png").exists()
+    assert (static_dir / "icons" / "icon_512.png").exists()
+    assert (static_dir / "icons" / "apple_touch_icon.png").exists()
+    sw_text = (static_dir / "svc_worker.js").read_text(encoding="utf-8")
+    assert "timeoutMs = isFullDb ? 300000" in sw_text
+
+
+def test_headless_chrome_sharded_pwa_worker_end_to_end():
+    """
+    Runs real db_worker.js inside headless Google Chrome against dist/ over HTTP,
+    verifying gzip decompression, OPFS/IDB shard loading, merged FTS search,
+    episode segment loading, and binary words_blob playback retrieval.
+    """
+    import http.server
+    import json
+    import subprocess
+    import tempfile
+    import threading
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found")
+    if not (DIST_DIR / "db_manifest.json").exists():
+        pytest.skip("Sharded bundle not compiled in dist/")
+
+    report = {}
+
+    class WorkerE2EHandler(StaticPreviewHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__e2e_report":
+                length = int(self.headers.get("Content-Length", 0))
+                payload = self.rfile.read(length)
+                report.update(json.loads(payload.decode("utf-8")))
+                self.send_response(200)
+                self.end_headers()
+                return
+            self.send_error(404)
+
+        def do_GET(self):
+            if self.path == "/__e2e_harness.html":
+                html = b"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><script>
+                (async () => {
+                  const res = {};
+                  try {
+                    const worker = new Worker('./db_worker.js');
+                    let seq = 0;
+                    const pending = new Map();
+                    const syncEvents = [];
+                    worker.onmessage = (e) => {
+                      const { id, success, data, error, type } = e.data || {};
+                      if (type === 'db_sync_progress') {
+                        syncEvents.push(data);
+                        return;
+                      }
+                      if (pending.has(id)) {
+                        const p = pending.get(id);
+                        pending.delete(id);
+                        if (success) p.resolve(data);
+                        else p.reject(new Error(error || 'worker error'));
+                      }
+                    };
+                    function call(type, payload) {
+                      const id = ++seq;
+                      return new Promise((resolve, reject) => {
+                        pending.set(id, { resolve, reject });
+                        worker.postMessage({ id, type, payload });
+                      });
+                    }
+                    res.init = await call('init', { manifestUrl: './db_manifest.json' });
+                    res.stats = await call('get_stats');
+                    res.search = await call('search', { query: 'breath', limit: 20 });
+                    res.episode = await call('get_episode', { episodeId: 'pb28113880' });
+                    res.words = await call('get_episode_words', { episodeId: 'pb28113880' });
+                    res.wordsByteLen = res.words ? res.words.byteLength : 0;
+                    res.segCount = res.episode && res.episode.segments ? res.episode.segments.length : 0;
+                    res.searchCount = res.search && res.search.results ? res.search.results.length : 0;
+                    res.syncEventCount = syncEvents.length;
+                    delete res.words;
+                    delete res.episode;
+                    delete res.search;
+                    res.ok = true;
+                  } catch (err) {
+                    res.ok = false;
+                    res.error = err && err.message ? err.message : String(err);
+                  }
+                  await fetch('/__e2e_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(res),
+                  });
+                })();
+                </script></body></html>"""
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(html)))
+                self.end_headers()
+                self.wfile.write(html)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: WorkerE2EHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_dir:
+            cmd = [
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_dir}",
+                f"http://127.0.0.1:{port}/__e2e_harness.html",
+            ]
+            proc = subprocess.Popen(cmd)
+            try:
+                # Poll cleanly up to 30s until browser reports completion
+                import time
+                deadline = time.time() + 45.0
+                while time.time() < deadline and not report:
+                    time.sleep(0.25)
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        assert report.get("ok") is True, f"Chrome E2E failed: {report}"
+        assert report["init"]["sharded"] is True
+        assert report["stats"]["transcribed_episodes"] >= 2500
+        assert report["searchCount"] > 0
+        assert report["segCount"] > 0
+        assert report["wordsByteLen"] > 100
     finally:
         server.shutdown()
         server.server_close()
@@ -614,3 +848,426 @@ def test_static_preview_handler_db_range_and_atomic_headers():
 
 
 
+
+
+def test_compile_sharded_atomic_staging_preserves_prior_bundle_on_interrupt(tmp_path: Path, monkeypatch):
+    """If web compilation is interrupted mid-build, existing dist/ artifacts must remain untouched."""
+    from deeper_dhamma.export_web import compile_sharded_static_databases
+    from deeper_dhamma.storage import TranscriptDatabase
+
+    if not BUDDHISM_LEXICON_DB_PATH.exists():
+        pytest.skip("Lexicon database not present")
+
+    src_db_path = tmp_path / "tiny_transcripts.db"
+    tdb = TranscriptDatabase(db_path=src_db_path, pipeline_db_path=tmp_path / "tiny_pipe.db")
+    tdb.save_episode(
+        episode_metadata={"id": "pb1", "title": "Tiny Talk", "primary_teacher": "ajahn_brahm", "upload_date": "20200101", "media_url": "https://example.com/1.mp3"},
+        attributed_segments=[{"start": 0.0, "end": 1.0, "speaker_slug": "ajahn_brahm", "speaker_display": "Ajahn Brahm", "text": "Namo Buddhaya."}],
+        duration_sec=10.0,
+        year="2020",
+        filename_stem="tiny",
+    )
+
+    out_dir = tmp_path / "dist"
+    out_dir.mkdir()
+    prior_manifest = out_dir / "db_manifest.json"
+    prior_core = out_dir / "core.db.gz"
+    prior_manifest.write_text('{"version": 1}', encoding="utf-8")
+    prior_core.write_bytes(b"prior-core-gz")
+
+    import deeper_dhamma.export_web as ew
+    calls = {"n": 0}
+    real_compress = ew._compress_db_gzip
+
+    def _interrupt_on_second(raw_p, gz_p):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise KeyboardInterrupt("simulated Ctrl+C")
+        return real_compress(raw_p, gz_p)
+
+    monkeypatch.setattr(ew, "_compress_db_gzip", _interrupt_on_second)
+    with pytest.raises(KeyboardInterrupt):
+        compile_sharded_static_databases(out_dir, version_int=20261116, transcripts_db_path=src_db_path, show_progress=False)
+
+    assert prior_manifest.read_text(encoding="utf-8") == '{"version": 1}'
+    assert prior_core.read_bytes() == b"prior-core-gz"
+    assert not any(p.name.startswith(".build_stage") for p in out_dir.iterdir())
+
+
+def test_search_stopword_filtering_and_pagination_ui():
+    """Verifies 50-per-page search pagination controls and stopword suppression across web assets."""
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
+    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    worker_js = (web_dir / "static" / "db_worker.js").read_text(encoding="utf-8")
+    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+
+    for dom_id in (
+        'id="search-pagination"',
+        'id="btn-search-first"',
+        'id="btn-search-prev"',
+        'id="btn-search-next"',
+        'id="btn-search-last"',
+        'id="search-page-indicator"',
+    ):
+        assert dom_id in index_html, f"Missing {dom_id} in index.html"
+
+    assert ".search-pagination" in style_css
+    assert "APP_SEARCH_STOPWORDS" in app_js
+    assert "updateSearchPagination" in app_js
+    assert "episodeLimit" in app_js
+    assert "episodeLimit" in worker_js
+    assert "all_episode_ids" in worker_js
+
+
+def test_headless_chrome_search_pagination_and_stopword_quality():
+    """
+    Runs the real dist/index.html + app.js + db_worker.js in headless Google Chrome
+    for 'mindfulness of breathing', verifying:
+    1. Page 1 renders at most 50 result cards (50 of ~167 matching talks).
+    2. Standalone stopword matches ('of', 'off', 'often') are NOT highlighted or extracted.
+    3. Pagination controls appear and clicking Next 50 loads the next disjoint 50 talks.
+    """
+    import http.server
+    import json
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found")
+    if not (DIST_DIR / "db_manifest.json").exists() or not (DIST_DIR / "index.html").exists():
+        pytest.skip("Built static bundle not present in dist/")
+
+    report = {}
+
+    class SearchUIHandler(StaticPreviewHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__search_ui_report":
+                length = int(self.headers.get("Content-Length", 0))
+                payload = self.rfile.read(length)
+                report.update(json.loads(payload.decode("utf-8")))
+                self.send_response(200)
+                self.end_headers()
+                return
+            self.send_error(404)
+
+        def do_GET(self):
+            if self.path == "/__search_ui_e2e.html":
+                raw_html = (DIST_DIR / "index.html").read_text(encoding="utf-8")
+                harness_js = """
+                <script>
+                (async () => {
+                  const res = { ok: false };
+                  const waitFor = async (fn, timeoutMs = 45000) => {
+                    const start = Date.now();
+                    while (Date.now() - start < timeoutMs) {
+                      const val = fn();
+                      if (val) return val;
+                      await new Promise(r => setTimeout(r, 100));
+                    }
+                    throw new Error('Timed out waiting for condition');
+                  };
+                  try {
+                    if (!window.location.hash) {
+                      window.location.hash = '#search?q=mindfulness%20of%20breathing';
+                    }
+                    await waitFor(() => document.querySelectorAll('#search-results-list .result-card').length > 0);
+                    const p1Cards = Array.from(document.querySelectorAll('#search-results-list .result-card'));
+                    const p1Ids = p1Cards.map(el => el.dataset.epId);
+                    const p1Bold = Array.from(document.querySelectorAll('#search-results-list .sentence-context-text b'))
+                      .map(el => el.textContent.trim().toLowerCase());
+                    const pagEl = document.getElementById('search-pagination');
+                    const pagInd1 = document.getElementById('search-page-indicator')?.textContent || '';
+                    const nextBtn = document.getElementById('btn-search-next');
+                    const prevBtn = document.getElementById('btn-search-prev');
+
+                    res.p1Count = p1Cards.length;
+                    res.p1Ids = p1Ids;
+                    res.p1BadOfBold = p1Bold.filter(w => ['of', 'off', 'often', 'offer'].includes(w));
+                    res.p1PhraseBoldCount = p1Bold.filter(w => w.includes('mindfulness of breathing')).length;
+                    res.pagVisible = pagEl && getComputedStyle(pagEl).display !== 'none';
+                    res.pagInd1 = pagInd1;
+                    res.prevDisabled1 = prevBtn ? prevBtn.disabled : null;
+                    res.nextDisabled1 = nextBtn ? nextBtn.disabled : null;
+
+                    nextBtn.click();
+                    await waitFor(() => {
+                      const txt = document.getElementById('search-page-indicator')?.textContent || '';
+                      return txt.includes('51') && txt !== pagInd1;
+                    });
+                    const p2Cards = Array.from(document.querySelectorAll('#search-results-list .result-card'));
+                    const p2Ids = p2Cards.map(el => el.dataset.epId);
+                    res.p2Count = p2Cards.length;
+                    res.p2Ids = p2Ids;
+                    res.pagInd2 = document.getElementById('search-page-indicator')?.textContent || '';
+                    res.prevDisabled2 = prevBtn ? prevBtn.disabled : null;
+                    res.ok = true;
+                  } catch (err) {
+                    res.error = err && err.message ? err.message : String(err);
+                  }
+                  await fetch('/__search_ui_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(res),
+                  });
+                })();
+                </script>
+                """
+                injected = raw_html.replace("</body>", harness_js + "\n</body>").encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(injected)))
+                self.end_headers()
+                self.wfile.write(injected)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: SearchUIHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_dir:
+            cmd = [
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_dir}",
+                f"http://127.0.0.1:{port}/__search_ui_e2e.html#search?q=mindfulness%20of%20breathing",
+            ]
+            proc = subprocess.Popen(cmd)
+            try:
+                deadline = time.time() + 50.0
+                while time.time() < deadline and not report:
+                    time.sleep(0.25)
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        assert report.get("ok") is True, f"Search UI E2E failed: {report}"
+        assert 1 <= report["p1Count"] <= 50
+        assert report["p1Count"] == 50
+        assert report["p1BadOfBold"] == [], f"Unexpected standalone 'of' highlights: {report['p1BadOfBold']}"
+        assert report["p1PhraseBoldCount"] > 0
+        assert report["pagVisible"] is True
+        assert "1–50" in report["pagInd1"]
+        assert report["prevDisabled1"] is True
+        assert report["nextDisabled1"] is False
+
+        assert 1 <= report["p2Count"] <= 50
+        assert "51–" in report["pagInd2"]
+        assert report["prevDisabled2"] is False
+        assert set(report["p1Ids"]).isdisjoint(set(report["p2Ids"])), "Page 2 results must not overlap Page 1"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_headless_chrome_search_jump_to_exact_phrase_location():
+    """
+    Verifies that clicking search results for 'mindfullness of breathing' across multiple
+    consecutive talks always:
+    1. Resolves the exact target word timestamp (never stale turnWordMap from a prior talk).
+    2. Highlights the matched word inside the target sentence.
+    3. Scrolls the matched word/sentence inside the unobstructed reading area between the
+       sticky transcript toolbar and the bottom audio player bar.
+    """
+    import http.server
+    import json
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found")
+    if not (DIST_DIR / "db_manifest.json").exists() or not (DIST_DIR / "index.html").exists():
+        pytest.skip("Built static bundle not present in dist/")
+
+    report = {}
+
+    class JumpUIHandler(StaticPreviewHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__jump_ui_report":
+                length = int(self.headers.get("Content-Length", 0))
+                payload = self.rfile.read(length)
+                report.update(json.loads(payload.decode("utf-8")))
+                self.send_response(200)
+                self.end_headers()
+                return
+            self.send_error(404)
+
+        def do_GET(self):
+            if self.path == "/__jump_ui_e2e.html":
+                raw_html = (DIST_DIR / "index.html").read_text(encoding="utf-8")
+                harness_js = """
+                <script>
+                (async () => {
+                  const res = { ok: false, jumps: [] };
+                  const wait = ms => new Promise(r => setTimeout(r, ms));
+                  const waitFor = async (fn, timeoutMs = 45000) => {
+                    const start = Date.now();
+                    while (Date.now() - start < timeoutMs) {
+                      const val = fn();
+                      if (val) return val;
+                      await wait(80);
+                    }
+                    throw new Error('Timed out waiting for jump UI condition');
+                  };
+                  try {
+                    HTMLMediaElement.prototype.play = function() { return Promise.resolve(); };
+                    let lastSeekCall = null;
+                    if (window.WordSync && typeof window.WordSync.prepareSeek === 'function') {
+                      const origPrepareSeek = window.WordSync.prepareSeek.bind(window.WordSync);
+                      window.WordSync.prepareSeek = function(physSec, wordStartSec) {
+                        lastSeekCall = { epId: window.WordSync.currentEpisodeId, physSec, wordStartSec };
+                        return origPrepareSeek(physSec, wordStartSec);
+                      };
+                    }
+                    await waitFor(() => document.querySelectorAll('#search-results-list .sentence-match-row').length > 0);
+                    const allRows = Array.from(document.querySelectorAll('#search-results-list .sentence-match-row'));
+                    const seenEps = new Set();
+                    const picked = [];
+                    for (const r of allRows) {
+                      if (!seenEps.has(r.dataset.epId)) {
+                        seenEps.add(r.dataset.epId);
+                        picked.push({
+                          epId: r.dataset.epId,
+                          turnIdx: Number(r.dataset.turnIdx),
+                          wordOff: Number(r.dataset.wordOffset),
+                        });
+                        if (picked.length >= 8) break;
+                      }
+                    }
+
+                    for (const p of picked) {
+                      lastSeekCall = null;
+                      document.getElementById('tab-search-btn').click();
+                      await wait(60);
+                      const rowEl = document.querySelector(
+                        `.sentence-match-row[data-ep-id="${p.epId}"][data-turn-idx="${p.turnIdx}"][data-word-offset="${p.wordOff}"]`
+                      );
+                      rowEl.click();
+                      await waitFor(() =>
+                        window.WordSync &&
+                        window.WordSync.currentEpisodeId === p.epId &&
+                        window.WordSync.turnWordMap &&
+                        window.WordSync.turnWordMap[p.turnIdx] &&
+                        document.querySelector('#drawer-turns-container .active-word')
+                      );
+                      await wait(250);
+
+                      const activeWord = document.querySelector('#drawer-turns-container .active-word');
+                      const flashedSent = document.querySelector('#drawer-turns-container .target-sentence-flash');
+                      const turnWords = (window.WordSync && window.WordSync.turnWordMap && window.WordSync.turnWordMap[p.turnIdx]) || [];
+                      const realWord = turnWords[p.wordOff] || null;
+                      const toolbar = document.getElementById('transcript-sticky-toolbar');
+                      const toolbarBottom = toolbar ? Math.max(0, toolbar.getBoundingClientRect().bottom) : 0;
+                      const playerBar = document.getElementById('audio-player-bar');
+                      const playerTop = playerBar ? Math.min(window.innerHeight, playerBar.getBoundingClientRect().top) : window.innerHeight;
+                      const targetEl = activeWord || flashedSent;
+                      const rect = targetEl ? targetEl.getBoundingClientRect() : null;
+                      const recordedSeek = (lastSeekCall && lastSeekCall.epId === p.epId)
+                        ? lastSeekCall.wordStartSec
+                        : (window.WordSync ? window.WordSync._seekTargetWordTime : null);
+
+                      res.jumps.push({
+                        epId: p.epId,
+                        turnIdx: p.turnIdx,
+                        wordOff: p.wordOff,
+                        hasActiveWord: Boolean(activeWord),
+                        activeWordText: activeWord ? activeWord.textContent.trim().toLowerCase() : '',
+                        hasFlashedSent: Boolean(flashedSent),
+                        sentContainsPhrase: flashedSent ? flashedSent.textContent.toLowerCase().includes('mindfulness of breathing') : false,
+                        realWordTime: realWord ? realWord.s : null,
+                        seekTargetTime: recordedSeek,
+                        rectTop: rect ? Math.round(rect.top) : null,
+                        rectBottom: rect ? Math.round(rect.bottom) : null,
+                        toolbarBottom: Math.round(toolbarBottom),
+                        playerTop: Math.round(playerTop),
+                      });
+                    }
+                    res.ok = true;
+                  } catch (err) {
+                    res.error = err && err.message ? err.message : String(err);
+                  }
+                  await fetch('/__jump_ui_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(res),
+                  });
+                })();
+                </script>
+                """
+                injected = raw_html.replace("</body>", harness_js + "\n</body>").encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(injected)))
+                self.end_headers()
+                self.wfile.write(injected)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: JumpUIHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_dir:
+            cmd = [
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_dir}",
+                f"http://127.0.0.1:{port}/__jump_ui_e2e.html#search?q=mindfullness%20of%20breathing",
+            ]
+            proc = subprocess.Popen(cmd)
+            try:
+                deadline = time.time() + 50.0
+                while time.time() < deadline and not report:
+                    time.sleep(0.25)
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        assert report.get("ok") is True, f"Jump UI E2E failed: {report}"
+        assert len(report["jumps"]) == 8
+        for j in report["jumps"]:
+            assert j["hasFlashedSent"] is True, f"Missing flashed sentence for {j}"
+            assert j["sentContainsPhrase"] is True, f"Target sentence missing phrase for {j}"
+            assert j["hasActiveWord"] is True, f"Missing active word for {j}"
+            assert "mindful" in j["activeWordText"], f"Wrong active word '{j['activeWordText']}' for {j}"
+            assert j["rectTop"] >= j["toolbarBottom"] - 2, f"Occluded by sticky toolbar: {j}"
+            assert j["rectBottom"] <= j["playerTop"] + 2, f"Occluded by player bar: {j}"
+            if j["realWordTime"] is not None and j["realWordTime"] > 0:
+                assert j["seekTargetTime"] is not None, f"Seek target missing for {j}"
+                assert abs(j["seekTargetTime"] - j["realWordTime"]) < 0.2, (
+                    f"Seek target {j['seekTargetTime']} != realWordTime {j['realWordTime']} for {j}"
+                )
+    finally:
+        server.shutdown()
+        server.server_close()

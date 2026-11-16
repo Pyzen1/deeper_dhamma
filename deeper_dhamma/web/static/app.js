@@ -27,6 +27,14 @@
       limit: 60,
       total: 0,
     },
+    search: {
+      offset: 0,
+      limit: 50,
+      totalEpisodes: 0,
+      totalSegments: 0,
+      filteredEpisodeIds: [],
+      filteredFilterOpts: null,
+    },
     currentFilteredTalks: [],
     dateFilterMode: 'year',
     archiveCancelRequested: false,
@@ -145,11 +153,18 @@
     btnClearBookmarks: document.getElementById('btn-clear-bookmarks'),
     
     // Search Content
+    searchResultsHeader: document.getElementById('search-results-header'),
     searchMetaBar: document.getElementById('search-meta-bar'),
     queryMetaText: document.getElementById('query-meta-text'),
     queryTierBadge: document.getElementById('query-tier-badge'),
     searchEmptyState: document.getElementById('search-empty-state'),
     searchResultsList: document.getElementById('search-results-list'),
+    searchPagination: document.getElementById('search-pagination'),
+    btnSearchFirst: document.getElementById('btn-search-first'),
+    btnSearchPrev: document.getElementById('btn-search-prev'),
+    btnSearchNext: document.getElementById('btn-search-next'),
+    btnSearchLast: document.getElementById('btn-search-last'),
+    searchPageIndicator: document.getElementById('search-page-indicator'),
     exampleChips: document.getElementById('example-queries'),
 
     // Browse Content
@@ -965,7 +980,22 @@
       await dbService.init();
       state.isDbReady = true;
 
-      // Seamless background hot-swap listener
+      // Seamless background hot-swap & offline PWA sync listener
+      dbService.onSyncProgress = (p) => {
+        const syncEl = document.getElementById('stat-offline-sync');
+        if (!syncEl || !p) return;
+        syncEl.style.display = 'block';
+        const mbDone = (p.loadedBytes / (1024 * 1024)).toFixed(0);
+        const mbTotal = Math.max(1, Math.round(p.totalBytes / (1024 * 1024)));
+        if (p.fullOfflineReady || p.phase === 'complete') {
+          syncEl.textContent = `Offline PWA ready (${mbTotal} MB cached)`;
+        } else if (p.textSearchReady) {
+          syncEl.textContent = `Offline search ready • syncing word-sync (${mbDone}/${mbTotal} MB)`;
+        } else {
+          syncEl.textContent = `Syncing offline search (${p.talksReady}/${p.talksTotal}, ${mbDone}/${mbTotal} MB)...`;
+        }
+      };
+
       dbService.onHotSwap = (data) => {
         console.log(`[App] Database hot-swapped seamlessly in background: v${data.version} (${data.size} bytes).`);
         loadArchiveStats();
@@ -1534,6 +1564,24 @@
     }, 1800);
   }
 
+  async function downloadFilteredArchive(format) {
+    try {
+      let talks = state.currentFilteredTalks || [];
+      if (state.search.filteredEpisodeIds && state.search.filteredEpisodeIds.length > talks.length) {
+        talks = await dbService.getEpisodesByIds(state.search.filteredEpisodeIds);
+      } else if (state.search.filteredFilterOpts && state.search.totalEpisodes > talks.length) {
+        const data = await dbService.getEpisodes({ ...state.search.filteredFilterOpts, limit: 0, offset: 0 });
+        if (data && Array.isArray(data.episodes)) {
+          talks = data.episodes;
+        }
+      }
+      await compileAndDownloadArchive(talks, format, 'filtered_transcripts');
+    } catch (err) {
+      console.error('Failed to download filtered archive:', err);
+      alert('Failed to load matching talks for download.');
+    }
+  }
+
   async function downloadAllArchive(format) {
     try {
       const data = await dbService.getEpisodes({
@@ -1600,8 +1648,7 @@
         }
 
         if (wrapper && wrapper.id === 'filtered-archive-dropdown-wrapper') {
-          const talks = state.currentFilteredTalks || [];
-          compileAndDownloadArchive(talks, format, 'filtered_transcripts');
+          downloadFilteredArchive(format);
         } else if (wrapper && wrapper.id === 'all-archive-dropdown-wrapper') {
           downloadAllArchive(format);
         } else if (wrapper && wrapper.id === 'single-talk-dropdown-wrapper') {
@@ -1746,13 +1793,48 @@
         els.yearFilter.value = '';
         if (els.startDateInput) els.startDateInput.value = '';
         if (els.endDateInput) els.endDateInput.value = '';
-        if (els.sortOrderSelect) els.sortOrderSelect.value = 'date_desc';
+        if (els.sortOrderSelect) els.sortOrderSelect.value = 'rank';
         state.dateFilterMode = 'year';
         if (els.btnModeYear) els.btnModeYear.classList.add('active');
         if (els.btnModeRange) els.btnModeRange.classList.remove('active');
         if (els.yearFilter) els.yearFilter.style.display = 'inline-block';
         if (els.dateRangeInputs) els.dateRangeInputs.style.display = 'none';
         executeSearch('');
+      });
+    }
+
+    const goToSearchPage = (nextOffset) => {
+      const limit = state.search.limit || 50;
+      const total = state.search.totalEpisodes || 0;
+      const lastOffset = Math.max(0, Math.floor(Math.max(0, total - 1) / limit) * limit);
+      const clamped = Math.max(0, Math.min(nextOffset, lastOffset));
+      if (clamped === state.search.offset) return;
+      state.search.offset = clamped;
+      executeSearch(state.currentQuery, { keepPage: true, skipHistory: true });
+      if (els.searchResultsHeader) {
+        els.searchResultsHeader.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
+    if (els.btnSearchFirst) {
+      els.btnSearchFirst.addEventListener('click', () => goToSearchPage(0));
+    }
+    if (els.btnSearchPrev) {
+      els.btnSearchPrev.addEventListener('click', () => {
+        goToSearchPage(state.search.offset - (state.search.limit || 50));
+      });
+    }
+    if (els.btnSearchNext) {
+      els.btnSearchNext.addEventListener('click', () => {
+        goToSearchPage(state.search.offset + (state.search.limit || 50));
+      });
+    }
+    if (els.btnSearchLast) {
+      els.btnSearchLast.addEventListener('click', () => {
+        const limit = state.search.limit || 50;
+        const total = state.search.totalEpisodes || 0;
+        const lastOffset = Math.max(0, Math.floor(Math.max(0, total - 1) / limit) * limit);
+        goToSearchPage(lastOffset);
       });
     }
 
@@ -2436,17 +2518,20 @@
 
   async function executeSearch(query, options = {}) {
     state.currentQuery = query;
+    if (!options.keepPage) {
+      state.search.offset = 0;
+    }
     const teacherVal = (els.teacherFilter && els.teacherFilter.value) || '';
     const yearVal = (els.yearFilter && els.yearFilter.value) || '';
     const startDateVal = (els.startDateInput && els.startDateInput.value) || '';
     const endDateVal = (els.endDateInput && els.endDateInput.value) || '';
-    const sortVal = (els.sortOrderSelect && els.sortOrderSelect.value) || 'date_desc';
+    const sortVal = (els.sortOrderSelect && els.sortOrderSelect.value) || 'rank';
 
     const hasFilters = Boolean(
       teacherVal ||
       (state.dateFilterMode === 'year' && yearVal) ||
       (state.dateFilterMode === 'range' && (startDateVal || endDateVal)) ||
-      sortVal !== 'date_desc'
+      (sortVal && sortVal !== 'rank' && sortVal !== 'date_desc')
     );
 
     // If no text query and no filters, show empty state
@@ -2454,11 +2539,16 @@
       els.searchEmptyState.style.display = 'block';
       els.searchResultsList.style.display = 'none';
       els.searchMetaBar.style.display = 'none';
+      if (els.searchPagination) els.searchPagination.style.display = 'none';
       if (els.filteredArchiveDropdownWrapper) {
         els.filteredArchiveDropdownWrapper.style.display = 'none';
       }
       els.searchCountBadge.textContent = '0';
       state.currentFilteredTalks = [];
+      state.search.totalEpisodes = 0;
+      state.search.totalSegments = 0;
+      state.search.filteredEpisodeIds = [];
+      state.search.filteredFilterOpts = null;
       if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = '0';
       if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = true;
 
@@ -2485,10 +2575,12 @@
       }
     }
 
-    // Case 1: Search query provided (FTS search)
+    // Case 1: Search query provided (FTS search, 50 talks per page)
     if (query) {
+      state.search.filteredFilterOpts = null;
       const searchOpts = {
-        limit: 500,
+        episodeLimit: state.search.limit,
+        offset: state.search.offset,
         exact: els.exactCheckbox.checked,
         sort: sortVal,
       };
@@ -2509,12 +2601,13 @@
       return;
     }
 
-    // Case 2: No search query, but filters active (Browse by Filter)
+    // Case 2: No search query, but filters active (Browse by Filter, 50 talks per page)
     try {
       const filterOpts = {
         transcribedOnly: true,
-        limit: 100,
-        sort: sortVal,
+        limit: state.search.limit,
+        offset: state.search.offset,
+        sort: sortVal === 'rank' ? 'date_desc' : sortVal,
       };
       if (teacherVal) filterOpts.teacher = teacherVal;
       if (state.dateFilterMode === 'year' && yearVal) filterOpts.year = yearVal;
@@ -2523,6 +2616,8 @@
         if (endDateVal) filterOpts.endDate = endDateVal;
       }
 
+      state.search.filteredFilterOpts = filterOpts;
+      state.search.filteredEpisodeIds = [];
       const data = await dbService.getEpisodes(filterOpts);
       renderFilterResults(data);
     } catch (err) {
@@ -2530,9 +2625,44 @@
     }
   }
 
+  function updateSearchPagination(totalEpisodes, shownCount) {
+    if (!els.searchPagination) return;
+    const limit = state.search.limit || 50;
+    const offset = state.search.offset || 0;
+    const total = Number(totalEpisodes) || 0;
+
+    if (total <= limit || shownCount === 0) {
+      els.searchPagination.style.display = 'none';
+      return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const currentPage = Math.min(totalPages, Math.floor(offset / limit) + 1);
+    const startNum = offset + 1;
+    const endNum = Math.min(total, offset + shownCount);
+    const remaining = Math.max(0, total - endNum);
+    const nextBatch = remaining > 0 && remaining < limit ? remaining : limit;
+
+    els.searchPagination.style.display = 'flex';
+    if (els.searchPageIndicator) {
+      els.searchPageIndicator.textContent =
+        `Showing ${startNum.toLocaleString()}–${endNum.toLocaleString()} of ${total.toLocaleString()} (Page ${currentPage} of ${totalPages})`;
+    }
+    if (els.btnSearchFirst) els.btnSearchFirst.disabled = currentPage <= 1;
+    if (els.btnSearchPrev) els.btnSearchPrev.disabled = currentPage <= 1;
+    if (els.btnSearchNext) {
+      els.btnSearchNext.disabled = currentPage >= totalPages;
+      els.btnSearchNext.textContent = `Next ${nextBatch} ›`;
+    }
+    if (els.btnSearchLast) els.btnSearchLast.disabled = currentPage >= totalPages;
+  }
+
   function renderFilterResults(data) {
     const episodes = data.episodes || [];
+    const total = data.total !== undefined ? data.total : episodes.length;
     state.currentFilteredTalks = episodes;
+    state.search.totalEpisodes = total;
+    state.search.totalSegments = 0;
 
     els.searchEmptyState.style.display = 'none';
     els.searchResultsList.style.display = 'flex';
@@ -2540,13 +2670,23 @@
     if (els.filteredArchiveDropdownWrapper) {
       els.filteredArchiveDropdownWrapper.style.display = 'inline-block';
     }
-    els.searchCountBadge.textContent = String(episodes.length);
+    els.searchCountBadge.textContent = String(total);
 
     els.queryTierBadge.textContent = 'Filtered Catalog';
-    els.queryMetaText.textContent = `Showing ${episodes.length} talk${episodes.length === 1 ? '' : 's'} matching active filters`;
+    if (total > episodes.length && episodes.length > 0) {
+      const startNum = state.search.offset + 1;
+      const endNum = state.search.offset + episodes.length;
+      els.queryMetaText.textContent =
+        `Showing ${startNum.toLocaleString()}–${endNum.toLocaleString()} of ${total.toLocaleString()} talks matching active filters`;
+    } else {
+      els.queryMetaText.textContent =
+        `Showing ${total.toLocaleString()} talk${total === 1 ? '' : 's'} matching active filters`;
+    }
 
-    if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = String(episodes.length);
-    if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = episodes.length === 0;
+    if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = String(total);
+    if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = total === 0;
+
+    updateSearchPagination(total, episodes.length);
 
     if (episodes.length === 0) {
       els.searchResultsList.innerHTML = `
@@ -2642,11 +2782,41 @@
     attachCardEventListeners(els.searchResultsList, episodes);
   }
 
+  const APP_SEARCH_STOPWORDS = new Set([
+    'a', 'about', 'after', 'all', 'also', 'am', 'an', 'and', 'any', 'are', 'as', 'at',
+    'be', 'been', 'being', 'but', 'by',
+    'can', 'could',
+    'did', 'do', 'does', 'doing', 'down',
+    'for', 'from',
+    'had', 'has', 'have', 'having', 'he', 'her', 'here', 'hers', 'him', 'his', 'how',
+    'if', 'in', 'into', 'is', 'it', 'its',
+    'just',
+    'like',
+    'me', 'more', 'most', 'my',
+    'no', 'nor', 'not', 'now',
+    'of', 'on', 'only', 'or', 'other', 'our', 'ours', 'out', 'over',
+    'same', 'she', 'should', 'so', 'some', 'such',
+    'than', 'that', 'the', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'to', 'too',
+    'under', 'up',
+    'very',
+    'was', 'we', 'were', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'will', 'with', 'would',
+    'you', 'your', 'yours'
+  ]);
+
+  function buildDiacriticPattern(word) {
+    const map = {
+      a: '[aā]', i: '[iī]', u: '[uū]', t: '[tṭ]', d: '[dḍ]',
+      n: '[nṇñṅ]', l: '[lḷ]', m: '[mṁṃŋ]', s: '[sśṣ]',
+    };
+    return String(word).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/[aiutdnlms]/gi, (ch) => map[ch.toLowerCase()] || ch);
+  }
+
   /**
    * Extracts sentence-level matches from a segment turn's full text,
-   * preserving sentence index, word offset within the turn, and estimated word timestamp.
+   * suppressing stopword-only noise while keeping phrase matches and content words.
    */
-  function extractSentenceMatchesFromSegment(segItem, query, effectiveQuery) {
+  function extractSentenceMatchesFromSegment(segItem, query, meta = {}) {
     const rawText = (segItem.text || '').trim();
     const startSec = parseFloat(segItem.start_sec || 0);
     const endSec = parseFloat(segItem.end_sec || startSec);
@@ -2668,34 +2838,62 @@
       }];
     }
 
-    // Build regex terms from query and effectiveQuery
-    const rawTerms = [];
-    const sourceQ = `${query || ''} ${effectiveQuery || ''}`;
-    const STOP_OPS = new Set(['and', 'or', 'not', 'near']);
-    const parsedWords = sourceQ.match(/[a-zA-Z0-9]+/g) || [];
-    parsedWords.forEach(w => {
-      const lw = w.toLowerCase();
-      if (!STOP_OPS.has(lw) && lw.length >= 2 && !/^\d+$/.test(lw)) {
-        if (!rawTerms.includes(lw)) rawTerms.push(lw);
-      }
-    });
+    // Build content terms from structured worker metadata (avoiding FTS syntax & stopwords)
+    let rawTerms = [];
+    let hasContentWords = true;
+    if (meta && Array.isArray(meta.highlight_terms) && meta.highlight_terms.length > 0) {
+      rawTerms = [...meta.highlight_terms];
+      hasContentWords = meta.has_content_words !== false;
+    } else {
+      const STOP_OPS = new Set(['and', 'or', 'not', 'near']);
+      const parsedWords = (query || '').match(/[\p{L}\p{N}]+/gu) || [];
+      const allTokens = parsedWords
+        .map(w => w.toLowerCase())
+        .filter(lw => !STOP_OPS.has(lw) && lw.length >= 2);
+      const nonStop = allTokens.filter(lw => !APP_SEARCH_STOPWORDS.has(lw));
+      hasContentWords = nonStop.length > 0;
+      rawTerms = Array.from(new Set(hasContentWords ? nonStop : allTokens));
+    }
 
     // Also inspect any <b>...</b> highlighted words in snippet_text (handles Tier 4 fuzzy corrections)
     if (segItem.snippet_text) {
       const bMatches = segItem.snippet_text.match(/<b>([^<]+)<\/b>/gi) || [];
       bMatches.forEach(bm => {
         const cleanW = bm.replace(/<\/?b>/gi, '').trim().toLowerCase();
-        if (cleanW && !rawTerms.includes(cleanW)) rawTerms.push(cleanW);
+        if (cleanW && cleanW.length >= 2 && (!hasContentWords || !APP_SEARCH_STOPWORDS.has(cleanW))) {
+          if (!rawTerms.includes(cleanW)) rawTerms.push(cleanW);
+        }
       });
     }
 
     // Sort longest first so multi-char stems don't get shadowed
-    rawTerms.sort((a, b) => b.length - a.length);
+    rawTerms = Array.from(new Set(rawTerms)).sort((a, b) => b.length - a.length);
 
-    const escapedTerms = rawTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    // Match exact word or prefix stem
-    const wordMatchRegex = escapedTerms.length > 0
-      ? new RegExp(`\\b(${escapedTerms.join('|')})[a-zA-Z]*\\b`, 'gi')
+    const wordPatterns = rawTerms.map(t => {
+      const basePat = buildDiacriticPattern(t);
+      if (hasContentWords && t.length >= 3 && !/^\d+$/.test(t)) {
+        return `${basePat}[a-zA-Z\\u00C0-\\u024F\\u1E00-\\u1EFF]*`;
+      }
+      return basePat;
+    });
+
+    const perTermRegexes = wordPatterns.map(pat => new RegExp(`\\b(?:${pat})\\b`, 'i'));
+
+    let phrasePattern = null;
+    let phraseRegex = null;
+    const phraseTokens = (meta && meta.phrase)
+      ? meta.phrase.match(/[\p{L}\p{N}]+/gu) || []
+      : [];
+    if (phraseTokens.length > 1) {
+      phrasePattern = phraseTokens.map(t => buildDiacriticPattern(t)).join('[\\s,;:\\-—–]+');
+      phraseRegex = new RegExp(`\\b${phrasePattern}\\b`, 'gi');
+    }
+
+    const highlightBranches = [];
+    if (phrasePattern) highlightBranches.push(phrasePattern);
+    if (wordPatterns.length > 0) highlightBranches.push(...wordPatterns);
+    const highlightRegex = highlightBranches.length > 0
+      ? new RegExp(`\\b(${highlightBranches.join('|')})\\b`, 'gi')
       : null;
 
     // Split turn text into sentences using the same boundary rule as WordSync.formatTurnParagraphs
@@ -2757,52 +2955,98 @@
     });
 
     const totalTurnWords = Math.max(1, globalWordCursor);
-    const matchedSentences = [];
+    const candidateMatches = [];
 
     allSentences.forEach(sObj => {
       if (!sObj.text) return;
-      let firstMatchedWordIdx = -1;
 
-      if (wordMatchRegex) {
+      let phraseMatched = false;
+      if (phraseRegex) {
+        phraseRegex.lastIndex = 0;
+        phraseMatched = phraseRegex.test(sObj.text);
+      }
+
+      let distinctHits = 0;
+      for (let i = 0; i < perTermRegexes.length; i++) {
+        if (perTermRegexes[i].test(sObj.text)) {
+          distinctHits++;
+        }
+      }
+
+      if (!phraseMatched && distinctHits === 0) return;
+
+      let firstMatchedWordIdx = -1;
+      if (phraseMatched && phraseRegex) {
+        phraseRegex.lastIndex = 0;
+        const pMatch = phraseRegex.exec(sObj.text);
+        if (pMatch) {
+          const prefixText = sObj.text.slice(0, pMatch.index);
+          const prefixTokens = prefixText.trim() ? prefixText.trim().split(/\s+/).length : 0;
+          const endsMidToken = pMatch.index > 0 && !/\s/.test(sObj.text[pMatch.index - 1]);
+          const wordIdxInSent = Math.max(0, Math.min(sObj.words.length - 1, endsMidToken ? prefixTokens - 1 : prefixTokens));
+          if (sObj.words[wordIdxInSent]) {
+            firstMatchedWordIdx = sObj.words[wordIdxInSent].wordIdxInTurn;
+          }
+        }
+      }
+      if (firstMatchedWordIdx < 0 && highlightRegex) {
         for (const wEntry of sObj.words) {
-          wordMatchRegex.lastIndex = 0;
-          if (wordMatchRegex.test(wEntry.token)) {
+          highlightRegex.lastIndex = 0;
+          if (highlightRegex.test(wEntry.token)) {
             firstMatchedWordIdx = wEntry.wordIdxInTurn;
             break;
           }
         }
       }
-
-      if (firstMatchedWordIdx >= 0) {
-        const escapedSent = escapeHtml(sObj.text);
-        const highlightedHtml = wordMatchRegex
-          ? escapedSent.replace(wordMatchRegex, '<b>$&</b>')
-          : escapedSent;
-
-        const wordRatio = firstMatchedWordIdx / totalTurnWords;
-        const estWordSec = startSec + wordRatio * turnDur;
-
-        matchedSentences.push({
-          episode_id: segItem.episode_id,
-          turn_index: turnIndex,
-          sent_idx_in_turn: sObj.sentIdxInTurn,
-          word_offset_in_turn: firstMatchedWordIdx,
-          sent_start_word_offset: sObj.startWordIdx,
-          est_word_sec: estWordSec,
-          turn_start_sec: startSec,
-          turn_end_sec: endSec,
-          speaker_display: segItem.speaker_display || segItem.teacher,
-          speaker_slug: segItem.speaker_slug || segItem.teacher_slug,
-          sentence_html: highlightedHtml,
-          sentence_text: sObj.text,
-        });
+      if (firstMatchedWordIdx < 0) {
+        firstMatchedWordIdx = sObj.startWordIdx || 0;
       }
+
+      const escapedSent = escapeHtml(sObj.text);
+      const highlightedHtml = highlightRegex
+        ? escapedSent.replace(highlightRegex, '<b>$&</b>')
+        : escapedSent;
+
+      const wordRatio = firstMatchedWordIdx / totalTurnWords;
+      const estWordSec = startSec + wordRatio * turnDur;
+
+      candidateMatches.push({
+        episode_id: segItem.episode_id,
+        turn_index: turnIndex,
+        sent_idx_in_turn: sObj.sentIdxInTurn,
+        word_offset_in_turn: firstMatchedWordIdx,
+        sent_start_word_offset: sObj.startWordIdx,
+        est_word_sec: estWordSec,
+        turn_start_sec: startSec,
+        turn_end_sec: endSec,
+        speaker_display: segItem.speaker_display || segItem.teacher,
+        speaker_slug: segItem.speaker_slug || segItem.teacher_slug,
+        sentence_html: highlightedHtml,
+        sentence_text: sObj.text,
+        _phraseMatched: phraseMatched,
+        _distinctHits: distinctHits,
+      });
     });
 
-    // Fallback if FTS matched the turn (e.g. speaker name or stem) but regex didn't catch a sentence
+    // Prefer exact-phrase sentences for phrase tiers, then multi-term sentences, to keep cards focused
+    let matchedSentences = candidateMatches;
+    const tier = meta && meta.tier;
+    if (candidateMatches.length > 0) {
+      const phraseHits = candidateMatches.filter(m => m._phraseMatched);
+      if (phraseHits.length > 0 && (tier === 'exact_phrase' || tier === 'explicit' || tier === 'fuzzy')) {
+        matchedSentences = phraseHits;
+      } else if (perTermRegexes.length > 1) {
+        const allTermHits = candidateMatches.filter(m => m._distinctHits >= perTermRegexes.length);
+        if (allTermHits.length > 0) {
+          matchedSentences = allTermHits;
+        }
+      }
+    }
+
+    // Fallback if FTS matched the turn (e.g. speaker name or cross-sentence phrase)
     if (matchedSentences.length === 0 && allSentences.length > 0) {
       const firstS = allSentences[0];
-      matchedSentences.push({
+      matchedSentences = [{
         episode_id: segItem.episode_id,
         turn_index: turnIndex,
         sent_idx_in_turn: 0,
@@ -2815,17 +3059,24 @@
         speaker_slug: segItem.speaker_slug || segItem.teacher_slug,
         sentence_html: segItem.snippet_text || escapeHtml(firstS.text),
         sentence_text: firstS.text,
-      });
+      }];
     }
 
     return matchedSentences;
   }
 
   function renderSearchResults(data) {
-    const { results, count, meta, elapsed_ms, query } = data;
-    const effectiveQuery = (meta && meta.effective_query) || query || '';
+    const {
+      results,
+      meta,
+      elapsed_ms,
+      query,
+      total_episodes,
+      total_segments,
+      all_episode_ids,
+    } = data;
 
-    // Group matching segments & extracted sentences by transcript (episode_id)
+    // Group matching segments & extracted sentences by transcript (preserving global worker sort order)
     const episodeGroupsMap = new Map();
     const episodeGroups = [];
     let totalSentenceMatches = 0;
@@ -2853,7 +3104,7 @@
         episodeGroups.push(group);
       }
 
-      const sentMatches = extractSentenceMatchesFromSegment(r, query, effectiveQuery);
+      const sentMatches = extractSentenceMatchesFromSegment(r, query, meta || {});
       sentMatches.forEach(m => {
         group.matches.push(m);
         totalSentenceMatches++;
@@ -2865,20 +3116,16 @@
       group.matches.sort((a, b) => (a.turn_index - b.turn_index) || (a.word_offset_in_turn - b.word_offset_in_turn));
     });
 
-    // Sort transcript cards according to user's selected sort order
-    const sortVal = (els.sortOrderSelect && els.sortOrderSelect.value) || 'date_desc';
-    if (sortVal === 'date_asc') {
-      episodeGroups.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.id.localeCompare(b.id));
-    } else if (sortVal === 'date_desc') {
-      episodeGroups.sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id.localeCompare(a.id));
-    } else if (sortVal === 'duration_desc') {
-      episodeGroups.sort((a, b) => (b.duration_sec || 0) - (a.duration_sec || 0));
-    } else if (sortVal === 'rank') {
-      episodeGroups.sort((a, b) => b.matches.length - a.matches.length);
-    }
+    const totalEpisodes = total_episodes !== undefined ? total_episodes : episodeGroups.length;
+    const totalSegments = total_segments !== undefined ? total_segments : (results || []).length;
 
     state.currentFilteredTalks = episodeGroups;
     state.currentSearchGroups = episodeGroups;
+    state.search.totalEpisodes = totalEpisodes;
+    state.search.totalSegments = totalSegments;
+    state.search.filteredEpisodeIds = Array.isArray(all_episode_ids)
+      ? all_episode_ids
+      : episodeGroups.map(g => g.id);
 
     els.searchEmptyState.style.display = 'none';
     els.searchResultsList.style.display = 'flex';
@@ -2886,19 +3133,32 @@
     if (els.filteredArchiveDropdownWrapper) {
       els.filteredArchiveDropdownWrapper.style.display = 'inline-block';
     }
-    els.searchCountBadge.textContent = String(totalSentenceMatches);
+    els.searchCountBadge.textContent = String(totalEpisodes);
 
-    if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = String(episodeGroups.length);
-    if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = episodeGroups.length === 0;
+    if (els.filteredArchiveCount) els.filteredArchiveCount.textContent = String(totalEpisodes);
+    if (els.btnDownloadFilteredArchive) els.btnDownloadFilteredArchive.disabled = totalEpisodes === 0;
 
     // Meta bar
     const tierDisplay = formatTierName(meta ? meta.tier : 'none');
     els.queryTierBadge.textContent = tierDisplay;
-    let metaMsg = `Found ${totalSentenceMatches} match${totalSentenceMatches === 1 ? '' : 'es'} across ${episodeGroups.length} talk${episodeGroups.length === 1 ? '' : 's'} in ${elapsed_ms}ms`;
+    let metaMsg = '';
+    if (totalEpisodes > episodeGroups.length && episodeGroups.length > 0) {
+      const startNum = state.search.offset + 1;
+      const endNum = state.search.offset + episodeGroups.length;
+      metaMsg =
+        `Showing ${startNum.toLocaleString()}–${endNum.toLocaleString()} of ${totalEpisodes.toLocaleString()} talks ` +
+        `(${totalSegments.toLocaleString()} matching segments) in ${elapsed_ms}ms`;
+    } else {
+      metaMsg =
+        `Found ${totalSentenceMatches.toLocaleString()} match${totalSentenceMatches === 1 ? '' : 'es'} ` +
+        `across ${totalEpisodes.toLocaleString()} talk${totalEpisodes === 1 ? '' : 's'} in ${elapsed_ms}ms`;
+    }
     if (meta && meta.corrected && meta.effective_query) {
       metaMsg += ` (auto-corrected to "${meta.effective_query}")`;
     }
     els.queryMetaText.textContent = metaMsg;
+
+    updateSearchPagination(totalEpisodes, episodeGroups.length);
 
     if (episodeGroups.length === 0) {
       els.searchResultsList.innerHTML = `
@@ -4628,6 +4888,24 @@
 
       window.renderActiveTranscript = renderDrawerTurns;
 
+      function scrollElementIntoReadingZone(el, behavior = 'auto') {
+        if (!el) return;
+        const viewportH = window.innerHeight || document.documentElement.clientHeight;
+        const toolbar = document.getElementById('transcript-sticky-toolbar');
+        const toolbarBottom = toolbar ? Math.max(0, toolbar.getBoundingClientRect().bottom) : 0;
+        const playerBar = document.getElementById('audio-player-bar');
+        const playerTop = playerBar ? Math.min(viewportH, playerBar.getBoundingClientRect().top) : viewportH;
+
+        const rect = el.getBoundingClientRect();
+        const docTop = rect.top + (window.scrollY || window.pageYOffset || 0);
+        const availableH = Math.max(80, playerTop - toolbarBottom);
+        const desiredTopInViewport = toolbarBottom + Math.min(availableH * 0.35, Math.max(20, (availableH - rect.height) / 2));
+        const targetScrollY = Math.max(0, docTop - desiredTopInViewport);
+        window.scrollTo({ top: targetScrollY, behavior });
+      }
+
+      let initialStartedSec = null;
+
       function applyTargetOpts(opts, isEnriched = false) {
         if (!opts || (typeof opts.turnIndex !== 'number' && typeof opts.fallbackSec !== 'number')) {
           return;
@@ -4652,6 +4930,9 @@
         let targetWordEl = null;
 
         // 1. Resolve exact word timestamp and DOM element from WordSync turnWordMap if available
+        const sentEl = document.getElementById(`turn-${tIdx}-sent-${sIdx}`);
+        const turnEl = document.getElementById(`turn-${tIdx}`);
+
         if (window.WordSync && window.WordSync.turnWordMap && window.WordSync.turnWordMap[tIdx]) {
           const turnWords = window.WordSync.turnWordMap[tIdx];
           if (turnWords.length > 0) {
@@ -4659,19 +4940,31 @@
             const matchedW = turnWords[clampedIdx];
             if (matchedW && typeof matchedW.s === 'number') {
               exactWordSec = matchedW.s;
-              targetWordEl = document.getElementById(matchedW.id);
+              targetWordEl = document.getElementById(matchedW.domId || matchedW.id);
             }
           }
         }
 
-        // 2. Locate target sentence element and turn element for smooth scrolling & highlight
-        const sentEl = document.getElementById(`turn-${tIdx}-sent-${sIdx}`);
-        const turnEl = document.getElementById(`turn-${tIdx}`);
-        const scrollTarget = isEnriched && targetWordEl ? targetWordEl : (sentEl || targetWordEl || turnEl);
+        // Guard against any minor token alignment drift: keep targetWordEl anchored inside sentEl
+        if (sentEl && (!targetWordEl || !sentEl.contains(targetWordEl))) {
+          const sentWords = sentEl.querySelectorAll('.transcript-word');
+          if (sentWords.length > 0) {
+            targetWordEl = sentWords[0];
+            const parsedStart = parseFloat(targetWordEl.dataset.start);
+            if (!isNaN(parsedStart)) {
+              exactWordSec = parsedStart;
+            }
+          }
+        }
 
-        if (scrollTarget && (!isEnriched || targetWordEl)) {
+        // 2. Scroll target cleanly into the unobstructed reading area between sticky toolbar and player bar
+        const scrollTarget = targetWordEl || sentEl || turnEl;
+        if (scrollTarget) {
+          scrollElementIntoReadingZone(scrollTarget, 'auto');
           requestAnimationFrame(() => {
-            scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (state.currentEpisode && state.currentEpisode.id === ep.id) {
+              scrollElementIntoReadingZone(scrollTarget, 'auto');
+            }
           });
         }
 
@@ -4693,35 +4986,44 @@
           }
         }
 
-        if (!isEnriched && opts.autoPlay !== false && ep.media_url) {
-          playAudioSegment({
-            episode_id: ep.id,
-            media_url: ep.media_url,
-            title: ep.title,
-            teacher: ep.primary_display,
-            start_sec: exactWordSec,
-          });
+        if (opts.autoPlay !== false && ep.media_url) {
+          const shouldSeekOrPlay = !isEnriched || initialStartedSec === null || Math.abs(exactWordSec - initialStartedSec) > 0.15;
+          if (shouldSeekOrPlay) {
+            initialStartedSec = exactWordSec;
+            playAudioSegment({
+              episode_id: ep.id,
+              media_url: ep.media_url,
+              title: ep.title,
+              teacher: ep.primary_display,
+              start_sec: exactWordSec,
+            });
+          }
         }
       }
 
-      // 1. Instant progressive render: talk turns appear immediately
+      // 1. Prepare word timings synchronously if words_blob is already attached (prevents stale turnWordMap!)
+      const wordsReadySync = window.WordSync ? window.WordSync.prepareEpisodeSync(ep) : false;
+      const paliReadySync = Boolean(state.lexCompanion.loadedOnce && window.WordSync && window.WordSync.paliTermsMap.size > 0);
       renderDrawerTurns();
       if (targetOpts) {
         applyTargetOpts(targetOpts, false);
       }
 
-      // 2. Concurrently load Pali lexicon terms, binary word sidecar, and companion cards
+      // 2. Concurrently load Pali lexicon terms, binary word sidecar (if not sync-ready), and companion cards
       const epLoadToken = ep.id;
       const enrichmentTasks = [ensurePaliTermsLoaded()];
-      if (window.WordSync) {
+      if (window.WordSync && !wordsReadySync) {
         enrichmentTasks.push(window.WordSync.prepareEpisode(ep));
       }
 
       Promise.all(enrichmentTasks).then(() => {
         if (!state.currentEpisode || state.currentEpisode.id !== epLoadToken) return;
-        renderDrawerTurns();
+        const needsReRender = !(wordsReadySync && paliReadySync);
+        if (needsReRender) {
+          renderDrawerTurns();
+        }
         buildCompanionTermsList();
-        if (targetOpts) {
+        if (targetOpts && needsReRender) {
           applyTargetOpts(targetOpts, true);
         }
         if (state.playingEpisode && state.currentEpisode && state.playingEpisode.id === state.currentEpisode.id && els.nativeAudio && els.nativeAudio.currentTime > 0) {
@@ -4852,6 +5154,9 @@
 
     function syncProgress() {
       if (isScrubbing) return; // Do not overwrite slider while user is dragging
+      if (window.WordSync && window.WordSync._awaitingInitialSeek) {
+        return;
+      }
       const rawCur = audio.currentTime;
       const physCur = window.WordSync ? window.WordSync.getPhysicalTime(rawCur) : rawCur;
       const dur = getTotalDuration();
@@ -5119,8 +5424,17 @@
 
     function performSeek(physSec, wordStartSec) {
       if (physSec < 0) return;
+      if (state._pendingOnReadySeek) {
+        audio.removeEventListener('loadedmetadata', state._pendingOnReadySeek);
+        audio.removeEventListener('loadeddata', state._pendingOnReadySeek);
+        audio.removeEventListener('canplay', state._pendingOnReadySeek);
+        state._pendingOnReadySeek = null;
+      }
       const doSeek = () => {
         try {
+          if (window.WordSync) {
+            window.WordSync._awaitingInitialSeek = false;
+          }
           const streamSeekTime = window.WordSync
             ? window.WordSync.prepareSeek(physSec, wordStartSec)
             : physSec;
@@ -5135,12 +5449,19 @@
       if (audio.readyState >= 1) {
         doSeek();
       } else {
+        if (window.WordSync) {
+          window.WordSync._awaitingInitialSeek = true;
+        }
         const onReady = () => {
           audio.removeEventListener('loadedmetadata', onReady);
           audio.removeEventListener('loadeddata', onReady);
           audio.removeEventListener('canplay', onReady);
+          if (state._pendingOnReadySeek === onReady) {
+            state._pendingOnReadySeek = null;
+          }
           doSeek();
         };
+        state._pendingOnReadySeek = onReady;
         audio.addEventListener('loadedmetadata', onReady);
         audio.addEventListener('loadeddata', onReady);
         audio.addEventListener('canplay', onReady);
@@ -5168,12 +5489,20 @@
       const isDifferentSource = state.currentStreamUrl !== streamUrl;
       state.currentStreamUrl = streamUrl;
 
+      if (window.WordSync && targetTime > 0) {
+        window.WordSync._seekTargetWordTime = rawTarget;
+        window.WordSync._pendingProgrammaticSeek = true;
+        if (isDifferentSource || audio.readyState < 1) {
+          window.WordSync._awaitingInitialSeek = true;
+        }
+      }
       if (isDifferentSource) {
         audio.src = streamUrl;
         audio.playbackRate = state.playbackSpeed;
         if (targetTime > 0) {
           performSeek(targetTime, rawTarget);
         } else if (window.WordSync) {
+          window.WordSync._awaitingInitialSeek = false;
           window.WordSync.prepareSeek(0, 0);
         }
       } else {
@@ -5371,6 +5700,11 @@
 
   window.resetDeeperDhammaCache = async function () {
     try {
+      if (dbService && dbService.worker && typeof dbService.worker.terminate === 'function') {
+        try {
+          dbService.worker.terminate();
+        } catch (_) {}
+      }
       if ('serviceWorker' in navigator) {
         const registrations = await navigator.serviceWorker.getRegistrations();
         for (const reg of registrations) {
@@ -5383,6 +5717,12 @@
           await caches.delete(key);
         }
       }
+      if (navigator.storage && typeof navigator.storage.getDirectory === 'function') {
+        try {
+          const root = await navigator.storage.getDirectory();
+          await root.removeEntry('deeper-dhamma-opfs', { recursive: true });
+        } catch (_) {}
+      }
       if (window.indexedDB && window.indexedDB.databases) {
         const dbs = await window.indexedDB.databases();
         for (const db of dbs) {
@@ -5392,6 +5732,7 @@
         }
       } else {
         window.indexedDB.deleteDatabase('dhamma_web_v1');
+        window.indexedDB.deleteDatabase('deeper_dhamma_cache');
       }
       localStorage.clear();
       sessionStorage.clear();

@@ -400,10 +400,22 @@
     },
 
     /**
-     * Prepares exact word timestamps and VBR seek calibration for an episode.
+     * Synchronously parses `episode.words_blob` and indexes `turnWordMap` when the BLOB
+     * is already attached to `episode`. Returns true if word timings are immediately ready.
      */
-    prepareEpisode: async function (episode) {
+    prepareEpisodeSync: function (episode) {
+      if (!episode) return false;
       const epId = episode.id || episode.episode_id;
+      const alreadyPrepared =
+        this.currentEpisodeId === epId &&
+        this.words.length > 0 &&
+        Object.keys(this.turnWordMap || {}).length > 0;
+      if (alreadyPrepared) {
+        this.currentEpisode = episode;
+        return true;
+      }
+
+      const isSameEpisode = this.currentEpisodeId === epId;
       this.currentEpisodeId = epId;
       this.currentEpisode = episode;
       this.words = [];
@@ -411,22 +423,44 @@
       this.turnWordMap = {};
       this._teleprompterLine = null;
       this._userInteractedAt = 0;
+      if (!isSameEpisode) {
+        this._pendingProgrammaticSeek = false;
+        this._awaitingInitialSeek = false;
+        this._seekTargetWordTime = null;
+      }
       this.clearHighlights();
 
-      const t0 = performance.now();
-      // 1. Direct memory extraction if episode already has words_blob attached from SQLite
       if (episode.words_blob) {
-        this.parseWordsBuffer(episode.words_blob, epId);
-      } else {
-        await this.loadWordsBlob(epId);
+        const parsed = this.parseWordsBuffer(episode.words_blob, epId);
+        if (parsed && episode.segments && this.words.length > 0) {
+          this.indexWordsByTurn(episode.segments);
+          this.metrics.wordCount = this.words.length;
+          return true;
+        }
       }
+      return false;
+    },
+
+    /**
+     * Prepares exact word timestamps and VBR seek calibration for an episode.
+     */
+    prepareEpisode: async function (episode) {
+      const epId = episode.id || episode.episode_id;
+      const t0 = performance.now();
+      const readySync = this.prepareEpisodeSync(episode);
+
+      if (!readySync) {
+        if (this.currentEpisodeId !== epId || this.words.length === 0) {
+          await this.loadWordsBlob(epId);
+        }
+        // Group words by segment turn if turns exist
+        if (episode.segments && this.words.length > 0) {
+          this.indexWordsByTurn(episode.segments);
+        }
+      }
+
       this.metrics.loadMs = Math.round(performance.now() - t0);
       this.metrics.wordCount = this.words.length;
-
-      // Group words by segment turn if turns exist
-      if (episode.segments && this.words.length > 0) {
-        this.indexWordsByTurn(episode.segments);
-      }
 
       // In Firefox, proactively start progressive VBR stream buffering & in-memory Xing->Info patching
       if (this.isFirefox && this.vbrData && episode.media_url) {
@@ -1309,6 +1343,10 @@
         return;
       }
       if (typeof rawCurrentTime !== 'number' || isNaN(rawCurrentTime)) return;
+      // Ignore pre-seek old/0:00 frames until doSeek() assigns audio.currentTime
+      if (this._awaitingInitialSeek) {
+        return;
+      }
 
       const currentTime = this.getPhysicalTime(rawCurrentTime);
 

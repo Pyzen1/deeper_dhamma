@@ -15,6 +15,7 @@
   <link rel="canonical" href="https://deeperdhamma.com/">
   <meta name="theme-color" content="#0b1120">
   <link rel="manifest" href="/static/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icons/apple_touch_icon.png">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1120'/%3E%3Ctext x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-size='40' fill='%23f59e0b'%3E%E2%98%B8%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -75,6 +76,7 @@
       <div class="stat-card" id="archive-stats-badge">
         <div class="stat-card-title">Archive Index</div>
         <div class="stat-card-body" id="stat-episodes">Loading archive...</div>
+        <div class="stat-card-sub" id="stat-offline-sync" style="margin-top: 0.35rem; font-size: 0.75rem; color: var(--text-muted); display: none;"></div>
       </div>
       <div class="sidebar-shortcuts-hint">
         <span><kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> Search</span>
@@ -142,10 +144,10 @@
               </div>
 
               <select id="sort-order-select" aria-label="Sort order">
+                <option value="rank" selected>Best Match (Relevance)</option>
                 <option value="date_desc">Newest First</option>
                 <option value="date_asc">Oldest First</option>
                 <option value="duration_desc">Longest Duration</option>
-                <option value="rank">Best Match (Relevance)</option>
               </select>
 
               <button type="button" id="reset-filters-btn" class="btn-secondary btn-reset-filters" title="Reset all filters">✕ Reset</button>
@@ -278,6 +280,17 @@
 
         <!-- Results List -->
         <div class="results-list" id="search-results-list" style="display: none;"></div>
+
+        <!-- Search Results Pagination Controls (50 talks per page) -->
+        <div class="search-pagination" id="search-pagination" style="display: none;">
+          <div class="page-nav-group">
+            <button type="button" class="btn-page" id="btn-search-first" title="First 50 results">« First</button>
+            <button type="button" class="btn-page" id="btn-search-prev" title="Previous 50 results">‹ Prev 50</button>
+            <span class="page-indicator" id="search-page-indicator">Showing 1–50 of 50 (Page 1 of 1)</span>
+            <button type="button" class="btn-page" id="btn-search-next" title="Next 50 results">Next 50 ›</button>
+            <button type="button" class="btn-page" id="btn-search-last" title="Last page">Last »</button>
+          </div>
+        </div>
       </div>
 
       <!-- 2. Browse Episodes View -->
