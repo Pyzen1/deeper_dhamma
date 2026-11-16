@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from deeper_dhamma.audio import discover_audio_files
 from deeper_dhamma.config import ARCHIVE_DIR, PROJECT_ROOT
 from deeper_dhamma.pipeline import TranscriptionPipeline
 
@@ -96,12 +97,12 @@ def find_matching_audio(ref_path: Path, archive_dir: Path = ARCHIVE_DIR) -> Opti
         year_str = date_str.split("-")[0]
         year_dir = archive_dir / year_str
         if year_dir.exists():
-            candidates = list(year_dir.rglob(f"*{date_str}*.mp3"))
+            candidates = [p for p in discover_audio_files(year_dir) if date_str in p.name]
         if not candidates:
-            candidates = list(archive_dir.rglob(f"*{date_str}*.mp3"))
+            candidates = [p for p in discover_audio_files(archive_dir) if date_str in p.name]
 
     if not candidates:
-        candidates = list(archive_dir.rglob("*.mp3"))
+        candidates = discover_audio_files(archive_dir)
 
     # Score candidates by token overlap with ref stem
     best_candidate = None

@@ -9,6 +9,7 @@ import torch
 import pytest
 
 from deeper_dhamma.audio import (
+    discover_audio_files,
     get_audio_info,
     inspect_ffmpeg_audio_errors,
     inspect_id3_header_issues,
@@ -143,3 +144,28 @@ def test_load_mp3_ignores_underestimated_metadata_duration(synthetic_wav_file: P
     # Full 2.0s MP3 decoded (~32,000 samples), not truncated to 0.4s (6,400 samples)
     assert tensor.shape[1] >= 30000
 
+
+
+def test_discover_audio_files_supports_multiple_formats_and_skips_temp_part(tmp_path: Path):
+    """discover_audio_files should return supported audio formats deterministically and skip temp/part files."""
+    y2016 = tmp_path / "2016"
+    y2020 = tmp_path / "2020" / "sub"
+    y2016.mkdir(parents=True)
+    y2020.mkdir(parents=True)
+
+    f_mp3 = y2016 / "talk_1.mp3"
+    f_m4a = y2016 / "talk_2.m4a"
+    f_mp3_upper = y2020 / "talk_3.MP3"
+    f_opus = y2020 / "talk_4.opus"
+    for f in (f_mp3, f_m4a, f_mp3_upper, f_opus):
+        f.write_bytes(b"audio")
+
+    # Files that must be ignored
+    (y2016 / "partial.temp.m4a").write_bytes(b"temp")
+    (y2016 / "partial.mp3.part").write_bytes(b"part")
+    (y2016 / "staging.tmp").write_bytes(b"tmp")
+    (y2016 / "notes.txt").write_text("notes", encoding="utf-8")
+
+    discovered = discover_audio_files(tmp_path)
+    assert discovered == sorted([f_mp3, f_m4a, f_mp3_upper, f_opus])
+    assert discover_audio_files(tmp_path / "missing_dir") == []

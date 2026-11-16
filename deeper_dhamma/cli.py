@@ -39,6 +39,7 @@ from deeper_dhamma.config import (
     DIST_DIR,
     TRANSCRIPTS_DB_PATH,
 )
+from deeper_dhamma.audio import discover_audio_files
 from deeper_dhamma.storage import TranscriptDatabase
 
 
@@ -178,14 +179,14 @@ def cmd_transcribe(args):
         if not year_dir.exists():
             print(f"[-] Year directory not found: {year_dir}")
             sys.exit(1)
-        files = sorted(list(year_dir.rglob("*.mp3")))
+        files = discover_audio_files(year_dir)
     elif args.series:
-        for p in archive_dir.rglob("*.mp3"):
-            if args.series.lower() in str(p).lower():
-                files.append(p)
-        files = sorted(files)
+        files = [
+            p for p in discover_audio_files(archive_dir)
+            if args.series.lower() in str(p).lower()
+        ]
     elif args.all:
-        files = sorted(list(archive_dir.rglob("*.mp3")))
+        files = discover_audio_files(archive_dir)
 
     if not files:
         print("[-] No audio files matched the filter.")
@@ -261,11 +262,12 @@ def cmd_transcribe(args):
                     )
 
             try:
+                effective_retry_errors = getattr(args, "retry_errors", False) or force_run
                 if len(to_process) > 1:
                     result = pipeline.process_file(
                         audio_path=f,
                         max_duration_sec=args.max_duration,
-                        retry_errors=getattr(args, "retry_errors", False),
+                        retry_errors=effective_retry_errors,
                         show_progress=show_progress,
                         prefetched=current_prefetched,
                         on_gpu_asr_start=_trigger_next_prefetch,
@@ -274,7 +276,7 @@ def cmd_transcribe(args):
                     result = pipeline.process_file(
                         audio_path=f,
                         max_duration_sec=args.max_duration,
-                        retry_errors=getattr(args, "retry_errors", False),
+                        retry_errors=effective_retry_errors,
                         show_progress=show_progress,
                     )
                 if result.get("status") == "skipped":
@@ -556,7 +558,7 @@ def cmd_test(args):
 
     sample_file = Path(args.file) if args.file else None
     if not sample_file or not sample_file.exists():
-        available = list(Path(ARCHIVE_DIR).rglob("*.mp3"))
+        available = discover_audio_files(ARCHIVE_DIR)
         if not available:
             print("[-] No audio files found in archive/.")
             sys.exit(1)
@@ -861,7 +863,7 @@ def main(argv=None):
     p_trans = subparsers.add_parser("transcribe", help="Transcribe audio talks and index in SQLite")
     g_target = p_trans.add_mutually_exclusive_group(required=True)
     g_target.add_argument("--id", "-i", nargs="+", help="Podbean episode ID(s) to transcribe (e.g. pbXXXX)")
-    g_target.add_argument("--file", "-f", type=str, help="Single MP3 file to transcribe")
+    g_target.add_argument("--file", "-f", type=str, help="Single audio file to transcribe (MP3, M4A, etc.)")
     g_target.add_argument("--year", "-y", type=int, help="Transcribe all talks for a given year")
     g_target.add_argument("--series", "-s", type=str, help="Transcribe all talks in a series")
     g_target.add_argument("--all", action="store_true", help="Transcribe entire audio archive")
@@ -931,7 +933,7 @@ def main(argv=None):
 
     # 6. Curate
     p_curate = subparsers.add_parser("curate", help="Curate and verify gold-standard reference transcripts")
-    p_curate.add_argument("file", nargs="?", type=str, help="Audio MP3 file to curate")
+    p_curate.add_argument("file", nargs="?", type=str, help="Audio file to curate (MP3, M4A, etc.)")
     p_curate.add_argument("--duration", "-d", type=float, help="Duration limit in seconds (default: full talk)")
     p_curate.add_argument("--approve", type=str, help="Candidate slug to approve as verified gold standard")
     p_curate.add_argument("--list", action="store_true", help="List active and pending reference transcripts")

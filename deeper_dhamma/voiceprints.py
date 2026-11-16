@@ -20,7 +20,7 @@ from deeper_dhamma.catalog import (
     extract_recording_year,
     identify_primary_teacher,
 )
-from deeper_dhamma.audio import load_audio_segment, get_audio_info
+from deeper_dhamma.audio import discover_audio_files, load_audio_segment, get_audio_info
 from deeper_dhamma.encoder import SpeakerEncoder
 
 logger = logging.getLogger("voiceprints")
@@ -291,7 +291,7 @@ def bootstrap_voiceprints(
             cur = conn.execute("SELECT teacher_slug, era, COUNT(*) FROM voiceprints GROUP BY teacher_slug, era;")
             counts = {(row[0], row[1]): row[2] for row in cur.fetchall()}
 
-    all_files = sorted(list(archive_p.rglob("*.mp3")) + list(archive_p.rglob("*.m4a")))
+    all_files = discover_audio_files(archive_p)
     total_added = 0
 
     # Group files by teacher so that monastics with few talks are prioritized

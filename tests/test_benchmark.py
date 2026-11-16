@@ -100,3 +100,18 @@ def test_discover_active_benchmarks_ignores_candidates(tmp_path: Path, monkeypat
     benchmarks = discover_active_benchmarks()
     assert len(benchmarks) == 0
 
+
+
+def test_find_matching_audio_finds_m4a_and_ignores_temp_part(tmp_path):
+    """Benchmark audio matcher should discover .m4a talks when no .mp3 is present."""
+    from deeper_dhamma.benchmark import find_matching_audio
+
+    year_dir = tmp_path / "2016"
+    year_dir.mkdir(parents=True, exist_ok=True)
+    (year_dir / "2016-04-10_sutta_talk.temp.m4a").write_bytes(b"temp")
+    (year_dir / "2016-04-10_sutta_talk.m4a.part").write_bytes(b"part")
+    expected_m4a = year_dir / "2016-04-10_sutta_talk.m4a"
+    expected_m4a.write_bytes(b"m4a-audio")
+
+    matched = find_matching_audio(tmp_path / "2016-04-10_sutta_talk.txt", archive_dir=tmp_path)
+    assert matched == expected_m4a

@@ -21,7 +21,7 @@ In accordance with the monastic Vinaya and the living Buddhist tradition of gene
   - `databases/buddhism_lexicon.db`: Master Pali terminology, translation matrix, and phonetic rule definitions.
   - `databases/authoritative_ebt_compounds.db`: Authoritative EBT doctrinal compounds and ASR phonetic substitution rules (compiled into `buddhism_lexicon.db`).
 - **High-Accuracy Speech-to-Text (`faster-whisper-large-v3-turbo` by default)**:
-  - Float16 on NVIDIA CUDA (RTX 5070 Ti, 16 GB GDDR7) running **single-worker sequential transcription (`model="turbo"`, `batch_size=1` by default)** with the full 32-layer `large-v3` Audio Encoder + 4-layer distilled Text Decoder (8x less GDDR7 decoder weight traffic per token, achieving **63x–99x real-time** speed and outperforming `large-v3` on gold-standard WER when paired with `TranscriptPostProcessor`).
+  - Float16 on NVIDIA CUDA (RTX 5070 Ti, 16 GB GDDR7) running **single-worker sequential transcription (`model="turbo"`, `batch_size=1` by default)** with the full 32-layer `large-v3` Audio Encoder + 4-layer distilled Text Decoder (8x less GDDR7 decoder weight traffic per token, achieving **63x–99x real-time** speed and outperforming `large-v3` on gold-standard WER when paired with `TranscriptPostProcessor`; see [docs/design/asr_architecture_benchmarks_2026-11-13.md](docs/design/asr_architecture_benchmarks_2026-11-13.md) for the Parakeet-TDT ONNX CPU/GPU & hybrid cascade comparison).
   - **1-Slot Lookahead CPU Prefetch Pipeline & Ryzen 7 9800X3D Tuning (`cpu_threads=8`)**: Overlaps Talk $N+1$'s CPU-bound 16 kHz audio decoding, Silero VAD speech chunk detection, 128-bin log-Mel spectrogram STFT (`Transcriber.prepare_audio`), and VBR1 seek table scanning (`TranscriptionPipeline.prefetch_file`) in a background thread while the GPU is executing Talk $N$'s ASR pass, eliminating the ~7.7s inter-talk CPU stall with 100% bit-for-bit output parity.
   - In-memory waveform caching for zero-disk acoustic profiling and speaker attribution.
   - Teacher-specific prompt steering with dynamic Pali lexicon conditioning.
@@ -88,9 +88,10 @@ The entire application runs through `python main.py` with standard subcommands:
 # 1. Full-Text Search across the archive (<5ms latency)
 python main.py search "hindrances OR obstacles"
 
-# 2. Transcribe Audio (single file, specific year, series, or full archive)
+# 2. Transcribe Audio (single file, specific year, series, or full archive across MP3/M4A/etc.)
 python main.py transcribe --file archive/2001/standalone/2001-08-15_the_five_hindrances_ajahn_brahm_15_august_2001.mp3
 python main.py transcribe --year 2001 --limit 5
+python main.py transcribe --all                 # Transcribe all pending archive talks (MP3 & M4A)
 python main.py transcribe --check-updates     # Explicitly check Hugging Face for model updates
 
 # 2b. Re-Run Non-Destructive ASR Post-Processing on Stored Database Transcripts
@@ -174,7 +175,7 @@ deeper_dhamma/
 │   ├── cli.py                  # Subcommand router
 │   ├── build_lexicon.py        # Deterministic lexicon compiler from databases/sources/
 │   ├── catalog.py              # Monastic catalog & era determination
-│   ├── audio.py                # Sliced soundfile loading & resampling
+│   ├── audio.py                # FFmpeg/soundfile decoding, resampling & multi-format discovery
 │   ├── encoder.py              # SpeechBrain ECAPA-TDNN embeddings
 │   ├── voiceprints.py          # SQLite voiceprints vector gallery
 │   ├── profiler.py             # Acoustic clustering & multi-speaker profiling
@@ -195,7 +196,7 @@ deeper_dhamma/
 │       ├── static/             # CSS, app.js, word_sync.js, db_worker.js, sqlite3.wasm
 │       │   └── adapters/       # In-browser SQLite WASM adapter (wasm_client.js)
 │       └── views/              # Static HTML template (index.html)
-├── tests/                      # Comprehensive Unit & Integration Test Suite (178 tests)
+├── tests/                      # Comprehensive Unit & Integration Test Suite (192 tests)
 │   ├── test_cli.py             # CLI parser, "One Obvious Way" flags, subcommands dispatch
 │   ├── test_audit.py           # Ghost files, temp fragments, html error pages, archive cleanup
 │   ├── test_benchmark.py       # Precision, recall, F1, and sequence-aligned WER evaluation
@@ -205,9 +206,10 @@ deeper_dhamma/
 │   ├── test_profiler.py        # Fast acoustic pre-analysis, single & multi-speaker clustering
 │   ├── test_main_and_cli.py    # main.py entry point and CLI subcommand integration
 │   ├── test_curation_and_self_correction.py # Curation slugs, false friends, anti-drift guardrails
-│   ├── test_audio_utils.py     # get_audio_info, load_audio_segment, downmixing, boundary checks
+│   ├── test_audio_utils.py     # get_audio_info, load_audio_segment, multi-format discovery, checks
 │   ├── test_export_web.py      # SQLite WASM db compilation, PRAGMA user_version, search_vocab
 │   ├── test_pipeline_integrity.py # Voiceprint scoring, turn smoothing, Pali terminology
+│   ├── test_transcription_progress.py # Progress bar, CPU prefetch lookahead, prepare_audio
 │   ├── test_lexicon_view.py    # BuddhismLexiconDatabase, core/all pagination, FTS5
 │   ├── test_audio_cdn_sync.py  # Bitstream parity with Podbean CDN streams
 │   ├── test_downloader_parity.py # ID3 preservation, parity audit, and archive log management
@@ -216,7 +218,7 @@ deeper_dhamma/
 │   ├── test_cross_browser_word_sync.py # Headless Firefox & Chrome real-time audio sync parity
 │   └── test_browser_fuzzy_search.py # Multi-word fuzzy search, Damerau-Levenshtein, V8 tests
 ├── docs/
-│   ├── design/                 # Pipeline architecture specifications
+│   ├── design/                 # Pipeline architecture & ASR benchmark specifications
 │   └── troubleshooting/        # Modular troubleshooting guides (VBR sync, SW caching, etc.)
 └── benchmarks/
     └── reference_transcripts/  # Verified word-for-word human reference transcripts

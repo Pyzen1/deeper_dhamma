@@ -42,6 +42,9 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
 ARCHIVE_DIR = PROJECT_ROOT / "archive"
+
+# Canonical set of supported audio extensions across archiving, discovery, and ASR
+SUPPORTED_AUDIO_EXTENSIONS = frozenset({".mp3", ".m4a", ".aac", ".mp4", ".m4b", ".opus", ".wav"})
 DATABASES_DIR = PROJECT_ROOT / "databases"
 DIST_DIR = PROJECT_ROOT / "dist"
 LOGS_DIR = PROJECT_ROOT / "logs"

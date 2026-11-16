@@ -277,29 +277,76 @@ class PipelineStateDatabase:
             return mapping
 
     def resolve_episode_uid(self, identifier: str) -> Optional[str]:
+        """Resolves an episode UID, filename stem, or filepath substring deterministically."""
         with self._get_connection() as conn:
             row = conn.execute(
                 """
                 SELECT episode_uid FROM episode_states
                 WHERE episode_uid = ? OR filename_stem = ? OR filepath LIKE ?
+                ORDER BY
+                    CASE
+                        WHEN episode_uid = ? THEN 0
+                        WHEN filename_stem = ? THEN 1
+                        ELSE 2
+                    END ASC,
+                    is_transcribed DESC,
+                    CASE WHEN last_error IS NULL OR last_error = '' THEN 0 ELSE 1 END ASC,
+                    updated_at DESC,
+                    id ASC
                 LIMIT 1;
                 """,
-                (identifier, identifier, f"%{identifier}%"),
+                (identifier, identifier, f"%{identifier}%", identifier, identifier),
             ).fetchone()
             return row["episode_uid"] if row else None
 
-    def _resolve_candidate_uids(self, conn: sqlite3.Connection, identifier: str) -> List[str]:
+    def _resolve_candidate_uids(
+        self,
+        conn: sqlite3.Connection,
+        identifier: str,
+        include_filepath_like: bool = False,
+    ) -> List[str]:
         rows = conn.execute(
             """
             SELECT episode_uid FROM episode_states
-            WHERE episode_uid = ? OR filename_stem = ?;
+            WHERE episode_uid = ? OR filename_stem = ?
+            ORDER BY
+                CASE WHEN episode_uid = ? THEN 0 ELSE 1 END ASC,
+                is_transcribed DESC,
+                CASE WHEN last_error IS NULL OR last_error = '' THEN 0 ELSE 1 END ASC,
+                updated_at DESC,
+                id ASC;
             """,
-            (identifier, identifier),
+            (identifier, identifier, identifier),
         ).fetchall()
         uids = [r["episode_uid"] for r in rows]
+        if not uids and include_filepath_like:
+            like_rows = conn.execute(
+                """
+                SELECT episode_uid FROM episode_states
+                WHERE filepath LIKE ?
+                ORDER BY
+                    is_transcribed DESC,
+                    CASE WHEN last_error IS NULL OR last_error = '' THEN 0 ELSE 1 END ASC,
+                    updated_at DESC,
+                    id ASC;
+                """,
+                (f"%{identifier}%",),
+            ).fetchall()
+            for r in like_rows:
+                if r["episode_uid"] not in uids:
+                    uids.append(r["episode_uid"])
         if identifier not in uids:
             uids.append(identifier)
         return uids
+
+    def resolve_candidate_uids(
+        self, identifier: str, include_filepath_like: bool = True
+    ) -> List[str]:
+        """Returns all candidate episode UIDs matching an identifier in priority order."""
+        with self._get_connection() as conn:
+            return self._resolve_candidate_uids(
+                conn, identifier, include_filepath_like=include_filepath_like
+            )
 
     def _mark_history_cleared(
         self,
@@ -411,9 +458,10 @@ class PipelineStateDatabase:
                 FROM episode_states
                 WHERE (episode_uid = ? OR filename_stem = ?)
                   AND last_error IS NOT NULL AND last_error != ''
+                ORDER BY CASE WHEN episode_uid = ? THEN 0 ELSE 1 END ASC, id ASC
                 LIMIT 1;
                 """,
-                (episode_id, episode_id),
+                (episode_id, episode_id, episode_id),
             ).fetchone()
             return dict(row) if row else None
 
@@ -1427,11 +1475,14 @@ class TranscriptDatabase:
         }
 
     def has_episode(self, episode_id: str) -> bool:
-        resolved_uid = self.pipeline_db.resolve_episode_uid(episode_id) or episode_id
+        candidate_ids = self.pipeline_db.resolve_candidate_uids(
+            episode_id, include_filepath_like=False
+        )
+        placeholders = ", ".join(["?"] * len(candidate_ids))
         with self._get_connection() as conn:
             cur = conn.execute(
-                "SELECT 1 FROM episodes WHERE id IN (?, ?) AND is_transcribed = 1 LIMIT 1;",
-                (episode_id, resolved_uid),
+                f"SELECT 1 FROM episodes WHERE id IN ({placeholders}) AND is_transcribed = 1 LIMIT 1;",
+                tuple(candidate_ids),
             )
             return cur.fetchone() is not None
 
@@ -1521,11 +1572,14 @@ class TranscriptDatabase:
         return None, f"Episode '{raw}' not found in catalog or archive."
 
     def get_episode(self, episode_id: str) -> Optional[Dict]:
-        resolved_uid = self.pipeline_db.resolve_episode_uid(episode_id) or episode_id
+        candidate_ids = self.pipeline_db.resolve_candidate_uids(
+            episode_id, include_filepath_like=True
+        )
+        placeholders = ", ".join(["?"] * len(candidate_ids))
         with self._get_connection() as conn:
             ep = conn.execute(
-                "SELECT * FROM episodes WHERE id IN (?, ?) LIMIT 1;",
-                (episode_id, resolved_uid),
+                f"SELECT * FROM episodes WHERE id IN ({placeholders}) ORDER BY is_transcribed DESC LIMIT 1;",
+                tuple(candidate_ids),
             ).fetchone()
             if not ep:
                 return None

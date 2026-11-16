@@ -81,7 +81,11 @@ class TranscriptionPipeline:
                     cat_list = json.load(f)
                 for ep in cat_list:
                     _, _, fname = parse_episode_metadata(ep.get("title", ""), ep.get("upload_date", ""))
-                    self.catalog_map[fname] = ep
+                    if fname:
+                        existing = self.catalog_map.get(fname)
+                        # Never let an empty-URL duplicate catalog entry clobber a playable entry.
+                        if existing is None or (not existing.get("media_url") and ep.get("media_url")):
+                            self.catalog_map[fname] = ep
                     if ep.get("id"):
                         self.catalog_map[ep["id"]] = ep
                 logger.info(f"[+] Loaded {len(self.catalog_map)} catalog metadata entries for automated stream linking.")
@@ -172,11 +176,11 @@ class TranscriptionPipeline:
         primary_display = meta_teacher_display
 
         if not catalog_entry:
-            catalog_entry = self.catalog_map.get(audio_path.stem)
+            resolved_uid = self.db.pipeline_db.resolve_episode_uid(audio_path.stem)
+            if resolved_uid:
+                catalog_entry = self.catalog_map.get(resolved_uid)
             if not catalog_entry:
-                resolved_uid = self.db.pipeline_db.resolve_episode_uid(audio_path.stem)
-                if resolved_uid:
-                    catalog_entry = self.catalog_map.get(resolved_uid)
+                catalog_entry = self.catalog_map.get(audio_path.stem)
 
         if catalog_entry:
             ep_title = html.unescape(catalog_entry.get("title", audio_path.stem))
@@ -192,11 +196,18 @@ class TranscriptionPipeline:
             upload_date = f"{year_val}0101"
 
         # Pre-flight error check: inspect previous error for this episode, resolve or skip
-        def _transcribe_auto_resolver(err_info: dict) -> bool:
+        def _transcribe_auto_resolver(err_info: dict) -> Union[bool, str]:
             err_msg = (err_info.get("last_error") or "").lower()
+            err_op = (err_info.get("last_error_op") or "").lower()
             if "not found" in err_msg or "0-byte" in err_msg or "corrupt" in err_msg:
                 if audio_path.exists() and audio_path.stat().st_size > 1024 * 1024:
                     return "valid audio file present on disk"
+            if (
+                err_op == "transcribe"
+                and ("agglomerativeclustering" in err_msg or "minimum of 2" in err_msg)
+                and audio_path.exists()
+            ):
+                return "single-sample profiler clustering fixed"
             return False
 
         can_proceed, reason = self.db.check_preflight(

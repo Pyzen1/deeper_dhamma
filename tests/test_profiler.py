@@ -155,3 +155,44 @@ def test_voiceprint_db_in_memory_cache_and_invalidation(tmp_path):
     assert len(gallery_2) == 2
 
 
+
+
+def test_profile_audio_single_valid_speech_window_does_not_crash():
+    """Sparse talks with only one non-silent profiler window should not crash AgglomerativeClustering."""
+    import numpy as np
+    import torch
+    from deeper_dhamma.profiler import SpeakerProfiler
+
+    class _DummyDB:
+        def identify_speaker(self, emb, era=None, threshold=0.40):
+            return {
+                "identified": False,
+                "teacher_slug": "unregistered",
+                "display_name": "Unregistered",
+                "confidence": 0.0,
+                "role": "unknown",
+            }
+
+    class _DummyEncoder:
+        def encode_waveform(self, waveform):
+            vec = np.ones(192, dtype=np.float32)
+            return vec / np.linalg.norm(vec)
+
+    # 180 seconds at 16 kHz -> stride=30s yields >=5 sample points starting at 10s;
+    # only the [10s..13s] window exceeds the energy threshold.
+    waveform = torch.zeros((1, 180 * 16000), dtype=torch.float32)
+    waveform[:, 10 * 16000 : 13 * 16000] = 0.2
+
+    profiler = SpeakerProfiler(voiceprint_db=_DummyDB(), encoder=_DummyEncoder())
+    result = profiler.profile_audio(
+        "sparse_meditation.mp3",
+        stride_sec=30.0,
+        window_sec=3.0,
+        waveform_16k=waveform,
+        sample_rate=16000,
+    )
+
+    assert result["clusters_count"] == 1
+    assert result["is_multi_speaker"] is False
+    assert len(result["ranked_speakers"]) == 1
+    assert result["ranked_speakers"][0]["share"] == 1.0

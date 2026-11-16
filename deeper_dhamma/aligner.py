@@ -83,7 +83,7 @@ class SpeakerAligner:
                     k_l = (max(0, int(left_st * sample_rate)), min(total_frames, int(min(left_en, left_st + 6.0) * sample_rate)))
                     k_r = (max(0, int(right_st * sample_rate)), min(total_frames, int(right_en * sample_rate)))
                     for k in (k_l, k_r):
-                        if k not in cand_seen and k[1] > k[0]:
+                        if k not in cand_seen and (k[1] - k[0]) >= 400:
                             cand_seen.add(k)
                             cand_keys.append(k)
             if cand_keys:
@@ -95,6 +95,8 @@ class SpeakerAligner:
             if waveform_16k is not None:
                 start_f = max(0, int(st * sample_rate))
                 end_f = min(waveform_16k.shape[-1], int(en * sample_rate))
+                if (end_f - start_f) < 400:
+                    return np.zeros(192, dtype=np.float32)
                 key = (start_f, end_f)
                 cached = slice_cache.get(key)
                 if cached is not None:
@@ -228,7 +230,7 @@ class SpeakerAligner:
                 st_f = int(seg["start"] * sample_rate)
                 en_f = min(total_frames, int(min(seg["end"], seg["start"] + 8.0) * sample_rate))
                 key = (st_f, en_f)
-                if key not in seen_keys and en_f > st_f:
+                if key not in seen_keys and (en_f - st_f) >= 400:
                     seen_keys.add(key)
                     pending_keys.append(key)
             if pending_keys:

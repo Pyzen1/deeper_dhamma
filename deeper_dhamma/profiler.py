@@ -91,14 +91,19 @@ class SpeakerProfiler:
 
         emb_matrix = np.array(embeddings)
 
-        # Agglomerative clustering with cosine distance
-        clustering = AgglomerativeClustering(
-            n_clusters=None,
-            metric="cosine",
-            linkage="average",
-            distance_threshold=0.35,
-        )
-        labels = clustering.fit_predict(emb_matrix)
+        if len(embeddings) == 1:
+            # AgglomerativeClustering rejects single-sample arrays (requires >= 2);
+            # sparse talks with 1 valid speech window map directly to cluster 0.
+            labels = np.array([0], dtype=int)
+        else:
+            # Agglomerative clustering with cosine distance
+            clustering = AgglomerativeClustering(
+                n_clusters=None,
+                metric="cosine",
+                linkage="average",
+                distance_threshold=0.35,
+            )
+            labels = clustering.fit_predict(emb_matrix)
         unique_labels, counts = np.unique(labels, return_counts=True)
 
         cluster_centers = {}

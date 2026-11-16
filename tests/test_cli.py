@@ -310,3 +310,105 @@ def test_cmd_transcribe_keyboard_interrupt_exits_130():
         assert "No partial data was committed" in output
 
 
+
+
+def test_transcribe_discovers_m4a_across_all_year_series_and_skips_temp_part(tmp_path):
+    """cmd_transcribe --all/--year/--series must include .m4a files and skip temp/part files."""
+    from argparse import Namespace
+    from unittest.mock import MagicMock, patch
+    from deeper_dhamma.cli import cmd_transcribe
+
+    y2016 = tmp_path / "2016"
+    y2020 = tmp_path / "2020" / "sutta_retreat"
+    y2016.mkdir(parents=True)
+    y2020.mkdir(parents=True)
+
+    f_mp3 = y2016 / "2016-01-01_talk_a.mp3"
+    f_m4a = y2016 / "2016-04-10_talk_b.m4a"
+    f_m4a_upper = y2020 / "2020-03-30_retreat_talk.M4A"
+    (y2016 / "2016-04-10_talk_b.temp.m4a").write_bytes(b"temp")
+    (y2016 / "2016-04-10_talk_b.m4a.part").write_bytes(b"part")
+    for f in (f_mp3, f_m4a, f_m4a_upper):
+        f.write_bytes(b"audio")
+
+    def _run_mode(**overrides):
+        seen_paths = []
+        mock_tdb = MagicMock()
+        mock_tdb.has_episode.return_value = False
+        mock_pipeline = MagicMock()
+
+        def _fake_process(audio_path, **kwargs):
+            seen_paths.append(audio_path)
+            return {"status": "ok", "elapsed_sec": 0.1, "episode_id": audio_path.stem, "turns_count": 1}
+
+        mock_pipeline.process_file.side_effect = _fake_process
+        args = Namespace(
+            id=None,
+            file=None,
+            year=overrides.get("year"),
+            series=overrides.get("series"),
+            all=overrides.get("all", False),
+            limit=None,
+            force=False,
+            retry_errors=False,
+            max_duration=None,
+            device="cpu",
+            model_size="turbo",
+            batch_size=1,
+            archive_dir=str(tmp_path),
+            check_updates=False,
+            no_progress=True,
+        )
+        with patch("deeper_dhamma.storage.TranscriptDatabase", return_value=mock_tdb), \
+             patch("deeper_dhamma.pipeline.TranscriptionPipeline", return_value=mock_pipeline):
+            cmd_transcribe(args)
+        return seen_paths
+
+    assert set(_run_mode(all=True)) == {f_mp3, f_m4a, f_m4a_upper}
+    assert set(_run_mode(year=2016)) == {f_mp3, f_m4a}
+    assert _run_mode(series="sutta_retreat") == [f_m4a_upper]
+
+
+def test_transcribe_force_and_explicit_id_enable_retry_errors(tmp_path):
+    """--force and --id should propagate retry_errors=True to pipeline.process_file."""
+    from argparse import Namespace
+    from unittest.mock import MagicMock, patch
+    from deeper_dhamma.cli import cmd_transcribe
+
+    audio = tmp_path / "2020-03-30_meditation.mp3"
+    audio.write_bytes(b"mp3")
+
+    for mode_kwargs in (
+        {"all": True, "force": True, "id": None},
+        {"all": False, "force": False, "id": ["pb16727929"]},
+    ):
+        mock_tdb = MagicMock()
+        mock_tdb.has_episode.return_value = False
+        mock_tdb.resolve_audio_path.return_value = (audio, None)
+        mock_pipeline = MagicMock()
+        mock_pipeline.process_file.return_value = {
+            "status": "ok",
+            "elapsed_sec": 0.1,
+            "episode_id": "pb16727929",
+            "turns_count": 1,
+        }
+        args = Namespace(
+            file=None,
+            year=None,
+            series=None,
+            limit=None,
+            retry_errors=False,
+            max_duration=None,
+            device="cpu",
+            model_size="turbo",
+            batch_size=1,
+            archive_dir=str(tmp_path),
+            check_updates=False,
+            no_progress=True,
+            **mode_kwargs,
+        )
+        with patch("deeper_dhamma.storage.TranscriptDatabase", return_value=mock_tdb), \
+             patch("deeper_dhamma.pipeline.TranscriptionPipeline", return_value=mock_pipeline):
+            cmd_transcribe(args)
+
+        assert mock_pipeline.process_file.call_args.kwargs["retry_errors"] is True

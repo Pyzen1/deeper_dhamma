@@ -250,3 +250,105 @@ def test_transcription_progress_bar_interrupted_reporting():
     out_clean = buf_clean.getvalue()
     assert "[✓]" in out_clean
     assert "100.0%" in out_clean
+
+
+def test_pipeline_auto_resolves_agglomerative_error_and_preserves_playable_catalog_entry(tmp_path):
+    """Pipeline must not let empty-URL catalog duplicates clobber playable entries and must auto-clear fixed AgglomerativeClustering errors."""
+    import json
+    from unittest.mock import patch
+    import torch
+    from deeper_dhamma.catalog import parse_episode_metadata
+    from deeper_dhamma.pipeline import TranscriptionPipeline
+
+    title = "Test Guided Sutta Talk"
+    upload_date = "20160410"
+    _, _, stem = parse_episode_metadata(title, upload_date)
+    audio_dir = tmp_path / "2016"
+    audio_dir.mkdir(parents=True)
+    audio_file = audio_dir / f"{stem}.m4a"
+    audio_file.write_bytes(b"fake-m4a-data")
+
+    cat_path = tmp_path / "catalog.json"
+    cat_path.write_text(
+        json.dumps([
+            {
+                "id": "pb_good",
+                "title": title,
+                "upload_date": upload_date,
+                "media_url": "https://cdn.example.com/talk.m4a",
+                "permalink": "https://example.com/p/1",
+            },
+            {
+                "id": "pb_empty",
+                "title": title,
+                "upload_date": upload_date,
+                "media_url": "",
+                "permalink": "",
+            },
+        ]),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "transcripts.db"
+
+    with patch("deeper_dhamma.pipeline.VoiceprintDatabase"), \
+         patch("deeper_dhamma.pipeline.SpeakerEncoder"), \
+         patch("deeper_dhamma.pipeline.Transcriber") as mock_transcriber, \
+         patch("deeper_dhamma.pipeline.SpeakerAligner") as mock_aligner, \
+         patch("deeper_dhamma.pipeline.SpeakerProfiler") as mock_profiler, \
+         patch("deeper_dhamma.pipeline.BuddhismLexiconDatabase") as mock_lexicon, \
+         patch("deeper_dhamma.pipeline.TerminologyEditor"), \
+         patch("deeper_dhamma.pipeline.TranscriptPostProcessor") as mock_postproc, \
+         patch("deeper_dhamma.pipeline.StreamSeekCalibrator"), \
+         patch("deeper_dhamma.pipeline.get_audio_info", return_value={"duration": 2.0}), \
+         patch(
+             "deeper_dhamma.pipeline.load_audio_segment",
+             return_value=(torch.ones((1, 32000), dtype=torch.float32) * 0.1, 16000),
+         ):
+        pipe = TranscriptionPipeline(
+            transcripts_db_path=db_path,
+            catalog_path=cat_path,
+            device="cpu",
+        )
+        assert pipe.catalog_map[stem]["id"] == "pb_good"
+        assert pipe.catalog_map[stem]["media_url"] == "https://cdn.example.com/talk.m4a"
+
+        pipe.db.pipeline_db.record_error(
+            episode_id="pb_good",
+            error_message="ValueError: Found array with 1 sample(s) (shape=(1, 192)) while a minimum of 2 is required by AgglomerativeClustering.",
+            operation="transcribe",
+            filepath=str(audio_file),
+        )
+        assert pipe.db.get_error("pb_good") is not None
+
+        mock_lexicon.return_value.get_prompt_steering_terms.return_value = "Namo Buddhaya"
+        mock_profiler.return_value.profile_audio.return_value = {
+            "is_multi_speaker": False,
+            "ranked_speakers": [],
+            "shares": {},
+            "clusters_count": 1,
+        }
+        mock_transcriber.return_value.transcribe.return_value = [
+            {"start": 0.0, "end": 2.0, "text": "Namo Buddhaya.", "words": []}
+        ]
+        mock_aligner.return_value.align_segments.return_value = [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "speaker_slug": "ajahn_brahm",
+                "speaker_display": "Ajahn Brahm",
+                "text": "Namo Buddhaya.",
+                "words": [],
+            }
+        ]
+        mock_postproc.return_value.process_segments.side_effect = lambda segs: (segs, [])
+
+        result = pipe.process_file(
+            audio_path=audio_file,
+            retry_errors=False,
+            export_words_blob=False,
+            show_progress=False,
+        )
+
+    assert result["episode_id"] == "pb_good"
+    assert pipe.db.has_episode("pb_good") is True
+    assert pipe.db.get_error("pb_good") is None

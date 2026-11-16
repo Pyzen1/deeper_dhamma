@@ -3,7 +3,7 @@ Audio Loading, Resampling, and Slicing Utilities.
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 import json
 import logging
 import subprocess
@@ -11,6 +11,7 @@ import numpy as np
 import soundfile as sf
 
 import deeper_dhamma.config  # Enforces HF_HOME and TORCH_HOME under C:\ai-models
+from deeper_dhamma.config import SUPPORTED_AUDIO_EXTENSIONS
 import torch
 import torchaudio
 
@@ -18,12 +19,34 @@ logger = logging.getLogger(__name__)
 
 # Route compressed podcast/archive formats directly through FFmpeg/FFprobe rather than
 # libsndfile/libmpg123 so corrupt ID3v2 frames never leak C-stderr or silently truncate.
-_FFMPEG_PRIMARY_EXTS = frozenset({".mp3", ".m4a", ".aac", ".mp4", ".m4b", ".opus"})
+_FFMPEG_PRIMARY_EXTS = SUPPORTED_AUDIO_EXTENSIONS - {".wav"}
 _BENIGN_FFMPEG_STDERR_MARKERS = (
     "[mjpeg",
     "error decoding exif",
     "estimating duration from bitrate",
 )
+
+
+def discover_audio_files(
+    root_dir: Union[Path, str],
+    extensions: Iterable[str] = SUPPORTED_AUDIO_EXTENSIONS,
+) -> List[Path]:
+    """Recursively discovers supported audio files under root_dir, excluding partial/temp files."""
+    root = Path(root_dir)
+    if not root.exists():
+        return []
+    allowed = {ext.lower() for ext in extensions}
+    found: List[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        lname = path.name.lower()
+        if ".temp." in lname or lname.endswith(".part") or lname.endswith(".tmp"):
+            continue
+        if path.suffix.lower() not in allowed:
+            continue
+        found.append(path)
+    return sorted(found)
 
 
 def inspect_ffmpeg_audio_errors(stderr_text: str) -> List[str]:

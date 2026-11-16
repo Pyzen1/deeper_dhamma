@@ -327,3 +327,59 @@ def test_pipeline_error_history_scoped_clearing_and_audit_trail(tmp_path: Path):
     assert len(cleared_rows) == 1
     assert cleared_rows[0]["episode_uid"] == "pb22141219"
     assert cleared_rows[0]["resolution"] == "retranscribed_via_ffmpeg"
+
+
+def test_duplicate_filename_stem_resolves_transcribed_uid_deterministically(tmp_path):
+    """Colliding filename_stem entries should deterministically prefer transcribed rows in has_episode/get_episode."""
+    from deeper_dhamma.storage import TranscriptDatabase
+
+    db_path = tmp_path / "dup_stem_transcripts.db"
+    pipe_path = tmp_path / "dup_stem_pipeline.db"
+    tdb = TranscriptDatabase(db_path=db_path, pipeline_db_path=pipe_path)
+    pdb = tdb.pipeline_db
+
+    shared_stem = "2016-04-10_sn12_12_moliyaphagguna_sutta_ajahn_ekaggata_10_april_2016"
+    m4a_path = tmp_path / f"{shared_stem}.m4a"
+    m4a_path.write_bytes(b"fake-m4a")
+
+    pdb.upsert_file_state(
+        episode_uid="pb_dup_untranscribed",
+        title="Moliyaphagguna Sutta (Duplicate)",
+        filepath=str(m4a_path),
+        year=2016,
+        is_transcribed=0,
+    )
+    tdb.save_episode(
+        episode_metadata={
+            "id": "pb_dup_transcribed",
+            "title": "Moliyaphagguna Sutta",
+            "filepath": str(m4a_path),
+            "primary_teacher": "ajahn_ekaggata",
+            "primary_display": "Ajahn Ekaggata",
+            "upload_date": "20160410",
+            "media_url": "https://example.com/moliyaphagguna.m4a",
+            "permalink": "https://example.com/moliyaphagguna",
+        },
+        attributed_segments=[
+            {
+                "start": 0.0,
+                "end": 5.0,
+                "speaker_slug": "ajahn_ekaggata",
+                "speaker_display": "Ajahn Ekaggata",
+                "text": "Today we examine the Moliyaphagguna Sutta.",
+                "confidence": 0.95,
+            }
+        ],
+        duration_sec=120.0,
+        year="2016",
+        filename_stem=shared_stem,
+    )
+
+    assert pdb.resolve_episode_uid("pb_dup_untranscribed") == "pb_dup_untranscribed"
+    assert pdb.resolve_episode_uid(shared_stem) == "pb_dup_transcribed"
+    assert tdb.has_episode(shared_stem) is True
+    # Substring stems must not falsely match another episode via filepath LIKE
+    assert tdb.has_episode("moliyaphagguna_sutta") is False
+    ep = tdb.get_episode(shared_stem)
+    assert ep is not None
+    assert ep["id"] == "pb_dup_transcribed"
