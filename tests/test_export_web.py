@@ -1524,3 +1524,319 @@ def test_headless_chrome_archive_notes_and_browse_count_parity():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_browse_multi_faceted_filtering_contract():
+    """Verifies DOM controls, CSS, and worker handlers for multi-faceted Browse filtering."""
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
+    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    worker_js = (web_dir / "static" / "db_worker.js").read_text(encoding="utf-8")
+    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+
+    for dom_id in (
+        'id="browse-title-input"',
+        'id="browse-title-word-checkbox"',
+        'id="browse-teachers-dropdown"',
+        'id="btn-teacher-mode-any"',
+        'id="btn-teacher-mode-all"',
+        'id="browse-teachers-list"',
+        'id="browse-years-dropdown"',
+        'id="browse-era-presets"',
+        'id="browse-years-grid"',
+        'id="browse-year-from"',
+        'id="browse-year-to"',
+        'id="browse-duration-dropdown"',
+        'id="browse-duration-buckets"',
+        'id="browse-min-duration"',
+        'id="browse-max-duration"',
+        'id="browse-category-dropdown"',
+        'id="browse-collections-list"',
+        'id="browse-formats-list"',
+        'id="browse-cotaught-checkbox"',
+        'id="browse-bookmarked-checkbox"',
+        'id="browse-sort-select"',
+        'id="browse-reset-filters-btn"',
+        'id="browse-active-chips"',
+        'id="browse-filtered-archive-dropdown-wrapper"',
+    ):
+        assert dom_id in index_html, f"Missing {dom_id} in index.html"
+
+    for css_sel in (".browse-filter-panel", ".browse-popover-panel", ".year-chip-grid", ".browse-filter-chip", ".title-match-mark"):
+        assert css_sel in style_css, f"Missing {css_sel} in style.css"
+
+    for js_sym in ("setupBrowseFilterListeners", "buildBrowseQueryOpts", "buildBrowseRouteHash", "highlightTitleText", "downloadBrowseFilteredArchive"):
+        assert js_sym in app_js, f"Missing {js_sym} in app.js"
+
+    for worker_sym in ("matchesTitleQuery", "classifyEpisodeCategories", "resolveTeacherToSlug", "browse_teachers", "year_counts", "duration_counts", "category_counts"):
+        assert worker_sym in worker_js, f"Missing {worker_sym} in db_worker.js"
+
+
+def test_headless_chrome_browse_multi_faceted_filtering_e2e():
+    """
+    Exercises all Browse View filtering features inside headless Google Chrome against dist/:
+    1. Multi-monastic selection (Any/OR vs All/AND co-taught) without Ajahn Brahm/Brahmali collision.
+    2. Groupable years (arbitrary multi-year selection & era presets).
+    3. Title text filter ("MN", diacritic-folded "dhatu", and Whole Word "AN" without matching "Ajahn").
+    4. Talk length / duration buckets and custom min-max minute bounds.
+    5. Collection/format filters, sorting, active chip removal, URL hash sync, and Reset.
+    """
+    import http.server
+    import json
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found")
+    if not (DIST_DIR / "db_manifest.json").exists() or not (DIST_DIR / "index.html").exists():
+        pytest.skip("Built static bundle not present in dist/")
+
+    report = {}
+
+    class BrowseUIHandler(StaticPreviewHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__browse_ui_report":
+                length = int(self.headers.get("Content-Length", 0))
+                payload = self.rfile.read(length)
+                report.update(json.loads(payload.decode("utf-8")))
+                self.send_response(200)
+                self.end_headers()
+                return
+            self.send_error(404)
+
+        def do_GET(self):
+            if self.path == "/__browse_ui_e2e.html":
+                raw_html = (DIST_DIR / "index.html").read_text(encoding="utf-8")
+                harness_js = r"""
+                <script>
+                (async () => {
+                  const res = { ok: false };
+                  const wait = ms => new Promise(r => setTimeout(r, ms));
+                  const waitFor = async (fn, timeoutMs = 45000) => {
+                    const start = Date.now();
+                    while (Date.now() - start < timeoutMs) {
+                      const val = fn();
+                      if (val) return val;
+                      await wait(60);
+                    }
+                    throw new Error('Timed out waiting for Browse UI condition');
+                  };
+                  const getBrowseCount = () => parseInt(document.getElementById('browse-count-badge')?.textContent?.trim() || '0', 10);
+                  try {
+                    await waitFor(() => {
+                      const b = getBrowseCount();
+                      const cards = document.querySelectorAll('#browse-episodes-grid .episode-card').length;
+                      const teachers = document.querySelectorAll('#browse-teachers-list input[data-teacher-slug]').length;
+                      return b > 2000 && cards > 0 && teachers > 5;
+                    });
+                    res.initialTotal = getBrowseCount();
+
+                    // Navigate to Browse tab
+                    document.getElementById('tab-browse-btn').click();
+                    await waitFor(() => document.getElementById('browse-view')?.classList.contains('active'));
+
+                    // 1. Single monastic: Ajahn Brahm (must NOT collide with Ajahn Brahmali)
+                    const brahmCb = document.querySelector('#browse-teachers-list input[data-teacher-slug="ajahn_brahm"]');
+                    const brahmaliCb = document.querySelector('#browse-teachers-list input[data-teacher-slug="ajahn_brahmali"]');
+                    brahmCb.click();
+                    await waitFor(() => getBrowseCount() < res.initialTotal && getBrowseCount() > 1000);
+                    res.brahmOnlyCount = getBrowseCount();
+
+                    // 2. Multi-monastic Any (OR): Ajahn Brahm + Ajahn Brahmali
+                    brahmaliCb.click();
+                    await waitFor(() => getBrowseCount() > res.brahmOnlyCount);
+                    res.brahmOrBrahmaliCount = getBrowseCount();
+
+                    // 3. Multi-monastic All (AND): Co-taught talks with BOTH Ajahn Brahm AND Ajahn Brahmali
+                    document.getElementById('btn-teacher-mode-all').click();
+                    await waitFor(() => getBrowseCount() > 0 && getBrowseCount() < 50);
+                    res.brahmAndBrahmaliCount = getBrowseCount();
+                    res.brahmAndBrahmaliHash = window.location.hash;
+                    res.andCardBadges = Array.from(document.querySelectorAll('#browse-episodes-grid .episode-card')).map(card =>
+                      Array.from(card.querySelectorAll('.teacher-badge')).map(b => b.textContent.trim())
+                    );
+
+                    // Reset
+                    document.getElementById('browse-reset-filters-btn').click();
+                    await waitFor(() => getBrowseCount() === res.initialTotal);
+
+                    // 4. Groupable years: 1997 + 2001
+                    const y1997Btn = document.querySelector('#browse-years-grid .year-chip-btn[data-year="1997"]');
+                    const y2001Btn = document.querySelector('#browse-years-grid .year-chip-btn[data-year="2001"]');
+                    y1997Btn.click();
+                    await waitFor(() => getBrowseCount() > 0 && getBrowseCount() < 200);
+                    const c1997 = getBrowseCount();
+                    y2001Btn.click();
+                    await waitFor(() => getBrowseCount() > c1997);
+                    res.y1997Count = c1997;
+                    res.y1997And2001Count = getBrowseCount();
+
+                    // Also verify 1990s era preset & chip removal
+                    const era1990sBtn = document.querySelector('#browse-era-presets .era-preset-btn[data-era="1990s"]');
+                    era1990sBtn.click();
+                    await waitFor(() => getBrowseCount() > res.y1997And2001Count);
+                    res.with1990sCount = getBrowseCount();
+
+                    // Reset
+                    document.getElementById('browse-reset-filters-btn').click();
+                    await waitFor(() => getBrowseCount() === res.initialTotal);
+
+                    // 5. Title filter: "MN" + Whole Word "AN" + diacritic folding "dhatu"
+                    const titleInput = document.getElementById('browse-title-input');
+                    const wordCb = document.getElementById('browse-title-word-checkbox');
+                    const setInput = (el, val) => {
+                      el.value = val;
+                      el.dispatchEvent(new Event('input', { bubbles: true }));
+                    };
+                    setInput(titleInput, 'MN');
+                    await waitFor(() => getBrowseCount() > 100 && getBrowseCount() < 300);
+                    res.mnTitleCount = getBrowseCount();
+                    res.mnHighlightCount = document.querySelectorAll('#browse-episodes-grid .title-match-mark').length;
+
+                    // Test "AN" substring vs Whole Word
+                    setInput(titleInput, 'AN');
+                    await waitFor(() => getBrowseCount() > 500);
+                    res.anSubstrCount = getBrowseCount();
+                    wordCb.click();
+                    await waitFor(() => getBrowseCount() > 20 && getBrowseCount() < 100);
+                    res.anWholeWordCount = getBrowseCount();
+                    res.anSampleTitles = Array.from(document.querySelectorAll('#browse-episodes-grid .episode-title')).slice(0, 10).map(e => e.textContent.trim());
+
+                    // Reset and test diacritic folding "dhatu"
+                    document.getElementById('browse-reset-filters-btn').click();
+                    await waitFor(() => getBrowseCount() === res.initialTotal);
+                    setInput(titleInput, 'dhatu');
+                    await waitFor(() => getBrowseCount() > 0 && getBrowseCount() < 50);
+                    res.dhatuTitles = Array.from(document.querySelectorAll('#browse-episodes-grid .episode-title')).map(e => e.textContent.trim());
+
+                    // Reset
+                    document.getElementById('browse-reset-filters-btn').click();
+                    await waitFor(() => getBrowseCount() === res.initialTotal);
+
+                    // 6. Talk length filter: under_15 bucket, then custom min=45 max=60
+                    const under15Cb = document.querySelector('#browse-duration-buckets input[data-dur-bucket="under_15"]');
+                    under15Cb.click();
+                    await waitFor(() => getBrowseCount() > 10 && getBrowseCount() < 150);
+                    res.under15Count = getBrowseCount();
+                    res.under15Durs = Array.from(document.querySelectorAll('#browse-episodes-grid .episode-card')).map(card => {
+                      const m = card.textContent.match(/(\d+)\s*mins/);
+                      return m ? parseInt(m[1], 10) : 0;
+                    });
+
+                    const minDurInput = document.getElementById('browse-min-duration');
+                    const maxDurInput = document.getElementById('browse-max-duration');
+                    setInput(minDurInput, '45');
+                    setInput(maxDurInput, '60');
+                    await waitFor(() => getBrowseCount() > 500 && getBrowseCount() < 1500);
+                    res.custom45to60Count = getBrowseCount();
+                    res.customSampleDurs = Array.from(document.querySelectorAll('#browse-episodes-grid .episode-card')).slice(0, 25).map(card => {
+                      const m = card.textContent.match(/(\d+)\s*mins/);
+                      return m ? parseInt(m[1], 10) : 0;
+                    });
+
+                    // 7. Sort shortest first
+                    const sortSel = document.getElementById('browse-sort-select');
+                    sortSel.value = 'duration_asc';
+                    sortSel.dispatchEvent(new Event('change', { bubbles: true }));
+                    await waitFor(() => {
+                      const first = document.querySelector('#browse-episodes-grid .episode-card')?.textContent?.match(/(\d+)\s*mins/);
+                      return first && parseInt(first[1], 10) === 45;
+                    });
+                    res.sortedFirstDur = parseInt(document.querySelector('#browse-episodes-grid .episode-card').textContent.match(/(\d+)\s*mins/)[1], 10);
+
+                    // 8. Collection filter (MN) + active chip removal
+                    document.getElementById('browse-reset-filters-btn').click();
+                    await waitFor(() => getBrowseCount() === res.initialTotal);
+                    const mnColCb = document.querySelector('#browse-collections-list input[data-collection="mn"]');
+                    mnColCb.click();
+                    await waitFor(() => getBrowseCount() > 100 && getBrowseCount() < 250);
+                    res.mnCollectionCount = getBrowseCount();
+                    const mnChip = document.querySelector('#browse-active-chips .browse-filter-chip[data-remove-col="mn"]');
+                    mnChip.click();
+                    await waitFor(() => getBrowseCount() === res.initialTotal);
+
+                    // Final reset
+                    res.resetTotal = getBrowseCount();
+                    res.ok = true;
+                  } catch (err) {
+                    res.error = err && err.message ? err.message : String(err);
+                  }
+                  await fetch('/__browse_ui_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(res),
+                  });
+                })();
+                </script>
+                """
+                injected = raw_html.replace("</body>", harness_js + "\n</body>").encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(injected)))
+                self.end_headers()
+                self.wfile.write(injected)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: BrowseUIHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_dir:
+            cmd = [
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_dir}",
+                f"http://127.0.0.1:{port}/__browse_ui_e2e.html",
+            ]
+            proc = subprocess.Popen(cmd)
+            try:
+                deadline = time.time() + 50.0
+                while time.time() < deadline and not report:
+                    time.sleep(0.25)
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        assert report.get("ok") is True, f"Browse UI E2E failed: {report}"
+        assert report["initialTotal"] >= 2900
+        assert report["brahmOnlyCount"] < 2000, "Ajahn Brahm filter must NOT collide with Ajahn Brahmali"
+        assert report["brahmOrBrahmaliCount"] > report["brahmOnlyCount"]
+        assert 1 <= report["brahmAndBrahmaliCount"] < 25
+        assert "teachers=ajahn_brahm" in report["brahmAndBrahmaliHash"]
+        assert "tmode=all" in report["brahmAndBrahmaliHash"]
+        for badges in report["andCardBadges"]:
+            assert "Ajahn Brahm" in badges and "Ajahn Brahmali" in badges
+
+        assert report["y1997And2001Count"] > report["y1997Count"]
+        assert report["with1990sCount"] > report["y1997And2001Count"]
+        assert 100 <= report["mnTitleCount"] <= 250
+        assert 100 <= report["mnCollectionCount"] <= 250
+        assert report["mnHighlightCount"] > 0
+        assert report["anSubstrCount"] > 500
+        assert 20 <= report["anWholeWordCount"] <= 80
+        assert any("Dhātuvibhaṅga" in t or "Dhatu" in t for t in report["dhatuTitles"])
+
+        assert all(d < 15 for d in report["under15Durs"])
+        assert all(45 <= d <= 60 for d in report["customSampleDurs"])
+        assert report["sortedFirstDur"] == 45
+        assert report["resetTotal"] == report["initialTotal"]
+    finally:
+        server.shutdown()
+        server.server_close()

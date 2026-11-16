@@ -52,7 +52,7 @@ In accordance with the monastic Vinaya and the living Buddhist tradition of gene
   - **Stopword-Aware FTS5 Search, BM25 Ranking & 50-Result Pagination**: Preserves stopwords in Tier 1 exact-phrase queries (`"mindfulness of breathing"`), strips stopwords from Tiers 2–6 fallback expansions and sentence highlighting, ranks episodes by BM25 + hit density (`Best Match` default), and paginates search/filter views at 50 talks per page (`#search-pagination`) while keeping full multi-page Filtered Archive exports.
   - **Deterministic Click-to-Jump Precision**: Synchronously parses attached `words_blob` timings on drawer open (`WordSync.prepareEpisodeSync`), guards pre-seek audio frames (`_awaitingInitialSeek`), and scrolls target phrases squarely into the unobstructed reading zone between the sticky transcript toolbar and bottom audio player bar.
   - Diacritic-insensitive real-time search filtering across all lexicon terms and authority documents.
-  - Full 3,246-talk playable archive in Browse Talks with a "Transcribed Only" toggle (default ON) and paginated "Load More" browsing.
+  - **Multi-Faceted Browse Filtering & Shareable Catalog Views**: Filter the transcribed archive in Browse Talks (`#browse`) by multiple monastics with `Any (OR)` or co-taught `All (AND)` matching (exact slug/token resolution avoiding `Ajahn Brahm` / `Ajahn Brahmali` substring collisions), groupable years with decade presets and custom spans, diacritic-insensitive title filtering (`MN`, `MN OR DN`, `-exclude`, `"phrase"`, and `Whole Word` boundary matching for codes like `AN` with live match highlighting), talk length presets and custom minute bounds, Sutta collection (`MN`, `DN`, `SN`, `AN`, `KN`) and talk format facets (`Retreat`, `Non-Retreat`, `Q&A`, `Meditation`, `Workshop`, `Co-taught`, `Bookmarked Only`), recorded-year sorting, removable filter chips, URL-hash persistence (`#browse?...`), and filtered ZIP archive exports.
   - Live audio companion highlighting Pali terms dynamically during playback.
   - Full browser Back and Forward history support (`popstate` SPA history routing) without interrupting audio streaming.
   - Universal shareable URLs for text messages and email: supports hashes (`/#talk/pb28113880`), query parameters (`/?talk=pb28113880`), and clean server paths (`/talk/pb28113880`).
@@ -154,7 +154,7 @@ python main.py web -r --port 8080       # Custom port or output directory
 python main.py serve --run              # Serve static bundle on http://127.0.0.1:34266
 python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
 
-# 13. Run Full Verification & Unit Test Suite (178 tests)
+# 13. Run Full Verification & Unit Test Suite (209 tests)
 python -m pytest tests -p no:cov        # Execute all unit and integration tests
 pytest --cov=deeper_dhamma              # Generate full code coverage report
 ```
@@ -199,7 +199,7 @@ deeper_dhamma/
 │       ├── static/             # CSS, app.js, word_sync.js, db_worker.js, sqlite3.wasm
 │       │   └── adapters/       # In-browser SQLite WASM adapter (wasm_client.js)
 │       └── views/              # Static HTML template (index.html)
-├── tests/                      # Comprehensive Unit & Integration Test Suite (192 tests)
+├── tests/                      # Comprehensive Unit & Integration Test Suite (209 tests)
 │   ├── test_cli.py             # CLI parser, "One Obvious Way" flags, subcommands dispatch
 │   ├── test_audit.py           # Ghost files, temp fragments, html error pages, archive cleanup
 │   ├── test_benchmark.py       # Precision, recall, F1, and sequence-aligned WER evaluation

@@ -304,21 +304,276 @@
             <h2>Archive Catalog</h2>
             <p class="section-desc">Browse all transcribed talks and retreats with word-synced transcripts and direct Podbean CDN audio streaming.</p>
           </div>
-          <div class="browse-filter-bar">
-            <select id="browse-teacher-filter-select" aria-label="Filter by Monastic Teacher">
-              <option value="">All Monastics</option>
-            </select>
-            <select id="browse-year-filter-select" aria-label="Filter by Year">
-              <option value="">All Years</option>
-            </select>
+          <div class="browse-header-actions">
+            <div class="download-dropdown-wrapper" id="browse-filtered-archive-dropdown-wrapper">
+              <button type="button" class="btn-secondary download-dropdown-btn" id="btn-browse-download-filtered" title="Download all matching talks in a ZIP archive">
+                📥 Export Matching (<span id="browse-filtered-archive-count">0</span>) ▾
+              </button>
+              <div class="download-dropdown-menu" id="browse-filtered-archive-menu">
+                <div class="dropdown-menu-header">Export Filtered Talks (.zip)</div>
+                <button type="button" class="download-option" data-format="md">
+                  <span class="download-opt-icon">📝</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Markdown Archive</span>
+                    <span class="download-opt-desc">Formatted notes with frontmatter &amp; timestamps</span>
+                  </div>
+                  <span class="download-opt-badge">.md</span>
+                </button>
+                <button type="button" class="download-option" data-format="txt">
+                  <span class="download-opt-icon">📄</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">Plain Text Archive</span>
+                    <span class="download-opt-desc">Clean transcript text with turn timings</span>
+                  </div>
+                  <span class="download-opt-badge">.txt</span>
+                </button>
+                <button type="button" class="download-option" data-format="srt">
+                  <span class="download-opt-icon">🎬</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">SubRip Subtitles Archive</span>
+                    <span class="download-opt-desc">Standard subtitle cues for VLC &amp; media players</span>
+                  </div>
+                  <span class="download-opt-badge">.srt</span>
+                </button>
+                <button type="button" class="download-option" data-format="vtt">
+                  <span class="download-opt-icon">🌐</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">WebVTT Captions Archive</span>
+                    <span class="download-opt-desc">Standard web caption track with speaker cues</span>
+                  </div>
+                  <span class="download-opt-badge">.vtt</span>
+                </button>
+                <button type="button" class="download-option" data-format="json">
+                  <span class="download-opt-icon">📊</span>
+                  <div class="download-opt-text">
+                    <span class="download-opt-title">JSON Data Archive</span>
+                    <span class="download-opt-desc">Structured transcript objects &amp; turns</span>
+                  </div>
+                  <span class="download-opt-badge">.json</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
+
+        <!-- Enhanced Multi-Faceted Browse Filter Bar -->
+        <div class="browse-filter-panel" id="browse-filter-panel">
+          <div class="browse-title-filter-row">
+            <div class="browse-title-input-wrap">
+              <span class="browse-title-icon" aria-hidden="true">🔍</span>
+              <input
+                type="search"
+                id="browse-title-input"
+                placeholder="Filter by title (e.g. &quot;MN&quot;, &quot;five hindrances&quot;, retreat -sutta, MN OR DN)..."
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Filter talks by title"
+              >
+              <button type="button" id="browse-clear-title-btn" class="btn-icon" title="Clear title filter" aria-label="Clear title filter" style="display: none;">✕</button>
+              <label class="toggle-pill browse-word-pill" title="Match whole words or sutta codes (e.g. 'AN' matches AN7.74 without matching 'Ajahn' or 'Jhana')">
+                <input type="checkbox" id="browse-title-word-checkbox">
+                <span class="toggle-track"></span>
+                <span class="toggle-text">Whole Word</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="browse-facets-row">
+            <!-- 1. Multi-Select Monastics -->
+            <div class="browse-popover-wrapper" id="browse-teachers-dropdown">
+              <button type="button" class="browse-filter-btn" id="browse-teachers-btn" aria-expanded="false" aria-haspopup="true">
+                <span class="filter-btn-icon" aria-hidden="true">👤</span>
+                <span class="filter-btn-label" id="browse-teachers-label">Monastics: All</span>
+                <span class="filter-btn-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="browse-popover-panel" id="browse-teachers-panel">
+                <div class="popover-section-header">
+                  <span class="popover-title">Select Monastics</span>
+                  <div class="browse-mode-toggle" title="Any = talks by either selected monastic; All = co-taught talks featuring every selected monastic">
+                    <button type="button" class="browse-mode-btn active" id="btn-teacher-mode-any" data-tmode="any">Any (OR)</button>
+                    <button type="button" class="browse-mode-btn" id="btn-teacher-mode-all" data-tmode="all">All (AND)</button>
+                  </div>
+                </div>
+                <p class="popover-hint" id="browse-teachers-mode-hint">Show talks featuring <strong>any</strong> selected monastic.</p>
+                <div class="popover-search-row">
+                  <input type="search" id="browse-teachers-search" class="popover-search-input" placeholder="Filter monastics..." autocomplete="off" aria-label="Filter monastics">
+                </div>
+                <div class="popover-meta-strip">
+                  <span id="browse-teachers-selected-info">0 selected</span>
+                  <button type="button" class="btn-text-link" id="btn-browse-teachers-clear">Clear</button>
+                </div>
+                <div class="popover-checklist" id="browse-teachers-list"></div>
+              </div>
+            </div>
+
+            <!-- 2. Groupable / Multi-Select Years -->
+            <div class="browse-popover-wrapper" id="browse-years-dropdown">
+              <button type="button" class="browse-filter-btn" id="browse-years-btn" aria-expanded="false" aria-haspopup="true">
+                <span class="filter-btn-icon" aria-hidden="true">📅</span>
+                <span class="filter-btn-label" id="browse-years-label">Years: All</span>
+                <span class="filter-btn-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="browse-popover-panel browse-years-panel" id="browse-years-panel">
+                <div class="popover-section-header">
+                  <span class="popover-title">Group by Years</span>
+                  <button type="button" class="btn-text-link" id="btn-browse-years-clear">Clear</button>
+                </div>
+                <div class="era-presets-row" id="browse-era-presets">
+                  <button type="button" class="era-preset-btn" data-era="recent3">Last 3 Yrs</button>
+                  <button type="button" class="era-preset-btn" data-era="2020s">2020s</button>
+                  <button type="button" class="era-preset-btn" data-era="2010s">2010s</button>
+                  <button type="button" class="era-preset-btn" data-era="2000s">2000s</button>
+                  <button type="button" class="era-preset-btn" data-era="1990s">1990s</button>
+                </div>
+                <div class="year-range-quick">
+                  <select id="browse-year-from" aria-label="From year">
+                    <option value="">From...</option>
+                  </select>
+                  <span class="date-sep">to</span>
+                  <select id="browse-year-to" aria-label="To year">
+                    <option value="">To...</option>
+                  </select>
+                  <button type="button" class="btn-mini" id="btn-browse-year-range-add" title="Add all years in this range to selection">Add Span</button>
+                </div>
+                <div class="year-chip-grid" id="browse-years-grid"></div>
+              </div>
+            </div>
+
+            <!-- 3. Talk Length / Duration -->
+            <div class="browse-popover-wrapper" id="browse-duration-dropdown">
+              <button type="button" class="browse-filter-btn" id="browse-duration-btn" aria-expanded="false" aria-haspopup="true">
+                <span class="filter-btn-icon" aria-hidden="true">⏱️</span>
+                <span class="filter-btn-label" id="browse-duration-label">Length: Any</span>
+                <span class="filter-btn-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="browse-popover-panel browse-duration-panel" id="browse-duration-panel">
+                <div class="popover-section-header">
+                  <span class="popover-title">Talk Length</span>
+                  <button type="button" class="btn-text-link" id="btn-browse-duration-clear">Clear</button>
+                </div>
+                <div class="popover-checklist duration-buckets-list" id="browse-duration-buckets">
+                  <label class="popover-check-item">
+                    <input type="checkbox" value="under_15" data-dur-bucket="under_15">
+                    <span class="check-item-label">Under 15 min</span>
+                    <span class="check-item-count" id="dur-cnt-under_15">0</span>
+                  </label>
+                  <label class="popover-check-item">
+                    <input type="checkbox" value="15_30" data-dur-bucket="15_30">
+                    <span class="check-item-label">15 – 30 min</span>
+                    <span class="check-item-count" id="dur-cnt-15_30">0</span>
+                  </label>
+                  <label class="popover-check-item">
+                    <input type="checkbox" value="30_60" data-dur-bucket="30_60">
+                    <span class="check-item-label">30 – 60 min</span>
+                    <span class="check-item-count" id="dur-cnt-30_60">0</span>
+                  </label>
+                  <label class="popover-check-item">
+                    <input type="checkbox" value="60_90" data-dur-bucket="60_90">
+                    <span class="check-item-label">60 – 90 min</span>
+                    <span class="check-item-count" id="dur-cnt-60_90">0</span>
+                  </label>
+                  <label class="popover-check-item">
+                    <input type="checkbox" value="over_90" data-dur-bucket="over_90">
+                    <span class="check-item-label">90+ min</span>
+                    <span class="check-item-count" id="dur-cnt-over_90">0</span>
+                  </label>
+                </div>
+                <div class="duration-custom-section">
+                  <div class="popover-subtitle">Custom Range (minutes)</div>
+                  <div class="duration-custom-inputs">
+                    <input type="number" id="browse-min-duration" min="0" max="600" placeholder="Min" aria-label="Minimum length in minutes">
+                    <span class="date-sep">–</span>
+                    <input type="number" id="browse-max-duration" min="0" max="600" placeholder="Max" aria-label="Maximum length in minutes">
+                    <span class="date-sep">min</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 4. Sutta Collection & Talk Type -->
+            <div class="browse-popover-wrapper" id="browse-category-dropdown">
+              <button type="button" class="browse-filter-btn" id="browse-category-btn" aria-expanded="false" aria-haspopup="true">
+                <span class="filter-btn-icon" aria-hidden="true">📂</span>
+                <span class="filter-btn-label" id="browse-category-label">Collection &amp; Type: All</span>
+                <span class="filter-btn-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="browse-popover-panel browse-category-panel" id="browse-category-panel">
+                <div class="popover-section-header">
+                  <span class="popover-title">Collection &amp; Talk Type</span>
+                  <button type="button" class="btn-text-link" id="btn-browse-category-clear">Clear</button>
+                </div>
+                <div class="category-group-block">
+                  <div class="popover-subtitle">Sutta Collections (Nikāyas)</div>
+                  <div class="category-pill-grid" id="browse-collections-list">
+                    <label class="cat-check-pill"><input type="checkbox" value="mn" data-collection="mn"><span>MN · Majjhima</span><small id="cat-cnt-mn">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="dn" data-collection="dn"><span>DN · Dīgha</span><small id="cat-cnt-dn">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="sn" data-collection="sn"><span>SN · Saṁyutta</span><small id="cat-cnt-sn">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="an" data-collection="an"><span>AN · Aṅguttara</span><small id="cat-cnt-an">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="kn" data-collection="kn"><span>KN · Ud/Iti</span><small id="cat-cnt-kn">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="sutta" data-collection="sutta"><span>Any Sutta</span><small id="cat-cnt-sutta">0</small></label>
+                  </div>
+                </div>
+                <div class="category-group-block">
+                  <div class="popover-subtitle">Talk Format</div>
+                  <div class="category-pill-grid" id="browse-formats-list">
+                    <label class="cat-check-pill"><input type="checkbox" value="retreat" data-format="retreat"><span>Retreats</span><small id="cat-cnt-retreat">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="non_retreat" data-format="non_retreat"><span>Non-Retreat</span><small id="cat-cnt-non_retreat">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="rains_retreat" data-format="rains_retreat"><span>Rains (Vassa)</span><small id="cat-cnt-rains_retreat">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="nine_day_retreat" data-format="nine_day_retreat"><span>9-Day Retreat</span><small id="cat-cnt-nine_day_retreat">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="weekend_retreat" data-format="weekend_retreat"><span>Weekend</span><small id="cat-cnt-weekend_retreat">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="qa" data-format="qa"><span>Q&amp;A</span><small id="cat-cnt-qa">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="meditation" data-format="meditation"><span>Meditation</span><small id="cat-cnt-meditation">0</small></label>
+                    <label class="cat-check-pill"><input type="checkbox" value="workshop" data-format="workshop"><span>Workshops</span><small id="cat-cnt-workshop">0</small></label>
+                  </div>
+                </div>
+                <div class="category-group-block">
+                  <div class="popover-subtitle">Attributes</div>
+                  <div class="popover-checklist">
+                    <label class="popover-check-item">
+                      <input type="checkbox" id="browse-cotaught-checkbox">
+                      <span class="check-item-label">Co-taught (2+ Monastics)</span>
+                      <span class="check-item-count" id="cat-cnt-co_taught">0</span>
+                    </label>
+                    <label class="popover-check-item">
+                      <input type="checkbox" id="browse-bookmarked-checkbox">
+                      <span class="check-item-label">🔖 Bookmarked Only</span>
+                      <span class="check-item-count" id="cat-cnt-bookmarked">0</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5. Sort & Reset -->
+            <div class="browse-sort-actions">
+              <select id="browse-sort-select" aria-label="Sort talks">
+                <option value="year_desc" selected>Recorded Year (Newest)</option>
+                <option value="year_asc">Recorded Year (Oldest)</option>
+                <option value="date_desc">Podbean Upload (Newest)</option>
+                <option value="date_asc">Podbean Upload (Oldest)</option>
+                <option value="duration_desc">Longest Talks First</option>
+                <option value="duration_asc">Shortest Talks First</option>
+                <option value="title_asc">Title (A → Z)</option>
+              </select>
+              <button type="button" id="browse-reset-filters-btn" class="btn-secondary btn-reset-filters" title="Reset all browse filters" disabled>✕ Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="browse-active-summary" id="browse-active-summary">
+          <div class="browse-result-stats" id="browse-result-stats">Loading archive catalog...</div>
+          <div class="browse-active-chips" id="browse-active-chips"></div>
+        </div>
+
         <div class="browse-grid" id="browse-episodes-grid">
           <div class="loading-spinner">Loading talks...</div>
         </div>
         <div class="browse-load-more-wrap" id="browse-load-more-wrap" style="display: none;">
           <button type="button" class="btn-secondary btn-load-more" id="btn-browse-load-more">
             + Load More Talks
+          </button>
+          <button type="button" class="btn-secondary btn-load-more" id="btn-browse-show-all" style="display: none;">
+            Show All Remaining
           </button>
         </div>
       </div>

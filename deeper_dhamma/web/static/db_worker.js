@@ -22,6 +22,10 @@ const shardHandles = new Map();
 const shardPromises = new Map();
 const shardCachedShas = new Map();
 let episodesMetaMap = new Map();
+let episodesMetaList = [];
+let teacherRegistryBySlug = new Map();
+let teacherSlugByLowerName = new Map();
+let teacherRegistryList = [];
 
 // ============================================================================
 // IndexedDB & OPFS Persistence Helpers
@@ -182,37 +186,207 @@ function queryOneOn(targetDb, sql, bind = []) {
   return rows.length > 0 ? rows[0] : null;
 }
 
+function stripTeacherNote(str) {
+  return String(str || '').replace(/\s*\([^)]*\)\s*$/g, '').trim();
+}
+
+function getDurationBucket(durMin) {
+  if (durMin < 15) return 'under_15';
+  if (durMin < 30) return '15_30';
+  if (durMin < 60) return '30_60';
+  if (durMin < 90) return '60_90';
+  return 'over_90';
+}
+
+function classifyEpisodeCategories(rawTitle, normTitle, realMonasticCount) {
+  const cats = new Set();
+  const t = normTitle || foldDiacritics(rawTitle || '');
+  // Nikaya / Sutta Collections (letter-boundary before code, followed by digit/colon/dot/hyphen/space/end)
+  if (/(?:^|[^a-z])mn(?=\s*\d|[:.\-\s]|$)/.test(t)) cats.add('mn');
+  if (/(?:^|[^a-z])dn(?=\s*\d|[:.\-\s]|$)/.test(t)) cats.add('dn');
+  if (/(?:^|[^a-z])sn(?=\s*\d|[:.\-\s]|$)/.test(t)) cats.add('sn');
+  if (/(?:^|[^a-z])an(?=\s*\d|[:.\-\s]|$)/.test(t)) cats.add('an');
+  if (/(?:^|[^a-z])(?:ud|iti|dhp|snp|thag|thig|kp)(?=\s*\d|[:.\-\s]|$)/.test(t)) cats.add('kn');
+  if (/\bsuttas?\b/.test(t) || cats.has('mn') || cats.has('dn') || cats.has('sn') || cats.has('an') || cats.has('kn')) {
+    cats.add('sutta');
+  }
+  const isRetreat = /\bretreat\b/.test(t);
+  const isWorkshop = /\bworkshop\b|\bcourse\b/.test(t);
+  if (isRetreat) cats.add('retreat');
+  if (!isRetreat) cats.add('non_retreat');
+  if (/\brains\s+retreat\b/.test(t)) cats.add('rains_retreat');
+  if (/\b(?:9|nine)\s*[-]?\s*day\b/.test(t)) cats.add('nine_day_retreat');
+  if (/\bweekend\b/.test(t)) cats.add('weekend_retreat');
+  if (/q\s*&\s*a|\bq\s+and\s+a\b|\bquestions?\b/.test(t)) cats.add('qa');
+  if (/\bmeditation\b|\bguided\b/.test(t)) cats.add('meditation');
+  if (isWorkshop) cats.add('workshop');
+  if (realMonasticCount >= 2) cats.add('co_taught');
+  return cats;
+}
+
+function resolveTeacherToSlug(val) {
+  const cleaned = stripTeacherNote(val);
+  if (!cleaned) return '';
+  if (teacherRegistryBySlug.has(cleaned)) return cleaned;
+  const lower = cleaned.toLowerCase();
+  if (teacherSlugByLowerName.has(lower)) return teacherSlugByLowerName.get(lower);
+  const slugGuess = lower.replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  if (teacherRegistryBySlug.has(slugGuess)) return slugGuess;
+  return lower;
+}
+
 function rebuildEpisodesMetaCache() {
   const nextMap = new Map();
+  const nextList = [];
+  const nextTeacherBySlug = new Map();
+  const nextSlugByLowerName = new Map();
+  let nextTeacherList = [];
+
   if (!db) {
     episodesMetaMap = nextMap;
+    episodesMetaList = nextList;
+    teacherRegistryBySlug = nextTeacherBySlug;
+    teacherSlugByLowerName = nextSlugByLowerName;
+    teacherRegistryList = nextTeacherList;
     return;
   }
+
   try {
-    const rows = queryAllOn(
+    nextTeacherList = queryAllOn(
+      db,
+      `SELECT slug, display_name, color, default_role
+       FROM teachers
+       ORDER BY display_name;`
+    );
+    for (let i = 0; i < nextTeacherList.length; i++) {
+      const t = nextTeacherList[i];
+      nextTeacherBySlug.set(t.slug, t);
+      if (t.display_name) {
+        nextSlugByLowerName.set(t.display_name.toLowerCase(), t.slug);
+      }
+    }
+  } catch (_) {}
+
+  const etMap = new Map();
+  try {
+    const etRows = queryAllOn(
+      db,
+      `SELECT et.episode_id, t.slug
+       FROM episode_teachers et
+       JOIN teachers t ON et.teacher_id = t.id;`
+    );
+    for (let i = 0; i < etRows.length; i++) {
+      const { episode_id, slug } = etRows[i];
+      if (!etMap.has(episode_id)) etMap.set(episode_id, new Set());
+      etMap.get(episode_id).add(slug);
+    }
+  } catch (_) {}
+
+  let rows = [];
+  try {
+    rows = queryAllOn(
       db,
       `SELECT id, title, date, year, primary_teacher, primary_display, identified_teachers,
               media_url, permalink, duration_sec, is_transcribed, talks_shard, words_shard
        FROM episodes;`
     );
-    for (let i = 0; i < rows.length; i++) {
-      nextMap.set(rows[i].id, rows[i]);
-    }
   } catch (_) {
     // Legacy monolithic DB lacks talks_shard / words_shard columns
     try {
-      const rows = queryAllOn(
+      rows = queryAllOn(
         db,
         `SELECT id, title, date, year, primary_teacher, primary_display, identified_teachers,
                 media_url, permalink, duration_sec, is_transcribed
          FROM episodes;`
       );
-      for (let i = 0; i < rows.length; i++) {
-        nextMap.set(rows[i].id, rows[i]);
-      }
     } catch (_) {}
   }
+
+  for (let i = 0; i < rows.length; i++) {
+    const ep = rows[i];
+    const teacherSlugs = new Set(etMap.get(ep.id) || []);
+    const teacherLowerNames = new Set();
+
+    if (ep.primary_teacher && nextTeacherBySlug.has(ep.primary_teacher)) {
+      teacherSlugs.add(ep.primary_teacher);
+    }
+
+    const addTeacherNameToken = (rawToken) => {
+      const cleaned = stripTeacherNote(rawToken);
+      if (!cleaned) return;
+      const lower = cleaned.toLowerCase();
+      teacherLowerNames.add(lower);
+      const matchedSlug = nextSlugByLowerName.get(lower);
+      if (matchedSlug) {
+        teacherSlugs.add(matchedSlug);
+      }
+    };
+
+    if (ep.identified_teachers) {
+      const parts = String(ep.identified_teachers).split(/\s*,\s*/);
+      for (let j = 0; j < parts.length; j++) {
+        addTeacherNameToken(parts[j]);
+      }
+    }
+    if (ep.primary_display) {
+      const parts = String(ep.primary_display).split(/\s*(?:&|,|\/|\band\b)\s*/i);
+      for (let j = 0; j < parts.length; j++) {
+        addTeacherNameToken(parts[j]);
+      }
+    }
+
+    const realMonasticSlugs = [];
+    for (const slug of teacherSlugs) {
+      const reg = nextTeacherBySlug.get(slug);
+      if (
+        slug !== 'unknown_teacher' &&
+        slug !== 'unregistered_speaker' &&
+        slug !== 'questioner' &&
+        (!reg || (reg.default_role !== 'unregistered' && reg.default_role !== 'lay_questioner'))
+      ) {
+        realMonasticSlugs.push(slug);
+      }
+    }
+
+    if (realMonasticSlugs.length > 0) {
+      teacherSlugs.delete('unknown_teacher');
+      teacherLowerNames.delete('unknown teacher');
+    }
+
+    for (const slug of teacherSlugs) {
+      const reg = nextTeacherBySlug.get(slug);
+      if (reg && reg.display_name) {
+        teacherLowerNames.add(reg.display_name.toLowerCase());
+      }
+    }
+
+    const normTitle = foldDiacritics(ep.title || '');
+    const durSec = Number(ep.duration_sec) || 0;
+    const durMin = Math.round(durSec / 60);
+    const epYear = ep.year
+      ? Number(ep.year)
+      : (ep.date && /^\d{4}/.test(ep.date) ? Number(ep.date.slice(0, 4)) : 0);
+
+    ep._teacherSlugs = teacherSlugs;
+    ep._teacherLowerNames = teacherLowerNames;
+    ep._realMonasticCount = realMonasticSlugs.length;
+    ep.teacher_slugs = Array.from(teacherSlugs);
+    ep._normTitle = normTitle;
+    ep._durSec = durSec;
+    ep._durMin = durMin;
+    ep._year = epYear;
+    ep._durBucket = getDurationBucket(durMin);
+    ep._categories = classifyEpisodeCategories(ep.title || '', normTitle, realMonasticSlugs.length);
+
+    nextMap.set(ep.id, ep);
+    nextList.push(ep);
+  }
+
   episodesMetaMap = nextMap;
+  episodesMetaList = nextList;
+  teacherRegistryBySlug = nextTeacherBySlug;
+  teacherSlugByLowerName = nextSlugByLowerName;
+  teacherRegistryList = nextTeacherList;
   searchCache = null;
 }
 
@@ -743,7 +917,77 @@ function queryOne(sql, bind = []) {
 // Service Handlers
 // ============================================================================
 
+function tokenMatchesTitle(normTitle, tokenText, wholeWord) {
+  if (!wholeWord) {
+    return normTitle.includes(tokenText);
+  }
+  const firstCh = tokenText[0];
+  const lastCh = tokenText[tokenText.length - 1];
+  const startBound = /[a-z]/.test(firstCh)
+    ? '(?:^|[^a-z])'
+    : (/[0-9]/.test(firstCh) ? '(?:^|[^0-9])' : '');
+  const endBound = /[a-z]/.test(lastCh)
+    ? '(?=$|[^a-z])'
+    : (/[0-9]/.test(lastCh) ? '(?=$|[^0-9])' : '');
+  const rx = new RegExp(`${startBound}${escapeRegExp(tokenText)}${endBound}`);
+  return rx.test(normTitle);
+}
+
+function matchesTitleQuery(normTitle, titleQuery, wholeWord = false) {
+  const raw = String(titleQuery || '').trim();
+  if (!raw) return true;
+  const branches = raw.split(/\s+OR\s+/);
+  for (let b = 0; b < branches.length; b++) {
+    const branch = branches[b].trim();
+    if (!branch) continue;
+    const rawTokens = branch.match(/-?"[^"]+"|\S+/g) || [];
+    if (rawTokens.length === 0) continue;
+    let branchOk = true;
+    for (let i = 0; i < rawTokens.length; i++) {
+      let tok = rawTokens[i];
+      let isNeg = false;
+      if (tok.startsWith('-') && tok.length > 1) {
+        isNeg = true;
+        tok = tok.slice(1);
+      }
+      if (tok.startsWith('"') && tok.endsWith('"') && tok.length >= 2) {
+        tok = tok.slice(1, -1);
+      }
+      const needle = foldDiacritics(tok).trim();
+      if (!needle) continue;
+      const hit = tokenMatchesTitle(normTitle, needle, wholeWord);
+      if (isNeg ? hit : !hit) {
+        branchOk = false;
+        break;
+      }
+    }
+    if (branchOk) return true;
+  }
+  return false;
+}
+
+function formatEpisodeRowForClient(ep) {
+  return {
+    id: ep.id,
+    title: ep.title,
+    date: ep.date,
+    year: ep.year,
+    primary_teacher: ep.primary_teacher,
+    teacher: ep.primary_display,
+    primary_display: ep.primary_display,
+    identified_teachers: ep.identified_teachers,
+    teacher_slugs: ep.teacher_slugs || [],
+    media_url: ep.media_url,
+    permalink: ep.permalink,
+    duration_sec: ep.duration_sec,
+    is_transcribed: ep.is_transcribed,
+  };
+}
+
 function handleGetStats() {
+  if (db && episodesMetaList.length === 0) {
+    rebuildEpisodesMetaCache();
+  }
   const totalEp = queryOne('SELECT COUNT(*) AS c FROM episodes;');
   const transEp = queryOne('SELECT COUNT(*) AS c FROM episodes WHERE is_transcribed = 1;');
   let segsCount = 0;
@@ -759,20 +1003,69 @@ function handleGetStats() {
   }
   const dur = queryOne('SELECT SUM(duration_sec) AS s FROM episodes WHERE is_transcribed = 1;');
 
-  const teachersList = queryAll(`
-    SELECT slug, display_name, color, default_role 
-    FROM teachers 
-    ORDER BY display_name;
-  `);
+  const teachersList = teacherRegistryList.length > 0
+    ? teacherRegistryList
+    : queryAll(`SELECT slug, display_name, color, default_role FROM teachers ORDER BY display_name;`);
 
   const teacherMap = {};
+  const teacherCounts = {};
+  const yearCounts = {};
+  const durationCounts = { under_15: 0, m15_30: 0, m30_60: 0, m60_90: 0, over_90: 0 };
+  const categoryCounts = {
+    mn: 0, dn: 0, sn: 0, an: 0, kn: 0, sutta: 0,
+    retreat: 0, rains_retreat: 0, nine_day_retreat: 0, weekend_retreat: 0,
+    non_retreat: 0, qa: 0, meditation: 0, workshop: 0, co_taught: 0,
+  };
+
   teachersList.forEach((t) => {
     teacherMap[t.slug] = {
       name: t.display_name,
       color: t.color || '#f59e0b',
       role: t.default_role
     };
+    teacherCounts[t.slug] = 0;
   });
+
+  for (let i = 0; i < episodesMetaList.length; i++) {
+    const ep = episodesMetaList[i];
+    if (!ep.is_transcribed) continue;
+    for (const slug of ep._teacherSlugs) {
+      teacherCounts[slug] = (teacherCounts[slug] || 0) + 1;
+    }
+    if (ep._year > 0) {
+      yearCounts[ep._year] = (yearCounts[ep._year] || 0) + 1;
+    }
+    if (ep._durBucket === 'under_15') durationCounts.under_15++;
+    else if (ep._durBucket === '15_30') durationCounts.m15_30++;
+    else if (ep._durBucket === '30_60') durationCounts.m30_60++;
+    else if (ep._durBucket === '60_90') durationCounts.m60_90++;
+    else durationCounts.over_90++;
+
+    for (const cat of ep._categories) {
+      if (cat in categoryCounts) categoryCounts[cat]++;
+    }
+  }
+
+  const browseTeachers = teachersList
+    .filter((r) => r.default_role !== 'unregistered' && r.default_role !== 'lay_questioner' && (teacherCounts[r.slug] || 0) > 0)
+    .map((r) => ({
+      slug: r.slug,
+      name: r.display_name,
+      color: r.color || '#f59e0b',
+      role: r.default_role,
+      count: teacherCounts[r.slug] || 0,
+    }))
+    .sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
+
+  if ((teacherCounts.unknown_teacher || 0) > 0 && teacherMap.unknown_teacher) {
+    browseTeachers.push({
+      slug: 'unknown_teacher',
+      name: teacherMap.unknown_teacher.name,
+      color: teacherMap.unknown_teacher.color || '#94a3b8',
+      role: 'unregistered',
+      count: teacherCounts.unknown_teacher,
+    });
+  }
 
   const years = queryAll(`
     SELECT DISTINCT year 
@@ -793,79 +1086,193 @@ function handleGetStats() {
     transcribed_episodes: transEp ? transEp.c : 0,
     transcribed_hours: dur && dur.s ? Math.round((dur.s / 3600.0) * 10) / 10 : 0.0,
     total_segments: segsCount,
-    teachers: teachersList.filter((r) => r.default_role !== 'unregistered' && r.slug !== 'unknown_teacher').map((r) => r.display_name),
+    teachers: teachersList
+      .filter((r) => r.default_role !== 'unregistered' && r.default_role !== 'lay_questioner' && r.slug !== 'unknown_teacher' && (teacherCounts[r.slug] || 0) > 0)
+      .map((r) => r.display_name),
+    browse_teachers: browseTeachers,
     teacher_map: teacherMap,
     years,
     all_years: allYears,
+    year_counts: yearCounts,
+    duration_counts: durationCounts,
+    category_counts: categoryCounts,
     db_version: currentDbVersion,
   };
 }
 
-function handleGetEpisodes({ teacher, year, startDate, endDate, sort = 'date_desc', transcribedOnly = true, limit = 50, offset = 0 }) {
-  let sql = `
-    SELECT id, title, date, year, primary_teacher, primary_display AS teacher, identified_teachers, media_url, permalink, duration_sec, is_transcribed 
-    FROM episodes 
-    WHERE 1=1
-  `;
-  const params = [];
-
-  if (transcribedOnly) {
-    sql += ' AND is_transcribed = 1';
-  }
-  if (year) {
-    sql += ' AND year = ?';
-    params.push(Number(year));
-  }
-  if (startDate) {
-    sql += ' AND date >= ?';
-    params.push(startDate);
-  }
-  if (endDate) {
-    sql += ' AND date <= ?';
-    params.push(endDate);
-  }
-  if (teacher) {
-    sql += ' AND (primary_display LIKE ? OR id IN (SELECT episode_id FROM episode_teachers et JOIN teachers t ON et.teacher_id = t.id WHERE t.display_name LIKE ?))';
-    params.push(`%${teacher}%`, `%${teacher}%`);
+function handleGetEpisodes({
+  teacher,
+  teachers,
+  teacherMatch = 'any',
+  year,
+  years,
+  startDate,
+  endDate,
+  titleQuery,
+  titleWholeWord = false,
+  minDurationMin = null,
+  maxDurationMin = null,
+  durationBuckets = null,
+  collections = null,
+  formats = null,
+  coTaughtOnly = false,
+  episodeIds = null,
+  sort = 'date_desc',
+  transcribedOnly = true,
+  limit = 50,
+  offset = 0,
+} = {}) {
+  if (db && episodesMetaList.length === 0) {
+    rebuildEpisodesMetaCache();
   }
 
-  let orderBy = ' ORDER BY date DESC, id DESC';
-  if (sort === 'date_asc') {
-    orderBy = ' ORDER BY date ASC, id ASC';
-  } else if (sort === 'duration_desc') {
-    orderBy = ' ORDER BY duration_sec DESC, date DESC';
-  } else if (sort === 'duration_asc') {
-    orderBy = ' ORDER BY duration_sec ASC, date ASC';
+  // Normalize teacher list (supports both single `teacher` and multi `teachers`)
+  const rawTeachers = [];
+  if (Array.isArray(teachers)) {
+    for (let i = 0; i < teachers.length; i++) {
+      if (teachers[i]) rawTeachers.push(String(teachers[i]));
+    }
   }
-  sql += orderBy;
+  if (teacher && rawTeachers.length === 0) {
+    rawTeachers.push(String(teacher));
+  }
+  const targetTeacherSlugs = rawTeachers.map(resolveTeacherToSlug).filter(Boolean);
+  const useAllTeachers = teacherMatch === 'all';
 
-  if (limit > 0) {
-    sql += ' LIMIT ? OFFSET ?;';
-    params.push(limit, offset);
-  } else {
-    sql += ';';
+  // Normalize year set (supports both single `year` and multi `years`)
+  const yearSet = new Set();
+  if (Array.isArray(years)) {
+    for (let i = 0; i < years.length; i++) {
+      const y = Number(years[i]);
+      if (y > 0) yearSet.add(y);
+    }
+  }
+  if (year && yearSet.size === 0) {
+    const y = Number(year);
+    if (y > 0) yearSet.add(y);
   }
 
-  const episodes = queryAll(sql, params);
+  const bucketSet = Array.isArray(durationBuckets) && durationBuckets.length > 0
+    ? new Set(durationBuckets)
+    : null;
+  const hasMinDur = minDurationMin !== null && minDurationMin !== undefined && minDurationMin !== '' && !Number.isNaN(Number(minDurationMin));
+  const hasMaxDur = maxDurationMin !== null && maxDurationMin !== undefined && maxDurationMin !== '' && !Number.isNaN(Number(maxDurationMin));
+  const minDurVal = hasMinDur ? Number(minDurationMin) : null;
+  const maxDurVal = hasMaxDur ? Number(maxDurationMin) : null;
 
-  // Count total
-  let countSql = 'SELECT COUNT(*) AS c FROM episodes WHERE 1=1';
-  const countParams = [];
-  if (transcribedOnly) countSql += ' AND is_transcribed = 1';
-  if (year) { countSql += ' AND year = ?'; countParams.push(Number(year)); }
-  if (startDate) { countSql += ' AND date >= ?'; countParams.push(startDate); }
-  if (endDate) { countSql += ' AND date <= ?'; countParams.push(endDate); }
-  if (teacher) {
-    countSql += ' AND (primary_display LIKE ? OR id IN (SELECT episode_id FROM episode_teachers et JOIN teachers t ON et.teacher_id = t.id WHERE t.display_name LIKE ?))';
-    countParams.push(`%${teacher}%`, `%${teacher}%`);
+  const colList = Array.isArray(collections) ? collections.filter(Boolean) : [];
+  const fmtList = Array.isArray(formats) ? formats.filter(Boolean) : [];
+  const allowedIdsSet = Array.isArray(episodeIds) ? new Set(episodeIds) : null;
+  const hasTitleQuery = Boolean(titleQuery && String(titleQuery).trim());
+
+  const filtered = [];
+  let totalDurationSec = 0;
+
+  for (let i = 0; i < episodesMetaList.length; i++) {
+    const ep = episodesMetaList[i];
+    if (transcribedOnly && !ep.is_transcribed) continue;
+    if (allowedIdsSet && !allowedIdsSet.has(ep.id)) continue;
+
+    if (yearSet.size > 0 && !yearSet.has(ep._year)) continue;
+    if (startDate && (ep.date || '') < startDate) continue;
+    if (endDate && (ep.date || '') > endDate) continue;
+
+    if (targetTeacherSlugs.length > 0) {
+      if (useAllTeachers) {
+        let allMatched = true;
+        for (let t = 0; t < targetTeacherSlugs.length; t++) {
+          const slug = targetTeacherSlugs[t];
+          if (!ep._teacherSlugs.has(slug) && !ep._teacherLowerNames.has(slug)) {
+            allMatched = false;
+            break;
+          }
+        }
+        if (!allMatched) continue;
+      } else {
+        let anyMatched = false;
+        for (let t = 0; t < targetTeacherSlugs.length; t++) {
+          const slug = targetTeacherSlugs[t];
+          if (ep._teacherSlugs.has(slug) || ep._teacherLowerNames.has(slug)) {
+            anyMatched = true;
+            break;
+          }
+        }
+        if (!anyMatched) continue;
+      }
+    }
+
+    if (coTaughtOnly && !ep._categories.has('co_taught')) continue;
+
+    if (colList.length > 0) {
+      let colMatch = false;
+      for (let c = 0; c < colList.length; c++) {
+        if (ep._categories.has(colList[c])) {
+          colMatch = true;
+          break;
+        }
+      }
+      if (!colMatch) continue;
+    }
+
+    if (fmtList.length > 0) {
+      let fmtMatch = false;
+      for (let f = 0; f < fmtList.length; f++) {
+        if (ep._categories.has(fmtList[f])) {
+          fmtMatch = true;
+          break;
+        }
+      }
+      if (!fmtMatch) continue;
+    }
+
+    if (hasMinDur || hasMaxDur) {
+      if (hasMinDur && ep._durMin < minDurVal) continue;
+      if (hasMaxDur && ep._durMin > maxDurVal) continue;
+    } else if (bucketSet && !bucketSet.has(ep._durBucket)) {
+      continue;
+    }
+
+    if (hasTitleQuery && !matchesTitleQuery(ep._normTitle, titleQuery, Boolean(titleWholeWord))) {
+      continue;
+    }
+
+    filtered.push(ep);
+    totalDurationSec += ep._durSec;
   }
-  const countRow = queryOne(countSql, countParams);
+
+  filtered.sort((a, b) => {
+    switch (sort) {
+      case 'year_desc':
+        return (b._year - a._year) || (b.date || '').localeCompare(a.date || '') || (b.id || '').localeCompare(a.id || '');
+      case 'year_asc':
+        return (a._year - b._year) || (a.date || '').localeCompare(b.date || '') || (a.id || '').localeCompare(b.id || '');
+      case 'date_asc':
+        return (a.date || '').localeCompare(b.date || '') || (a.id || '').localeCompare(b.id || '');
+      case 'duration_desc':
+        return (b._durSec - a._durSec) || (b._year - a._year) || (b.date || '').localeCompare(a.date || '');
+      case 'duration_asc':
+        return (a._durSec - b._durSec) || (b._year - a._year) || (b.date || '').localeCompare(a.date || '');
+      case 'title_asc':
+        return (a._normTitle || '').localeCompare(b._normTitle || '') || (b._year - a._year);
+      case 'date_desc':
+      default:
+        return (b.date || '').localeCompare(a.date || '') || (b.id || '').localeCompare(a.id || '');
+    }
+  });
+
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const safeLimit = Number(limit);
+  const sliced = (safeLimit > 0)
+    ? filtered.slice(safeOffset, safeOffset + safeLimit)
+    : filtered.slice(safeOffset);
 
   return {
-    episodes,
-    total: countRow ? countRow.c : episodes.length,
-    limit,
-    offset,
+    episodes: sliced.map(formatEpisodeRowForClient),
+    total: filtered.length,
+    total_duration_sec: totalDurationSec,
+    all_episode_ids: filtered.map((ep) => ep.id),
+    limit: safeLimit,
+    offset: safeOffset,
   };
 }
 
@@ -952,6 +1359,19 @@ async function handleGetEpisodeWords(episodeId) {
 
 function handleGetEpisodesByIds(ids) {
   if (!Array.isArray(ids) || ids.length === 0) return [];
+  if (db && episodesMetaList.length === 0) {
+    rebuildEpisodesMetaCache();
+  }
+  if (episodesMetaMap.size > 0) {
+    const out = [];
+    for (let i = 0; i < ids.length; i++) {
+      const ep = episodesMetaMap.get(ids[i]);
+      if (ep) out.push(formatEpisodeRowForClient(ep));
+    }
+    if (out.length === ids.length || out.length > 0) {
+      return out;
+    }
+  }
   const uniqueIds = Array.from(new Set(ids));
   const placeholders = uniqueIds.map(() => '?').join(',');
   const rows = queryAll(`
@@ -1163,21 +1583,29 @@ function escapeRegExp(str) {
 function matchesEpisodeFilters(ep, { teacher, year, startDate, endDate }) {
   if (!ep) return false;
   if (teacher) {
-    const tf = teacher.trim().toLowerCase();
-    const primary = (ep.primary_display || '').toLowerCase();
-    const identifiedRaw = (ep.identified_teachers || '').toLowerCase();
-    const identifiedList = identifiedRaw ? identifiedRaw.split(',').map((s) => s.trim()).filter(Boolean) : [];
-    const wordBoundaryRe = new RegExp(`\\b${escapeRegExp(tf)}\\b`, 'i');
-    const matchesTeacher =
-      primary === tf ||
-      identifiedList.includes(tf) ||
-      wordBoundaryRe.test(ep.primary_display || '') ||
-      wordBoundaryRe.test(ep.identified_teachers || '');
-    if (!matchesTeacher) return false;
+    const targetSlug = resolveTeacherToSlug(teacher);
+    if (ep._teacherSlugs && ep._teacherSlugs.size > 0) {
+      if (!ep._teacherSlugs.has(targetSlug) && !(ep._teacherLowerNames && ep._teacherLowerNames.has(targetSlug))) {
+        return false;
+      }
+    } else {
+      const tf = teacher.trim().toLowerCase();
+      const primary = (ep.primary_display || '').toLowerCase();
+      const identifiedRaw = (ep.identified_teachers || '').toLowerCase();
+      const identifiedList = identifiedRaw ? identifiedRaw.split(',').map((s) => stripTeacherNote(s).toLowerCase()).filter(Boolean) : [];
+      const wordBoundaryRe = new RegExp(`\\b${escapeRegExp(tf)}\\b`, 'i');
+      const matchesTeacher =
+        primary === tf ||
+        identifiedList.includes(tf) ||
+        wordBoundaryRe.test(ep.primary_display || '') ||
+        wordBoundaryRe.test(ep.identified_teachers || '');
+      if (!matchesTeacher) return false;
+    }
   }
   if (year) {
-    const yStr = String(year);
-    if (!(ep.date || '').startsWith(yStr)) return false;
+    const yNum = Number(year);
+    const epYear = ep._year || (ep.year ? Number(ep.year) : (ep.date && /^\d{4}/.test(ep.date) ? Number(ep.date.slice(0, 4)) : 0));
+    if (epYear !== yNum) return false;
   }
   if (startDate && (ep.date || '') < startDate) return false;
   if (endDate && (ep.date || '') > endDate) return false;
@@ -1383,10 +1811,12 @@ async function handleSearchFTS({
               episode_id: r.episode_id,
               title: ep.title || r.episode_id,
               date: ep.date || '',
+              year: ep.year || 0,
               duration_sec: ep.duration_sec || 0,
               teacher_slug: ep.primary_teacher || '',
               teacher: ep.primary_display || '',
               identified_teachers: ep.identified_teachers || '',
+              teacher_slugs: ep.teacher_slugs || [],
               media_url: ep.media_url || '',
               permalink: ep.permalink || '',
               turn_index: r.turn_index,
