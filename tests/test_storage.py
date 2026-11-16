@@ -446,3 +446,72 @@ def test_search_fts_stopword_filtering_prevents_of_explosion(tmp_path: Path):
     assert any_meta["tier"] == "any_word"
     assert [r["episode_id"] for r in any_rows] == ["pb_exact"]
     assert "of" not in any_meta["effective_query"].lower().split()
+
+
+def test_exclude_episode_removes_from_transcripts_db_and_persists_in_pipeline_state(tmp_path: Path):
+    """Excluding an untranscribable episode purges dhamma_transcripts.db and survives re-indexing."""
+    db_path = tmp_path / "excl_transcripts.db"
+    pipe_path = tmp_path / "excl_pipeline.db"
+    arch_dir = tmp_path / "archive" / "2012" / "standalone"
+    arch_dir.mkdir(parents=True)
+    stem = "2012-09-06_group_chanting_track"
+    mp3_path = arch_dir / f"{stem}.mp3"
+    mp3_path.write_bytes(b"\xff\xfb\x90\x64" * 100)
+
+    tdb = TranscriptDatabase(db_path=db_path, pipeline_db_path=pipe_path)
+    tdb.save_episode(
+        episode_metadata={
+            "id": "pb_chant",
+            "title": "Group Chanting",
+            "upload_date": "20120906",
+            "primary_teacher": "ajahn_brahm",
+            "primary_display": "Ajahn Brahm",
+            "filepath": str(mp3_path),
+            "media_url": "https://example.com/chant.mp3",
+        },
+        attributed_segments=[],
+        duration_sec=713.6,
+        year="2012",
+        filename_stem=stem,
+    )
+    assert tdb.get_episode("pb_chant") is not None
+
+    removed = tdb.exclude_episode(
+        episode_id="pb_chant",
+        reason="no_transcribable_speech",
+        title="Group Chanting",
+        filepath=str(mp3_path),
+        year=2012,
+    )
+    assert removed == 1
+    assert tdb.get_episode("pb_chant") is None
+    assert tdb.has_episode("pb_chant") is False
+    assert tdb.has_episode(stem) is False
+    assert tdb.is_excluded("pb_chant") == "no_transcribable_speech"
+    assert tdb.is_excluded(stem) == "no_transcribable_speech"
+    assert len(tdb.pipeline_db.get_excluded_episodes()) == 1
+
+    # Re-indexing local audio must not erase exclusion or re-insert into episodes
+    tdb.index_archive_audio_files(archive_dir=tmp_path / "archive")
+    assert tdb.is_excluded("pb_chant") == "no_transcribable_speech"
+    assert tdb.get_episode("pb_chant") is None
+
+    # If later saved with valid speech segments, exclusion clears cleanly
+    tdb.save_episode(
+        episode_metadata={
+            "id": "pb_chant",
+            "title": "Group Chanting",
+            "upload_date": "20120906",
+            "primary_teacher": "ajahn_brahm",
+            "primary_display": "Ajahn Brahm",
+            "filepath": str(mp3_path),
+        },
+        attributed_segments=[
+            {"start": 0.0, "end": 5.0, "speaker": "ajahn_brahm", "speaker_display": "Ajahn Brahm", "text": "Namo Buddhaya."}
+        ],
+        duration_sec=713.6,
+        year="2012",
+        filename_stem=stem,
+    )
+    assert tdb.is_excluded("pb_chant") is None
+    assert tdb.has_episode("pb_chant") is True

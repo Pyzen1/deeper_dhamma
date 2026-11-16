@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Deeper Dhamma — BSWA Study Tool, Pali Lexicon & Audio Archive</title>
-  <meta name="description" content="Interactive study tool and online reference guide for 30+ years of English Theravada Buddhist teachings by Ajahn Brahm, Ajahn Brahmali, Bhante Sujato, and BSWA monastics. Features 6-tier FTS5 search, word-level audio sync, and a 2,447-term comparative Pali lexicon.">
+  <meta name="description" content="Interactive study tool and online reference guide for 30+ years of English Theravada Buddhist teachings by Ajahn Brahm, Ajahn Brahmali, Bhante Sujato, and BSWA monastics. Features 6-tier FTS5 search, word-level audio sync, and a 2,482-term comparative Pali lexicon.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://deeperdhamma.com/">
   <meta property="og:title" content="Deeper Dhamma — BSWA Study Tool, Pali Lexicon & Audio Archive">
-  <meta property="og:description" content="Search transcripts with sub-second word synchronization, stream 3,246 English monastic talks directly from Podbean, and compare 2,447 canonical Pali terms across four teachers.">
+  <meta property="og:description" content="Search transcripts with sub-second word synchronization, stream 2,971 transcribed English monastic talks directly from Podbean, and compare 2,482 canonical Pali terms across four teachers.">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Deeper Dhamma — BSWA Study Tool & Pali Reference Guide">
   <meta name="twitter:description" content="Interactive Theravada Buddhist transcript search, synchronized audio reader, and comparative Pali lexicon.">
@@ -64,6 +64,10 @@
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-about-btn" data-tab="about-view">
           <span class="nav-icon">ℹ️</span>
           <span class="nav-label">About</span>
+        </button>
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-notes-btn" data-tab="notes-view">
+          <span class="nav-icon">📋</span>
+          <span class="nav-label">Archive Notes</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-transcript-btn" data-tab="transcript-view" style="display: none;">
           <span class="nav-icon">📜</span>
@@ -266,7 +270,7 @@
         <!-- Initial Placeholder State -->
         <div class="empty-state" id="search-empty-state">
           <div class="empty-icon">🪷</div>
-          <h2>Search 3,246 English Theravada Teachings</h2>
+          <h2 id="search-empty-heading">Search 2,971 English Theravada Teachings</h2>
           <p>Instant zero-copy search across high-accuracy Whisper transcripts. Click any speech segment to stream directly from Podbean at that precise second.</p>
           <div class="example-chips" id="example-queries">
             <span>Try searching:</span>
@@ -298,13 +302,9 @@
         <div class="browse-header">
           <div class="browse-header-info">
             <h2>Archive Catalog</h2>
-            <p class="section-desc">Browse talks and retreats. All talks stream directly in the audio player; transcribed talks include word-synced text.</p>
+            <p class="section-desc">Browse all transcribed talks and retreats with word-synced transcripts and direct Podbean CDN audio streaming.</p>
           </div>
           <div class="browse-filter-bar">
-            <button type="button" id="browse-transcribed-only-btn" class="btn-toggle-transcribed active" aria-pressed="true" title="Show only talks with full synchronized transcripts (click to browse all 3,246 English audio talks)">
-              <span class="toggle-check-icon" id="browse-transcribed-icon">✓</span>
-              <span id="browse-transcribed-label">Transcribed Only</span>
-            </button>
             <select id="browse-teacher-filter-select" aria-label="Filter by Monastic Teacher">
               <option value="">All Monastics</option>
             </select>
@@ -537,9 +537,9 @@
               An open, interactive research portal and study companion bridging 30+ years of oral Buddhist teachings with sub-second word-level audio synchronization, 6-tier FTS5 search, and canonical Pali lexicon references.
             </p>
             <div class="about-hero-chips">
-              <span class="about-chip"><span class="chip-icon">🪷</span> 3,246 English Monastic Talks</span>
+              <span class="about-chip" id="about-talks-chip"><span class="chip-icon">🪷</span> 2,971 English Monastic Talks</span>
               <span class="about-chip"><span class="chip-icon">⏱️</span> 1994 – Present Audio Heritage</span>
-              <span class="about-chip"><span class="chip-icon">📖</span> 2,447 Pali Lexicon Terms</span>
+              <span class="about-chip"><span class="chip-icon">📖</span> 2,482 Pali Lexicon Terms</span>
               <span class="about-chip"><span class="chip-icon">⚡</span> Sub-5ms Client-Side Search</span>
               <span class="about-chip"><span class="chip-icon">🔒</span> Privacy-Focused (Anonymous Diagnostics Only)</span>
             </div>
@@ -562,11 +562,16 @@
                 Historically recorded onto analog cassettes, digital mini-discs, and MP3 files—and later distributed via the <em>Deeper Dhamma</em> podcast feed on Podbean—these teachings represent an irreplaceable treasure of practical meditation instruction, sutta analysis, and compassionate monastic wisdom.
               </p>
               <p>
-                <strong>Curated English Archive:</strong> The Deeper Dhamma collection indexes <strong>3,246 English-language monastic recordings</strong> spanning over thirty years. Non-English talks (such as Sinhala, Thai, Chinese, and Vietnamese translations) and duplicate defunct feeds have been excluded to guarantee that search indexes, transcripts, and word alignments remain 100% focused on English oral Dhamma teachings.
+                <strong>Curated English Archive:</strong> The Deeper Dhamma library indexes and transcribes <strong>2,971 unique English-language monastic talks</strong> spanning over thirty years (1994–2026). Non-English translations, untranscribable non-speech recordings (such as unison chanting), duplicate Podbean feed re-uploads, and defunct CDN links have been excluded so search indexes, transcripts, and word alignments stay focused on unique transcribable English oral Dhamma teachings.
               </p>
               <p>
                 <strong>The Deeper Dhamma Solution:</strong> This platform transforms the entire audio archive into an instant, searchable, studyable knowledge base. Audio streams 1:1 bit-for-bit from official Podbean servers, while every spoken word is mapped in real time to high-precision transcripts, canonical dictionaries, and authoritative source texts.
               </p>
+              <div class="notes-inline-link-row">
+                <button type="button" class="btn-secondary" id="btn-about-archive-notes" title="Inspect full catalog reconciliation, pipeline methodology, and build details">
+                  📋 Read Archive &amp; Transcription Notes →
+                </button>
+              </div>
             </div>
           </section>
 
@@ -684,7 +689,7 @@
                 <div class="feature-card-icon">📖</div>
                 <h4 class="feature-card-title">Live Pali Lexicon Companion</h4>
                 <p class="feature-card-text">
-                  A curated database of 2,447+ canonical Pali terms and doctrinal definitions. During audio playback, a real-time rolling companion window tracks spoken concepts and displays definitions, etymology, and Sutta citations alongside the transcript.
+                  A curated database of 2,482 canonical Pali terms and doctrinal definitions. During audio playback, a real-time rolling companion window tracks spoken concepts and displays definitions, etymology, and Sutta citations alongside the transcript.
                 </p>
                 <div class="feature-card-meta">
                   <span class="meta-tag">Bodhi &amp; Sujato Concordance</span>
@@ -931,6 +936,301 @@
                   <span class="diag-label">Audio CDN</span>
                   <span class="diag-val">Podbean Streaming CDN (1:1 Bitstream)</span>
                 </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- Archive Notes View -->
+      <div class="view-panel" id="notes-view">
+        <div class="about-container">
+          <!-- Hero Header -->
+          <div class="about-hero">
+            <div class="about-hero-badge">📋 How the Archive Is Built</div>
+            <h2 class="about-hero-title">Archive Notes</h2>
+            <p class="about-hero-lead">
+              A plain-language guide to how the BSWA Deeper Dhamma audio collection is organized, deduplicated, transcribed, and prepared for study.
+            </p>
+            <div class="about-hero-chips">
+              <span class="about-chip"><span class="chip-icon">📡</span> 3,323 Podcast Feed Entries</span>
+              <span class="about-chip" id="notes-chip-transcribed"><span class="chip-icon">✓</span> 2,971 Unique Transcribed Talks</span>
+              <span class="about-chip" id="notes-chip-hours"><span class="chip-icon">⏱️</span> 3,352.6 Audio Hours</span>
+              <span class="about-chip" id="notes-chip-segments"><span class="chip-icon">💬</span> 177,279 Spoken Turns</span>
+              <span class="about-chip"><span class="chip-icon">💾</span> 100% of Transcribable Talks Indexed</span>
+            </div>
+          </div>
+
+          <!-- Section 1: Catalog Reconciliation -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">🗂️</span>
+              <div>
+                <h3 class="about-section-title">Why There Are 2,971 Talks Out of 3,323 Podcast Entries</h3>
+                <p class="about-section-subtitle">How the full podcast history reconciles down to every unique transcribable English talk</p>
+              </div>
+            </div>
+            <div class="about-card about-prose-card">
+              <p>
+                Every transcribable English talk preserved in the local audio archive (<strong>2,971 out of 2,971 talks</strong>, spanning 1994–2026) has been transcribed. The difference between the <strong>3,323</strong> total entries on the BSWA Podbean podcast feed and the <strong>2,971</strong> searchable talks comes from non-English retreats, one unavailable recording, duplicate podcast posts, and untranscribable chanting tracks:
+              </p>
+              <div class="notes-diagram-card">
+                <svg class="notes-diagram-svg" viewBox="0 0 900 560" role="img" aria-label="Catalog reconciliation diagram from 3,323 Podbean feed entries to 2,971 transcribed talks" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="notesStageGrad" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stop-color="#172238" />
+                      <stop offset="100%" stop-color="#11192b" />
+                    </linearGradient>
+                    <linearGradient id="notesFinalGrad" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stop-color="#112826" />
+                      <stop offset="100%" stop-color="#0f1c29" />
+                    </linearGradient>
+                    <linearGradient id="notesBranchGrad" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stop-color="#161f33" />
+                      <stop offset="100%" stop-color="#111827" />
+                    </linearGradient>
+                  </defs>
+
+                  <!-- Stage 1: Raw Catalog -->
+                  <rect x="20" y="18" width="452" height="72" rx="12" fill="url(#notesStageGrad)" stroke="rgba(148,163,184,0.28)" stroke-width="1.2" />
+                  <text x="40" y="44" fill="#f8fafc" font-size="14.5" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">BSWA Podbean Podcast Feed</text>
+                  <text x="40" y="66" fill="#94a3b8" font-size="12" font-family="Plus Jakarta Sans, system-ui, sans-serif">All published episodes on the feed</text>
+                  <rect x="374" y="37" width="82" height="34" rx="17" fill="rgba(245,158,11,0.14)" stroke="rgba(245,158,11,0.45)" stroke-width="1.2" />
+                  <text x="415" y="54" text-anchor="middle" dominant-baseline="central" fill="#fbbf24" font-size="14.5" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">3,323</text>
+
+                  <!-- Connector 1 + Exclusion 1 (-72) -->
+                  <line x1="246" y1="90" x2="246" y2="141" stroke="#f59e0b" stroke-width="2" />
+                  <polygon points="240,139 252,139 246,149" fill="#f59e0b" />
+                  <line x1="246" y1="120" x2="516" y2="120" stroke="rgba(148,163,184,0.55)" stroke-width="1.5" stroke-dasharray="4 3" />
+                  <polygon points="514,115.5 523,120 514,124.5" fill="#94a3b8" />
+                  <circle cx="246" cy="120" r="3.5" fill="#f59e0b" />
+                  <rect x="524" y="92" width="356" height="56" rx="10" fill="url(#notesBranchGrad)" stroke="rgba(244,63,94,0.34)" stroke-width="1.1" />
+                  <rect x="538" y="107" width="46" height="26" rx="6" fill="rgba(244,63,94,0.15)" stroke="rgba(244,63,94,0.4)" stroke-width="1" />
+                  <text x="561" y="120" text-anchor="middle" dominant-baseline="central" fill="#fda4af" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">-72</text>
+                  <text x="596" y="114" fill="#f8fafc" font-size="12.5" font-weight="600" font-family="Plus Jakarta Sans, system-ui, sans-serif">Non-English Talks Excluded</text>
+                  <text x="596" y="133" fill="#94a3b8" font-size="11.2" font-family="Plus Jakarta Sans, system-ui, sans-serif">13 Thai retreats · 59 Sinhalese translations</text>
+
+                  <!-- Stage 2: English In-Scope -->
+                  <rect x="20" y="150" width="452" height="72" rx="12" fill="url(#notesStageGrad)" stroke="rgba(148,163,184,0.28)" stroke-width="1.2" />
+                  <text x="40" y="176" fill="#f8fafc" font-size="14.5" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">English Talks in Scope</text>
+                  <text x="40" y="198" fill="#94a3b8" font-size="12" font-family="Plus Jakarta Sans, system-ui, sans-serif">Focused on English-language teachings</text>
+                  <rect x="374" y="169" width="82" height="34" rx="17" fill="rgba(245,158,11,0.14)" stroke="rgba(245,158,11,0.45)" stroke-width="1.2" />
+                  <text x="415" y="186" text-anchor="middle" dominant-baseline="central" fill="#fbbf24" font-size="14.5" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">3,251</text>
+
+                  <!-- Connector 2 + Exclusion 2 (-1) -->
+                  <line x1="246" y1="222" x2="246" y2="273" stroke="#f59e0b" stroke-width="2" />
+                  <polygon points="240,271 252,271 246,281" fill="#f59e0b" />
+                  <line x1="246" y1="252" x2="516" y2="252" stroke="rgba(148,163,184,0.55)" stroke-width="1.5" stroke-dasharray="4 3" />
+                  <polygon points="514,247.5 523,252 514,256.5" fill="#94a3b8" />
+                  <circle cx="246" cy="252" r="3.5" fill="#f59e0b" />
+                  <rect x="524" y="224" width="356" height="56" rx="10" fill="url(#notesBranchGrad)" stroke="rgba(244,63,94,0.34)" stroke-width="1.1" />
+                  <rect x="538" y="239" width="46" height="26" rx="6" fill="rgba(244,63,94,0.15)" stroke="rgba(244,63,94,0.4)" stroke-width="1" />
+                  <text x="561" y="252" text-anchor="middle" dominant-baseline="central" fill="#fda4af" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">-1</text>
+                  <text x="596" y="246" fill="#f8fafc" font-size="12.5" font-weight="600" font-family="Plus Jakarta Sans, system-ui, sans-serif">Removed from Podcast Host</text>
+                  <text x="596" y="265" fill="#94a3b8" font-size="11.2" font-family="Plus Jakarta Sans, system-ui, sans-serif">2016 March Weekend Retreat (audio unavailable)</text>
+
+                  <!-- Stage 3: Indexed Episodes -->
+                  <rect x="20" y="282" width="452" height="72" rx="12" fill="url(#notesStageGrad)" stroke="rgba(148,163,184,0.28)" stroke-width="1.2" />
+                  <text x="40" y="308" fill="#f8fafc" font-size="14.5" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">Active English Feed Entries</text>
+                  <text x="40" y="330" fill="#94a3b8" font-size="12" font-family="Plus Jakarta Sans, system-ui, sans-serif">Playable listings on the podcast catalog</text>
+                  <rect x="374" y="301" width="82" height="34" rx="17" fill="rgba(245,158,11,0.14)" stroke="rgba(245,158,11,0.45)" stroke-width="1.2" />
+                  <text x="415" y="318" text-anchor="middle" dominant-baseline="central" fill="#fbbf24" font-size="14.5" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">3,250</text>
+
+                  <!-- Connector 3 + Exclusion 3 (-279) -->
+                  <line x1="246" y1="354" x2="246" y2="427" stroke="#f59e0b" stroke-width="2" />
+                  <polygon points="240,425 252,425 246,435" fill="#f59e0b" />
+                  <line x1="246" y1="395" x2="516" y2="395" stroke="rgba(148,163,184,0.55)" stroke-width="1.5" stroke-dasharray="4 3" />
+                  <polygon points="514,390.5 523,395 514,399.5" fill="#94a3b8" />
+                  <circle cx="246" cy="395" r="3.5" fill="#f59e0b" />
+                  <rect x="524" y="322" width="356" height="136" rx="10" fill="url(#notesBranchGrad)" stroke="rgba(245,158,11,0.34)" stroke-width="1.1" />
+                  <rect x="538" y="334" width="50" height="26" rx="6" fill="rgba(245,158,11,0.16)" stroke="rgba(245,158,11,0.42)" stroke-width="1" />
+                  <text x="563" y="347" text-anchor="middle" dominant-baseline="central" fill="#fbbf24" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">-279</text>
+                  <text x="598" y="347" dominant-baseline="central" fill="#f8fafc" font-size="12.5" font-weight="600" font-family="Plus Jakarta Sans, system-ui, sans-serif">Duplicates &amp; Excluded Chanting</text>
+                  <text x="540" y="378" fill="#cbd5e1" font-size="11.5" font-family="Plus Jakarta Sans, system-ui, sans-serif">• 272 duplicate links to the exact same audio</text>
+                  <text x="540" y="398" fill="#cbd5e1" font-size="11.5" font-family="Plus Jakarta Sans, system-ui, sans-serif">• 4 re-uploaded copies of transcribed talks</text>
+                  <text x="540" y="418" fill="#cbd5e1" font-size="11.5" font-family="Plus Jakarta Sans, system-ui, sans-serif">• 2 chanting tracks not in the archive</text>
+                  <text x="540" y="438" fill="#cbd5e1" font-size="11.5" font-family="Plus Jakarta Sans, system-ui, sans-serif">• 1 group chanting track (no spoken segments)</text>
+
+                  <!-- Stage 4: Canonical Transcribed Library -->
+                  <rect x="20" y="436" width="452" height="106" rx="14" fill="url(#notesFinalGrad)" stroke="#10b981" stroke-width="1.6" />
+                  <text x="40" y="463" fill="#f8fafc" font-size="15" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">Complete Transcribed Library</text>
+                  <text x="40" y="484" fill="#cbd5e1" font-size="12" font-family="Plus Jakarta Sans, system-ui, sans-serif">100% of transcribable talks indexed (1994–2026)</text>
+                  <rect x="374" y="451" width="82" height="34" rx="17" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1.3" />
+                  <text id="notes-svg-transcribed" x="415" y="468" text-anchor="middle" dominant-baseline="central" fill="#34d399" font-size="15" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">2,971</text>
+
+                  <!-- Summary Strip inside Stage 4 -->
+                  <rect x="40" y="499" width="416" height="29" rx="8" fill="rgba(16,185,129,0.1)" stroke="rgba(16,185,129,0.3)" stroke-width="1" />
+                  <text x="248" y="513.5" text-anchor="middle" dominant-baseline="central" fill="#34d399" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">177,279 Spoken Turns · Word-Synced Playback · 3,352.6 hrs</text>
+                </svg>
+              </div>
+
+              <div class="notes-table-wrap">
+                <table class="notes-table">
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th>Count</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>Transcribed Talks</strong></td>
+                      <td class="notes-count-cell" id="notes-tbl-transcribed">2,971</td>
+                      <td>Every unique transcribable English audio recording preserved in the library—each with indexed spoken turns and word-by-word playback highlighting.</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Duplicate Podcast Links</strong></td>
+                      <td class="notes-count-cell">272</td>
+                      <td>Talks re-posted on Podbean pointing to the exact same audio file as an already-transcribed talk (often with slightly different title punctuation or a newer upload date). Each unique recording is transcribed once.</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Re-Uploaded Copies</strong></td>
+                      <td class="notes-count-cell">3</td>
+                      <td>Identical talks uploaded twice as separate audio files whose recordings are already transcribed in the library: <em>MN121 Cūḷasuññata Sutta</em> (14 Mar 2010), <em>AN8.29 Akkhaṇa Sutta</em> (9 Jun 2013), and <em>MN44 Cūḷavedalla Sutta</em> (11 Apr 2010).</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Duplicate Feed Listing</strong></td>
+                      <td class="notes-count-cell">1</td>
+                      <td>A duplicate listing for <em>12 - Insights | by Ajahn Brahmavamso</em> (5 Oct 2015), whose audio recording is already transcribed.</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Excluded Group Chanting</strong></td>
+                      <td class="notes-count-cell">1</td>
+                      <td><em>2012 April | 9 Day Retreat - 20</em> (11m 54s) is a group chanting recording where automated speech detection finds no spoken segments. Recordings without transcribable speech are automatically excluded from the transcripts library during processing.</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Missing Chanting Tracks</strong></td>
+                      <td class="notes-count-cell">2</td>
+                      <td>Two chanting recordings (<em>2012 January Retreat - 18 Metta Chanting</em> and <em>2009 November Retreat - Chanting</em>) appear in historical feed records but are not present in the local audio archive.</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Removed by Podcast Host</strong></td>
+                      <td class="notes-count-cell">1</td>
+                      <td><em>2016 March | 02. Weekend Meditation Retreat | Ajahn Brahmali</em> is no longer hosted on the podcast server and cannot be downloaded or streamed.</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Non-English Recordings</strong></td>
+                      <td class="notes-count-cell">72</td>
+                      <td>13 Thai-language retreat recordings (2021 &amp; 2026) and 59 Sinhalese-translated Sangha Retreat recordings (2017) excluded so English full-text search and Pali definitions stay focused and accurate.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 2: How Audio Recordings Are Preserved -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">🎧</span>
+              <div>
+                <h3 class="about-section-title">How Audio Recordings Are Preserved</h3>
+                <p class="about-section-subtitle">Keeping original sound quality intact and ensuring playback jumps stay accurate everywhere</p>
+              </div>
+            </div>
+            <div class="about-arch-grid">
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Original Audio</span>
+                  <h4 class="arch-title">Unmodified Recordings</h4>
+                </div>
+                <p class="arch-desc">
+                  Every recording is kept in its original format directly from Podbean without re-encoding, editing, or altering audio tags. Because the audio streamed in your browser matches the exact recording used for transcription, timestamps stay locked in sync.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ Verified byte-for-byte against the podcast host</li>
+                  <li>✓ No quality loss from re-conversion</li>
+                  <li>✓ Works across all standard MP3 and M4A recordings</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Historical Dates</span>
+                  <h4 class="arch-title">True Recording Eras (1994–2026)</h4>
+                </div>
+                <p class="arch-desc">
+                  Hundreds of older cassette and mini-disc talks from the 1990s and 2000s were uploaded to Podbean years later. Titles and dates are read carefully so talks appear under the year and era they were actually recorded rather than when they were uploaded online.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ <strong>1997–2003:</strong> Analog cassette &amp; early tape transfers</li>
+                  <li>✓ <strong>2004–2014:</strong> Early digital &amp; mini-disc recordings</li>
+                  <li>✓ <strong>2015–2026:</strong> Modern high-definition sanctuary audio</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Playback Sync</span>
+                  <h4 class="arch-title">Accurate Seeking Across Browsers</h4>
+                </div>
+                <p class="arch-desc">
+                  Some older variable-bitrate MP3 files can jump slightly early or late depending on which web browser plays them. Each talk is calibrated beforehand so clicking a word or sentence jumps to the exact spoken moment in Chrome, Firefox, and Safari.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ Consistent jump timing across desktop &amp; mobile browsers</li>
+                  <li>✓ Instant word-by-word highlighting during playback</li>
+                  <li>✓ Streams directly from Podbean with no audio edits</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <!-- Section 3: How Transcripts & Speakers Are Prepared -->
+          <section class="about-section">
+            <div class="about-section-header">
+              <span class="about-section-icon">⚙️</span>
+              <div>
+                <h3 class="about-section-title">How Transcripts &amp; Speakers Are Prepared</h3>
+                <p class="about-section-subtitle">Prioritizing accuracy, quiet speech capture, speaker recognition, and consistent Pali spelling</p>
+              </div>
+            </div>
+            <div class="about-arch-grid">
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Accuracy First</span>
+                  <h4 class="arch-title">Careful Speech-to-Text</h4>
+                </div>
+                <p class="arch-desc">
+                  Talks are transcribed one at a time in full precision rather than cutting corners for raw speed. Speech detection is tuned to keep quiet monastic remarks, gentle laughter, and thoughtful pauses intact, while recordings with no transcribable speech (such as unison chanting) are automatically excluded from the transcripts library during processing.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ Designed for completeness over batch speed</li>
+                  <li>✓ Captures quiet Q&amp;A questions and gentle pauses</li>
+                  <li>✓ Automatically excludes non-speech tracks during processing</li>
+                  <li>✓ Guided by Buddhist &amp; Pali vocabulary for each teacher</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Speaker Labels</span>
+                  <h4 class="arch-title">Recognizing Monastic Teachers</h4>
+                </div>
+                <p class="arch-desc">
+                  Voice recognition compares spoken sections against reference voice samples from 38 monastic teachers across different decades, separating main teachers from retreat hosts and audience questions without sudden false speaker switches.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ Accounts for voice changes across decades of recordings</li>
+                  <li>✓ Separates talks, announcements, and Q&amp;A exchanges</li>
+                  <li>✓ Splits speaker turns at natural pauses in conversation</li>
+                </ul>
+              </div>
+
+              <div class="about-card arch-card">
+                <div class="arch-card-header">
+                  <span class="arch-badge">Preserved Baselines</span>
+                  <h4 class="arch-title">Cleanup &amp; Pali Spelling</h4>
+                </div>
+                <p class="arch-desc">
+                  The raw speech segments are preserved during build and processing, so spelling and formatting improvements can always be re-applied safely without re-transcribing audio. Pali terms and sutta names are standardized against canonical references while keeping every word synced to audio.
+                </p>
+                <ul class="arch-checklist">
+                  <li>✓ Raw segments preserved for non-destructive updates</li>
+                  <li>✓ Cleans repeated speech stumbles &amp; splits compound words</li>
+                  <li>✓ Context-checked Pali spelling matched to 2,482 glossary terms</li>
+                </ul>
               </div>
             </div>
           </section>

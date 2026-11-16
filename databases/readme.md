@@ -100,7 +100,7 @@ While consolidating these files under a single `databases/` folder makes discove
 * **Status:** Ignored by Git (local operational state, never exported to `dist/`)
 * **Python Interface:** `deeper_dhamma.storage.PipelineStateDatabase`
 * **Key Tables:**
-  * `episode_states`: Tracks local archive file paths (`filepath`) and operational download/audit/transcription error states (`last_error`, `last_error_at`, `last_error_op`) keyed by surrogate primary key `id INTEGER PRIMARY KEY AUTOINCREMENT` and `episode_uid TEXT UNIQUE NOT NULL`. Decoupling local operational state from `dhamma_transcripts.db` ensures the domain database is always clean and ready for static web publication without post-hoc scrubbing.
+  * `episode_states`: Tracks local archive file paths (`filepath`), exclusion flags for untranscribable audio (`is_excluded`, `exclusion_reason`), and operational download/audit/transcription error states (`last_error`, `last_error_at`, `last_error_op`) keyed by surrogate primary key `id INTEGER PRIMARY KEY AUTOINCREMENT` and `episode_uid TEXT UNIQUE NOT NULL`. Decoupling local operational state from `dhamma_transcripts.db` ensures the domain database contains only genuinely transcribed talks and is always ready for static web publication without post-hoc scrubbing.
 
 ---
 

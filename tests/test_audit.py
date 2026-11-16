@@ -182,3 +182,25 @@ def test_audit_database_transcripts_tracks_and_clears_word_sync_mismatch(tmp_pat
     assert stats2["cleared"] == 1
     assert tdb.get_error("pb12345") is None
     assert tdb.get_error_history_counts()["cleared"] == 1
+
+
+def test_audit_database_transcripts_flags_untranscribable_zero_token_episode(tmp_path: Path):
+    """DB audit should flag stale is_transcribed=1 episodes that have 0 speech tokens."""
+    db_path = tmp_path / "audit_zero.db"
+    pipe_path = tmp_path / "audit_zero_pipe.db"
+    tdb = TranscriptDatabase(db_path=db_path, pipeline_db_path=pipe_path)
+    tdb.save_episode(
+        episode_metadata={"id": "pb_zero", "title": "Chanting Zero"},
+        attributed_segments=[],
+        duration_sec=600.0,
+        year="2012",
+        filename_stem="chanting_zero",
+    )
+    issues, checked = audit_database_transcripts(
+        db_path=db_path,
+        archive_dir=tmp_path,
+        check_durations=False,
+        pipeline_db_path=pipe_path,
+    )
+    assert "pb_zero" in checked
+    assert any(i["issue"] == "untranscribable_no_speech" and i["episode_id"] == "pb_zero" for i in issues)

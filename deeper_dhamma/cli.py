@@ -192,11 +192,19 @@ def cmd_transcribe(args):
         print("[-] No audio files matched the filter.")
         return
 
-    # Filter already transcribed files unless force_run
+    # Filter already transcribed or excluded files unless force_run
     to_process = []
+    skipped_transcribed = 0
+    skipped_excluded = 0
     for f in files:
-        if tdb.has_episode(f.stem) and not force_run:
-            continue
+        if not force_run:
+            if tdb.has_episode(f.stem):
+                skipped_transcribed += 1
+                continue
+            excl_reason = tdb.is_excluded(f.stem)
+            if excl_reason is True or (isinstance(excl_reason, str) and bool(excl_reason)):
+                skipped_excluded += 1
+                continue
         to_process.append(f)
 
     if args.limit:
@@ -209,7 +217,12 @@ def cmd_transcribe(args):
     if is_explicit_id:
         print(f"[*] Targeted episode mode: Re-transcribing {len(to_process)} specified episode(s)")
     else:
-        print(f"[*] Pending processing: {len(to_process)} (skipping {len(files) - len(to_process)} existing)")
+        skip_detail = (
+            f"{skipped_transcribed} transcribed, {skipped_excluded} excluded"
+            if skipped_excluded
+            else f"{len(files) - len(to_process)} existing"
+        )
+        print(f"[*] Pending processing: {len(to_process)} (skipping {skip_detail})")
     if args.max_duration:
         print(f"[*] Testing mode active: duration capped at {args.max_duration:.1f}s per file.")
     print("-" * 75)
@@ -226,6 +239,7 @@ def cmd_transcribe(args):
     )
 
     completed = 0
+    excluded = 0
     failed = 0
     show_progress = not getattr(args, "no_progress", False)
 
@@ -268,6 +282,7 @@ def cmd_transcribe(args):
                         audio_path=f,
                         max_duration_sec=args.max_duration,
                         retry_errors=effective_retry_errors,
+                        force=force_run,
                         show_progress=show_progress,
                         prefetched=current_prefetched,
                         on_gpu_asr_start=_trigger_next_prefetch,
@@ -277,10 +292,15 @@ def cmd_transcribe(args):
                         audio_path=f,
                         max_duration_sec=args.max_duration,
                         retry_errors=effective_retry_errors,
+                        force=force_run,
                         show_progress=show_progress,
                     )
                 if result.get("status") == "skipped":
                     print(f"    [-] Skipped by pre-flight check: {result.get('reason')}")
+                    _trigger_next_prefetch()
+                elif result.get("status") == "excluded":
+                    excluded += 1
+                    print(f"    [-] Excluded from transcripts DB ({result.get('reason')}): {result['episode_id']}")
                     _trigger_next_prefetch()
                 else:
                     completed += 1
@@ -298,10 +318,10 @@ def cmd_transcribe(args):
             prefetch_executor.shutdown(wait=False, cancel_futures=True)
 
     print("\n" + "=" * 75)
-    print(f"[✓] Batch transcription complete: {completed} successful, {failed} failed.")
+    print(f"[✓] Batch transcription complete: {completed} successful, {excluded} excluded, {failed} failed.")
     print("=" * 75)
 
-    if completed > 0:
+    if completed > 0 or excluded > 0:
         try:
             from deeper_dhamma.export_web import export_static_site
             print("\n[*] Updating static distribution and dhamma_web.db...")

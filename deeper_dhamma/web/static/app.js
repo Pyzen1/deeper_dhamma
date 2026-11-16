@@ -22,7 +22,6 @@
     teachers: {},
     catalog: [],
     browse: {
-      transcribedOnly: true,
       offset: 0,
       limit: 60,
       total: 0,
@@ -158,6 +157,7 @@
     queryMetaText: document.getElementById('query-meta-text'),
     queryTierBadge: document.getElementById('query-tier-badge'),
     searchEmptyState: document.getElementById('search-empty-state'),
+    searchEmptyHeading: document.getElementById('search-empty-heading'),
     searchResultsList: document.getElementById('search-results-list'),
     searchPagination: document.getElementById('search-pagination'),
     btnSearchFirst: document.getElementById('btn-search-first'),
@@ -169,9 +169,6 @@
 
     // Browse Content
     browseGrid: document.getElementById('browse-episodes-grid'),
-    browseTranscribedBtn: document.getElementById('browse-transcribed-only-btn'),
-    browseTranscribedIcon: document.getElementById('browse-transcribed-icon'),
-    browseTranscribedLabel: document.getElementById('browse-transcribed-label'),
     browseLoadMoreWrap: document.getElementById('browse-load-more-wrap'),
     btnBrowseLoadMore: document.getElementById('btn-browse-load-more'),
 
@@ -213,8 +210,19 @@
     // About View Elements
     tabAboutBtn: document.getElementById('tab-about-btn'),
     aboutView: document.getElementById('about-view'),
+    aboutTalksChip: document.getElementById('about-talks-chip'),
+    btnAboutArchiveNotes: document.getElementById('btn-about-archive-notes'),
     aboutAppVersion: document.getElementById('about-app-version'),
     btnAboutResetCache: document.getElementById('btn-about-reset-cache'),
+
+    // Archive Notes View Elements
+    tabNotesBtn: document.getElementById('tab-notes-btn'),
+    notesView: document.getElementById('notes-view'),
+    notesChipTranscribed: document.getElementById('notes-chip-transcribed'),
+    notesChipHours: document.getElementById('notes-chip-hours'),
+    notesChipSegments: document.getElementById('notes-chip-segments'),
+    notesTblTranscribed: document.getElementById('notes-tbl-transcribed'),
+    notesSvgTranscribed: document.getElementById('notes-svg-transcribed'),
 
     // Transcript View Elements
     transcriptBackBtn: document.getElementById('transcript-back-btn'),
@@ -817,7 +825,7 @@
           id = segments[talkIdx + 1].trim();
         } else if (segments.length > 0) {
           const last = segments[segments.length - 1];
-          if (['browse', 'lexicon', 'documents', 'search', 'bookmarks', 'about'].includes(last)) {
+          if (['browse', 'lexicon', 'documents', 'search', 'bookmarks', 'about', 'notes'].includes(last)) {
             route = last;
           }
         }
@@ -836,7 +844,7 @@
         if (cleanPath.startsWith('talk/')) {
           route = 'talk';
           id = cleanPath.replace('talk/', '').trim();
-        } else if (['browse', 'lexicon', 'documents', 'search', 'bookmarks', 'about'].includes(cleanPath)) {
+        } else if (['browse', 'lexicon', 'documents', 'search', 'bookmarks', 'about', 'notes'].includes(cleanPath)) {
           route = cleanPath;
         } else if (cleanPath) {
           route = cleanPath;
@@ -918,6 +926,10 @@
 
         case 'about':
           switchTab('about-view', { skipHistory: true });
+          break;
+
+        case 'notes':
+          switchTab('notes-view', { skipHistory: true });
           break;
 
         case 'search':
@@ -1058,9 +1070,34 @@
         state.teachers = data.teacher_map;
       }
 
+      const transcribedCount = Number(data.transcribed_episodes || 0);
+      const transcribedFormatted = transcribedCount.toLocaleString();
+      const transcribedHoursFormatted = Number(data.transcribed_hours || 0).toLocaleString();
+      const totalSegmentsFormatted = Number(data.total_segments || 0).toLocaleString();
+
       if (els.statEpisodes) {
-        const totalTalks = (data.total_episodes || 0).toLocaleString();
-        els.statEpisodes.textContent = `${data.transcribed_episodes} transcribed (${data.transcribed_hours} hrs) • ${totalTalks} audio talks`;
+        els.statEpisodes.textContent = `${transcribedFormatted} transcribed talks (${transcribedHoursFormatted} hrs)`;
+      }
+      if (els.searchEmptyHeading && transcribedCount > 0) {
+        els.searchEmptyHeading.textContent = `Search ${transcribedFormatted} English Theravada Teachings`;
+      }
+      if (els.aboutTalksChip && transcribedCount > 0) {
+        els.aboutTalksChip.innerHTML = `<span class="chip-icon">🪷</span> ${transcribedFormatted} English Monastic Talks`;
+      }
+      if (els.notesChipTranscribed && transcribedCount > 0) {
+        els.notesChipTranscribed.innerHTML = `<span class="chip-icon">✓</span> ${transcribedFormatted} Unique Transcribed Talks`;
+      }
+      if (els.notesChipHours && data.transcribed_hours) {
+        els.notesChipHours.innerHTML = `<span class="chip-icon">⏱️</span> ${transcribedHoursFormatted} Audio Hours`;
+      }
+      if (els.notesChipSegments && data.total_segments) {
+        els.notesChipSegments.innerHTML = `<span class="chip-icon">💬</span> ${totalSegmentsFormatted} Spoken Turns`;
+      }
+      if (els.notesTblTranscribed && transcribedCount > 0) {
+        els.notesTblTranscribed.textContent = transcribedFormatted;
+      }
+      if (els.notesSvgTranscribed && transcribedCount > 0) {
+        els.notesSvgTranscribed.textContent = transcribedFormatted;
       }
 
       // Populate filter dropdowns
@@ -1090,7 +1127,7 @@
         });
       }
 
-      const browseYears = (data.all_years && data.all_years.length > 0) ? data.all_years : (data.years || []);
+      const browseYears = data.years || [];
       if (browseYears.length > 0 && els.browseYearFilter) {
         browseYears.forEach(y => {
           const opt2 = document.createElement('option');
@@ -1849,12 +1886,6 @@
 
     setupDownloadDropdowns();
 
-    if (els.browseTranscribedBtn) {
-      els.browseTranscribedBtn.addEventListener('click', () => {
-        setBrowseTranscribedOnly(!state.browse.transcribedOnly);
-      });
-    }
-
     if (els.browseTeacherFilter) {
       els.browseTeacherFilter.addEventListener('change', () => {
         loadBrowseCatalog({ append: false });
@@ -1899,6 +1930,12 @@
     }
     if (els.tabAboutBtn) {
       els.tabAboutBtn.addEventListener('click', () => switchTab('about-view'));
+    }
+    if (els.tabNotesBtn) {
+      els.tabNotesBtn.addEventListener('click', () => switchTab('notes-view'));
+    }
+    if (els.btnAboutArchiveNotes) {
+      els.btnAboutArchiveNotes.addEventListener('click', () => switchTab('notes-view'));
     }
     if (els.tabTranscriptBtn) {
       els.tabTranscriptBtn.addEventListener('click', () => switchTab('transcript-view'));
@@ -2499,6 +2536,7 @@
         'lexicon-view': state.lexicon.term ? `lexicon?term=${encodeURIComponent(state.lexicon.term)}` : 'lexicon',
         'documents-view': docRoute,
         'about-view': 'about',
+        'notes-view': 'notes',
         'transcript-view': state.currentEpisode ? `talk/${state.currentEpisode.id}` : 'search',
       };
       const targetRoute = tabToRouteMap[viewId];
@@ -3381,18 +3419,6 @@
   // Browse Catalog View
   // ==========================================================================
 
-  function setBrowseTranscribedOnly(enabled) {
-    state.browse.transcribedOnly = Boolean(enabled);
-    if (els.browseTranscribedBtn) {
-      els.browseTranscribedBtn.classList.toggle('active', state.browse.transcribedOnly);
-      els.browseTranscribedBtn.setAttribute('aria-pressed', state.browse.transcribedOnly ? 'true' : 'false');
-    }
-    if (els.browseTranscribedIcon) {
-      els.browseTranscribedIcon.textContent = state.browse.transcribedOnly ? '✓' : '○';
-    }
-    loadBrowseCatalog({ append: false });
-  }
-
   function renderBrowseEpisodeCardHtml(ep) {
     const isTranscribed = Boolean(ep.is_transcribed);
     const durMin = Math.round((ep.duration_sec || 0) / 60);
@@ -3407,10 +3433,6 @@
             ${renderTeacherBadgesHtml(ep)}
             <span>📅 ${escapeHtml(ep.date || '')}</span>
             ${durMin > 0 ? `<span>• ⏱️ ${durMin} mins</span>` : ''}
-            ${isTranscribed
-              ? '<span class="status-pill transcribed-pill" title="Full synchronized transcript available">✓ Transcribed</span>'
-              : '<span class="status-pill audio-only-pill" title="Stream audio directly from Podbean CDN">🎧 Audio</span>'
-            }
           </div>
           <h3 class="episode-title">${escapeHtml(ep.title)}</h3>
         </div>
@@ -3489,7 +3511,7 @@
     const teacherVal = (els.browseTeacherFilter && els.browseTeacherFilter.value) || '';
     const yearVal = (els.browseYearFilter && els.browseYearFilter.value) || '';
     const opts = {
-      transcribedOnly: Boolean(state.browse.transcribedOnly),
+      transcribedOnly: true,
       limit: state.browse.limit,
       offset: state.browse.offset,
     };
@@ -3517,19 +3539,10 @@
         els.browseGrid.innerHTML = `
           <div class="empty-state" style="grid-column: 1 / -1;">
             <div class="empty-icon">📂</div>
-            <h3>${state.browse.transcribedOnly ? 'No transcribed talks match the selected filter' : 'No talks match the selected filter'}</h3>
-            ${state.browse.transcribedOnly ? `
-              <p style="margin-top: 0.4rem;">Toggle off "Transcribed Only" to browse and stream all audio talks in the archive.</p>
-              <button type="button" class="btn-secondary" id="btn-empty-show-all-talks" style="margin-top: 0.5rem;">
-                🎧 Show All Audio Talks
-              </button>
-            ` : ''}
+            <h3>No talks match the selected filter</h3>
+            <p style="margin-top: 0.4rem;">Try clearing the monastic teacher or year filter to browse all transcribed talks.</p>
           </div>
         `;
-        const btnShowAll = document.getElementById('btn-empty-show-all-talks');
-        if (btnShowAll) {
-          btnShowAll.addEventListener('click', () => setBrowseTranscribedOnly(false));
-        }
         return;
       }
 
@@ -3664,10 +3677,6 @@
                 ${renderTeacherBadgesHtml(ep)}
                 <span class="bookmark-meta-item">📅 ${escapeHtml(ep.date || '')}</span>
                 ${durMin > 0 ? `<span class="bookmark-meta-item">• ⏱️ ${durMin}m</span>` : ''}
-                ${isTranscribed
-                  ? '<span class="status-pill transcribed-pill" title="Full synchronized transcript available">✓ Transcribed</span>'
-                  : '<span class="status-pill audio-only-pill" title="Stream audio directly from Podbean CDN">🎧 Audio</span>'
-                }
               </div>
               <button type="button" class="btn-remove-bookmark" data-action="remove-bookmark" data-ep-id="${escapeHtml(ep.id)}" title="Remove bookmark" aria-label="Remove from bookmarks">
                 ${renderBookmarkRibbonSvg(true)}

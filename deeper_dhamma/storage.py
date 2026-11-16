@@ -98,6 +98,8 @@ class PipelineStateDatabase:
                     filename_stem TEXT,
                     year INTEGER,
                     is_transcribed INTEGER DEFAULT 0,
+                    is_excluded INTEGER DEFAULT 0,
+                    exclusion_reason TEXT,
                     last_error TEXT,
                     last_error_at TEXT,
                     last_error_op TEXT,
@@ -148,6 +150,14 @@ class PipelineStateDatabase:
                   );
                 """
             )
+            existing_cols = {
+                r[1] for r in conn.execute("PRAGMA table_info(episode_states);").fetchall()
+            }
+            if "is_excluded" not in existing_cols:
+                conn.execute("ALTER TABLE episode_states ADD COLUMN is_excluded INTEGER DEFAULT 0;")
+            if "exclusion_reason" not in existing_cols:
+                conn.execute("ALTER TABLE episode_states ADD COLUMN exclusion_reason TEXT;")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_episode_states_excluded ON episode_states(is_excluded);")
 
     def save_raw_asr(self, episode_uid: str, segments: List[Dict]) -> None:
         """
@@ -225,50 +235,131 @@ class PipelineStateDatabase:
     ) -> None:
         stem = Path(filepath).stem if filepath else None
         trans_val = 1 if is_transcribed else 0
+        clear_sql = (
+            ", last_error = NULL, last_error_at = NULL, last_error_op = NULL"
+            if clear_error
+            else ""
+        )
         with self._get_connection() as conn:
             with conn:
+                conn.execute(
+                    f"""
+                    INSERT INTO episode_states (
+                        episode_uid, title, filepath, filename_stem, year, is_transcribed,
+                        is_excluded, exclusion_reason, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, CURRENT_TIMESTAMP)
+                    ON CONFLICT(episode_uid) DO UPDATE SET
+                        title = COALESCE(NULLIF(excluded.title, ''), episode_states.title),
+                        filepath = COALESCE(NULLIF(excluded.filepath, ''), episode_states.filepath),
+                        filename_stem = COALESCE(NULLIF(excluded.filename_stem, ''), episode_states.filename_stem),
+                        year = COALESCE(NULLIF(excluded.year, 0), episode_states.year),
+                        is_transcribed = CASE WHEN excluded.is_transcribed = 1 THEN 1 ELSE episode_states.is_transcribed END,
+                        is_excluded = CASE WHEN excluded.is_transcribed = 1 THEN 0 ELSE episode_states.is_excluded END,
+                        exclusion_reason = CASE WHEN excluded.is_transcribed = 1 THEN NULL ELSE episode_states.exclusion_reason END
+                        {clear_sql},
+                        updated_at = CURRENT_TIMESTAMP;
+                    """,
+                    (episode_uid, title, filepath, stem, year, trans_val),
+                )
                 if clear_error:
-                    conn.execute(
-                        """
-                        INSERT INTO episode_states (
-                            episode_uid, title, filepath, filename_stem, year, is_transcribed,
-                            last_error, last_error_at, last_error_op, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, CURRENT_TIMESTAMP)
-                        ON CONFLICT(episode_uid) DO UPDATE SET
-                            title = COALESCE(NULLIF(excluded.title, ''), episode_states.title),
-                            filepath = COALESCE(NULLIF(excluded.filepath, ''), episode_states.filepath),
-                            filename_stem = COALESCE(NULLIF(excluded.filename_stem, ''), episode_states.filename_stem),
-                            year = COALESCE(NULLIF(excluded.year, 0), episode_states.year),
-                            is_transcribed = CASE WHEN excluded.is_transcribed = 1 THEN 1 ELSE episode_states.is_transcribed END,
-                            last_error = NULL,
-                            last_error_at = NULL,
-                            last_error_op = NULL,
-                            updated_at = CURRENT_TIMESTAMP;
-                        """,
-                        (episode_uid, title, filepath, stem, year, trans_val),
-                    )
                     self._mark_history_cleared(
                         conn,
                         episode_id=episode_uid,
                         resolution="episode_saved",
                         operation=None,
                     )
-                else:
-                    conn.execute(
-                        """
-                        INSERT INTO episode_states (
-                            episode_uid, title, filepath, filename_stem, year, is_transcribed, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        ON CONFLICT(episode_uid) DO UPDATE SET
-                            title = COALESCE(NULLIF(excluded.title, ''), episode_states.title),
-                            filepath = COALESCE(NULLIF(excluded.filepath, ''), episode_states.filepath),
-                            filename_stem = COALESCE(NULLIF(excluded.filename_stem, ''), episode_states.filename_stem),
-                            year = COALESCE(NULLIF(excluded.year, 0), episode_states.year),
-                            is_transcribed = CASE WHEN excluded.is_transcribed = 1 THEN 1 ELSE episode_states.is_transcribed END,
-                            updated_at = CURRENT_TIMESTAMP;
-                        """,
-                        (episode_uid, title, filepath, stem, year, trans_val),
-                    )
+
+    def mark_excluded(
+        self,
+        episode_uid: str,
+        reason: str = "no_transcribable_speech",
+        title: Optional[str] = None,
+        filepath: Optional[str] = None,
+        year: Optional[int] = None,
+    ) -> None:
+        """Marks an episode as excluded from transcription (e.g. non-speech chanting audio)."""
+        stem = Path(filepath).stem if filepath else None
+        clean_reason = (reason or "excluded").strip()
+        with self._get_connection() as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO episode_states (
+                        episode_uid, title, filepath, filename_stem, year,
+                        is_transcribed, is_excluded, exclusion_reason,
+                        last_error, last_error_at, last_error_op, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 0, 1, ?, NULL, NULL, NULL, CURRENT_TIMESTAMP)
+                    ON CONFLICT(episode_uid) DO UPDATE SET
+                        title = COALESCE(NULLIF(excluded.title, ''), episode_states.title),
+                        filepath = COALESCE(NULLIF(excluded.filepath, ''), episode_states.filepath),
+                        filename_stem = COALESCE(NULLIF(excluded.filename_stem, ''), episode_states.filename_stem),
+                        year = COALESCE(NULLIF(excluded.year, 0), episode_states.year),
+                        is_transcribed = 0,
+                        is_excluded = 1,
+                        exclusion_reason = excluded.exclusion_reason,
+                        last_error = NULL,
+                        last_error_at = NULL,
+                        last_error_op = NULL,
+                        updated_at = CURRENT_TIMESTAMP;
+                    """,
+                    (episode_uid, title, filepath, stem, year, clean_reason),
+                )
+                conn.execute("DELETE FROM episode_raw_asr WHERE episode_uid = ?;", (episode_uid,))
+                self._mark_history_cleared(
+                    conn,
+                    episode_id=episode_uid,
+                    resolution=f"excluded:{clean_reason}",
+                    operation=None,
+                )
+
+    def get_exclusion_reason(self, identifier: str) -> Optional[str]:
+        """Returns the exclusion reason if identifier (UID or filename stem) is marked excluded, else None."""
+        raw = str(identifier or "").strip()
+        if not raw:
+            return None
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT exclusion_reason
+                FROM episode_states
+                WHERE (episode_uid = ? OR filename_stem = ?)
+                  AND COALESCE(is_excluded, 0) = 1
+                ORDER BY CASE WHEN episode_uid = ? THEN 0 ELSE 1 END ASC, updated_at DESC, id ASC
+                LIMIT 1;
+                """,
+                (raw, raw, raw),
+            ).fetchone()
+            if not row:
+                return None
+            return row["exclusion_reason"] or "excluded"
+
+    def get_excluded_episodes(self) -> List[Dict[str, Any]]:
+        """Returns all episodes marked excluded in episode_states."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id AS state_id, episode_uid AS id, title, filepath, filename_stem,
+                       year, exclusion_reason, updated_at
+                FROM episode_states
+                WHERE COALESCE(is_excluded, 0) = 1
+                ORDER BY updated_at DESC, id ASC;
+                """
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_excluded_identifiers(self) -> Tuple[set[str], set[str]]:
+        """Returns (excluded_uids, excluded_stems) for fast filtering across catalog/disk scans."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT episode_uid, filename_stem
+                FROM episode_states
+                WHERE COALESCE(is_excluded, 0) = 1;
+                """
+            ).fetchall()
+            uids = {r["episode_uid"] for r in rows if r["episode_uid"]}
+            stems = {r["filename_stem"] for r in rows if r["filename_stem"]}
+            return uids, stems
 
     def get_filepath(self, identifier: str) -> Optional[str]:
         raw = str(identifier).strip()
@@ -862,6 +953,53 @@ class TranscriptDatabase:
 
         logger.info(f"[✓] Saved '{title}' to database ({len(segment_rows)} turns indexed).")
 
+    def exclude_episode(
+        self,
+        episode_id: str,
+        reason: str = "no_transcribable_speech",
+        title: Optional[str] = None,
+        filepath: Optional[str] = None,
+        year: Optional[int] = None,
+    ) -> int:
+        """
+        Excludes an untranscribable episode from `dhamma_transcripts.db` and records its
+        excluded status in `pipeline_state.db`. Returns number of removed episode rows.
+        """
+        self.pipeline_db.mark_excluded(
+            episode_uid=episode_id,
+            reason=reason,
+            title=title,
+            filepath=filepath,
+            year=year,
+        )
+        target_ids = [episode_id]
+        stem = Path(filepath).stem if filepath else None
+        if stem and stem not in target_ids:
+            target_ids.append(stem)
+
+        removed = 0
+        with self._get_connection() as conn:
+            with conn:
+                for tid in target_ids:
+                    if tid != episode_id:
+                        row = conn.execute(
+                            "SELECT is_transcribed FROM episodes WHERE id = ? LIMIT 1;",
+                            (tid,),
+                        ).fetchone()
+                        if row and row["is_transcribed"]:
+                            continue
+                    # Delete child speech segments explicitly first so FTS5 delete triggers run cleanly.
+                    conn.execute("DELETE FROM speech_segments WHERE episode_id = ?;", (tid,))
+                    conn.execute("DELETE FROM episode_words WHERE episode_id = ?;", (tid,))
+                    conn.execute("DELETE FROM episode_teachers WHERE episode_id = ?;", (tid,))
+                    cur = conn.execute("DELETE FROM episodes WHERE id = ?;", (tid,))
+                    removed += cur.rowcount
+        return removed
+
+    def is_excluded(self, identifier: str) -> Optional[str]:
+        """Returns the exclusion reason if `identifier` (UID or filename stem) is excluded, else None."""
+        return self.pipeline_db.get_exclusion_reason(identifier)
+
     def reprocess_episodes(
         self,
         postprocessor: Optional[Any] = None,
@@ -1185,6 +1323,7 @@ class TranscriptDatabase:
             for r in self.pipeline_db.list_errors()
             if "404" in (r.get("last_error") or "") or "removed from cdn" in (r.get("last_error") or "").lower()
         }
+        excluded_uids, excluded_stems = self.pipeline_db.get_excluded_identifiers()
 
         with self._get_connection() as conn:
             with conn:
@@ -1244,7 +1383,7 @@ class TranscriptDatabase:
                         is_transcribed=is_trans_val,
                     )
 
-                    if ep_id in permanently_broken_ids and not is_trans_val:
+                    if (ep_id in permanently_broken_ids or ep_id in excluded_uids or stem in excluded_stems) and not is_trans_val:
                         continue
 
                     if not row:
@@ -1316,7 +1455,7 @@ class TranscriptDatabase:
 
                 # Reconcile any remaining catalog episodes in database
                 for ep_id, cat_ep in catalog_by_id.items():
-                    if ep_id in permanently_broken_ids:
+                    if ep_id in permanently_broken_ids or ep_id in excluded_uids:
                         continue
                     raw_title = cat_ep.get("title", "")
                     clean_title = html.unescape(raw_title)
@@ -1484,6 +1623,24 @@ class TranscriptDatabase:
                     conn.execute(
                         f"DELETE FROM episodes WHERE is_transcribed = 0 AND id IN ({placeholders});",
                         tuple(permanently_broken_ids),
+                    )
+                if excluded_uids:
+                    placeholders = ", ".join("?" for _ in excluded_uids)
+                    conn.execute(
+                        f"DELETE FROM speech_segments WHERE episode_id IN ({placeholders});",
+                        tuple(excluded_uids),
+                    )
+                    conn.execute(
+                        f"DELETE FROM episode_words WHERE episode_id IN ({placeholders});",
+                        tuple(excluded_uids),
+                    )
+                    conn.execute(
+                        f"DELETE FROM episode_teachers WHERE episode_id IN ({placeholders});",
+                        tuple(excluded_uids),
+                    )
+                    conn.execute(
+                        f"DELETE FROM episodes WHERE id IN ({placeholders});",
+                        tuple(excluded_uids),
                     )
                 conn.execute(
                     """

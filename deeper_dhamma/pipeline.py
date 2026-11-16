@@ -151,6 +151,7 @@ class TranscriptionPipeline:
         catalog_entry: Optional[Dict] = None,
         max_duration_sec: Optional[float] = None,
         retry_errors: bool = False,
+        force: bool = False,
         export_words_blob: bool = True,
         show_progress: bool = True,
         progress_callback: Optional[Callable[[float, float, str], None]] = None,
@@ -209,6 +210,19 @@ class TranscriptionPipeline:
             ):
                 return "single-sample profiler clustering fixed"
             return False
+
+        if not force:
+            excl_reason = self.db.is_excluded(ep_id) or self.db.is_excluded(audio_path.stem)
+            if excl_reason:
+                logger.info(
+                    f"[-] Skipping excluded episode '{ep_id}' ({excl_reason}). Pass --force to re-evaluate."
+                )
+                return {
+                    "status": "skipped",
+                    "reason": f"excluded ({excl_reason})",
+                    "episode_id": ep_id,
+                    "audio_file": str(audio_path),
+                }
 
         can_proceed, reason = self.db.check_preflight(
             episode_id=ep_id,
@@ -340,26 +354,56 @@ class TranscriptionPipeline:
             )
             logger.info(f"    ASR complete in {time.time() - t_asr0:.2f}s ({len(asr_segments)} segments).")
 
-            # 4. Speaker Alignment & Identification (in-memory slice attribution)
-            logger.info("    Aligning speakers with voiceprints & pre-analyzed profile...")
-            t_spk0 = time.time()
-            attributed = self.aligner.align_segments(
-                audio_file=audio_path,
-                asr_segments=asr_segments,
-                primary_slug=primary_slug,
-                primary_display=primary_display,
-                era=era,
-                profile=profile,
-                waveform_16k=waveform_16k,
-                candidate_monastics=active_slugs,
-            )
-            logger.info(f"    Speaker alignment complete in {time.time() - t_spk0:.2f}s ({len(attributed)} turns).")
+            attributed: List[Dict] = []
+            term_changelog: List[Dict] = []
+            if asr_segments:
+                # 4. Speaker Alignment & Identification (in-memory slice attribution)
+                logger.info("    Aligning speakers with voiceprints & pre-analyzed profile...")
+                t_spk0 = time.time()
+                attributed = self.aligner.align_segments(
+                    audio_file=audio_path,
+                    asr_segments=asr_segments,
+                    primary_slug=primary_slug,
+                    primary_display=primary_display,
+                    era=era,
+                    profile=profile,
+                    waveform_16k=waveform_16k,
+                    candidate_monastics=active_slugs,
+                )
+                logger.info(f"    Speaker alignment complete in {time.time() - t_spk0:.2f}s ({len(attributed)} turns).")
 
-            # 5. Multi-Stage ASR Post-Processing & Buddhist Terminology Normalization
-            logger.info("    Applying ASR post-processing & Buddhist reference terminology normalization...")
-            attributed, term_changelog = self.postprocessor.process_segments(attributed)
-            if term_changelog:
-                logger.info(f"    [+] Post-processor applied {len(term_changelog)} standardization/cleanup rule(s).")
+                # 5. Multi-Stage ASR Post-Processing & Buddhist Terminology Normalization
+                logger.info("    Applying ASR post-processing & Buddhist reference terminology normalization...")
+                attributed, term_changelog = self.postprocessor.process_segments(attributed)
+                if term_changelog:
+                    logger.info(f"    [+] Post-processor applied {len(term_changelog)} standardization/cleanup rule(s).")
+
+            if not any(bool((seg.get("text") or "").strip()) for seg in attributed):
+                logger.info(
+                    f"[-] Excluding '{ep_id}' ({ep_title}) from transcripts database: "
+                    "no transcribable speech detected."
+                )
+                self.db.exclude_episode(
+                    episode_id=ep_id,
+                    reason="no_transcribable_speech",
+                    title=ep_title,
+                    filepath=str(audio_path.resolve()),
+                    year=year_val,
+                )
+                elapsed = time.time() - t0
+                return {
+                    "status": "excluded",
+                    "reason": "no_transcribable_speech",
+                    "audio_file": str(audio_path),
+                    "episode_id": ep_id,
+                    "duration_sec": process_dur,
+                    "elapsed_sec": round(elapsed, 2),
+                    "primary_teacher": primary_slug,
+                    "primary_display": primary_display,
+                    "era": era,
+                    "turns_count": 0,
+                    "db_path": str(self.db.db_path),
+                }
 
             # 6. Preserve exact physical PCM timestamps in SQLite and export VBR seek trailer in .bin
             # (Prevents intra-turn VBR bitrate drift and ensures cross-browser Firefox/Chrome parity)

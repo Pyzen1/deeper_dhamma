@@ -16,7 +16,7 @@ In accordance with the monastic Vinaya and the living Buddhist tradition of gene
 
 - **Centralized Database Storage (`databases/`)**: 
   - `databases/dhamma_transcripts.db`: Canonical transcripts warehouse & zero-copy FTS5 search index (pure domain data keyed by `pbXXXXXXX`, zero local filepaths).
-  - `databases/pipeline_state.db`: Local operational ingestion state (archive filepaths, transcription flags, and error logs; excluded from web distribution).
+  - `databases/pipeline_state.db`: Local operational ingestion state (archive filepaths, transcription & non-speech exclusion flags, and error logs; excluded from web distribution).
   - `databases/voiceprints.db`: Era-tagged speaker embeddings gallery.
   - `databases/buddhism_lexicon.db`: Master Pali terminology, translation matrix, and phonetic rule definitions.
   - `databases/authoritative_ebt_compounds.db`: Authoritative EBT doctrinal compounds and ASR phonetic substitution rules (compiled into `buddhism_lexicon.db`).

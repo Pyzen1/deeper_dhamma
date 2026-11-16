@@ -378,6 +378,19 @@ def audit_database_transcripts(
             else (str(audio_fp) if audio_fp else ep_id)
         )
 
+        if tok_cnt == 0:
+            issues.append({
+                "path": rel_display,
+                "full_path": str(audio_fp) if audio_fp else "",
+                "episode_id": ep_id,
+                "title": title,
+                "issue": "untranscribable_no_speech",
+                "size": audio_fp.stat().st_size if audio_fp and audio_fp.exists() else 0,
+                "token_count": 0,
+                "can_delete": False,
+                "description": "Episode marked is_transcribed=1 has 0 speech segments / tokens",
+            })
+
         if blob_cnt is not None and blob_cnt != tok_cnt:
             issues.append({
                 "path": rel_display,
@@ -457,7 +470,7 @@ def sync_audit_results_to_db(
         )
         recorded += 1
 
-    db_issue_codes = {"word_sync_mismatch", "duration_truncation"}
+    db_issue_codes = {"word_sync_mismatch", "duration_truncation", "untranscribable_no_speech"}
     checked_file_set = set(checked_identifiers or [])
     checked_decode_set = set(checked_decode_ids or [])
     checked_db_set = set(checked_db_ids or [])

@@ -88,6 +88,8 @@ def collect_status(
 
     db_resolved_teachers: Dict[str, str] = {}
     db_errors: List[Dict[str, Any]] = []
+    excluded_episodes: List[Dict[str, Any]] = []
+    excluded_stems: Set[str] = set()
     error_years = Counter()
     error_history_counts: Dict[str, int] = {"active": 0, "cleared": 0}
     cleared_errors: List[Dict[str, Any]] = []
@@ -98,6 +100,26 @@ def collect_status(
             tdb = TranscriptDatabase(db_path=db_path)
             pipeline_db = tdb.pipeline_db
             fp_map = pipeline_db.get_filepath_map()
+            raw_excluded = pipeline_db.get_excluded_episodes()
+            for ex in raw_excluded:
+                ey = int(ex.get("year") or 0)
+                if not ey and ex.get("filepath"):
+                    for part in Path(ex["filepath"]).parts:
+                        if part.isdigit() and len(part) == 4:
+                            ey = int(part)
+                            break
+                if year_filter is None or ey == year_filter:
+                    excluded_episodes.append(ex)
+                if ex.get("id"):
+                    excluded_stems.add(ex["id"])
+                if ex.get("filename_stem"):
+                    excluded_stems.add(ex["filename_stem"])
+                if ex.get("filepath"):
+                    excluded_stems.add(Path(ex["filepath"]).stem)
+                if ex.get("title"):
+                    _, _, ex_fn = parse_episode_metadata(ex["title"], "")
+                    if ex_fn:
+                        excluded_stems.add(ex_fn)
 
             with tdb._get_connection() as conn:
                 rows = conn.execute(
@@ -199,8 +221,9 @@ def collect_status(
     # Stems on disk for fast lookup
     disk_file_stems = {f.stem for f in all_disk_files}
 
-    # Transcribed archive files on disk vs pending transcription on disk
+    # Transcribed vs excluded vs pending transcription archive files on disk
     archive_files_transcribed = []
+    archive_files_excluded = []
     archive_files_pending_transcription = []
 
     for f in all_disk_files:
@@ -226,6 +249,8 @@ def collect_status(
                     break
         if f.stem in transcribed_stems:
             archive_files_transcribed.append({"path": f, "year": year_cand, "teacher": teacher_display})
+        elif f.stem in excluded_stems:
+            archive_files_excluded.append({"path": f, "year": year_cand, "teacher": teacher_display})
         else:
             archive_files_pending_transcription.append({"path": f, "year": year_cand, "teacher": teacher_display})
 
@@ -360,8 +385,10 @@ def collect_status(
             "m4a_files": m4a_count,
             "total_bytes": archive_disk_bytes,
             "transcribed_on_disk": len(archive_files_transcribed),
+            "excluded_on_disk": len(archive_files_excluded),
             "pending_transcription_on_disk": len(archive_files_pending_transcription),
             "pending_files": archive_files_pending_transcription,
+            "excluded_files": archive_files_excluded,
             "transcribed_files": archive_files_transcribed,
         },
         "transcripts": {
@@ -372,6 +399,10 @@ def collect_status(
             "by_teacher": dict(transcribed_teachers),
             "by_era": dict(transcribed_eras),
             "episodes": db_episodes,
+        },
+        "excluded": {
+            "count": len(excluded_episodes),
+            "episodes": excluded_episodes,
         },
         "all_years": all_years,
         "all_teachers": all_teachers,
@@ -395,8 +426,11 @@ def print_summary(data: Dict[str, Any]) -> None:
     arch_gb = arch["total_bytes"] / (1024 ** 3)
     dur_str = format_duration_hhmmss(tr["total_duration_sec"])
 
+    excl_disk = int(arch.get("excluded_on_disk", 0))
+    eligible_disk = arch["transcribed_on_disk"] + arch["pending_transcription_on_disk"]
+    cov_denom = eligible_disk if excl_disk > 0 else arch["total_files"]
     sync_bar = make_progress_bar(cat["synced_count"], cat["total_in_scope"], width=18)
-    tr_bar = make_progress_bar(arch["transcribed_on_disk"], arch["total_files"], width=18)
+    tr_bar = make_progress_bar(arch["transcribed_on_disk"], cov_denom, width=18)
 
     print("=" * 80)
     print(f"BSWA Deeper Dhamma: Transcription Progress & Archive Status{year_label}")
@@ -411,8 +445,14 @@ def print_summary(data: Dict[str, Any]) -> None:
     print(f"  - Database Episode Records: {tr['records_count']:,} cataloged in dhamma_transcripts.db")
     print(f"  - Total Transcribed Audio:  {dur_str} ({tr['total_duration_sec']:.1f}s)")
     print(f"  - Indexed Speech Segments:  {tr['total_segments']:,} turns (zero-copy SQLite FTS5 index)")
-    print(f"  - Disk Archive Coverage:    {arch['transcribed_on_disk']:,} / {arch['total_files']:,} talks transcribed {tr_bar}")
+    if excl_disk > 0:
+        print(f"  - Disk Archive Coverage:    {arch['transcribed_on_disk']:,} / {cov_denom:,} talks transcribed {tr_bar} ({excl_disk:,} excluded)")
+    else:
+        print(f"  - Disk Archive Coverage:    {arch['transcribed_on_disk']:,} / {arch['total_files']:,} talks transcribed {tr_bar}")
     print(f"  - Ready for Transcription:  {arch['pending_transcription_on_disk']:,} audio talks available on disk")
+    excl_total = int((data.get("excluded") or {}).get("count", excl_disk))
+    if excl_total > 0:
+        print(f"  - Excluded Untranscribable: {excl_total:,} track(s) (no speech detected)")
     err_count = data.get("errors_count", len(data.get("errors", [])))
     hist_counts = data.get("error_history_counts") or {}
     cleared_count = int(hist_counts.get("cleared", 0))

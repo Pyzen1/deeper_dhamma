@@ -352,3 +352,86 @@ def test_pipeline_auto_resolves_agglomerative_error_and_preserves_playable_catal
     assert result["episode_id"] == "pb_good"
     assert pipe.db.has_episode("pb_good") is True
     assert pipe.db.get_error("pb_good") is None
+
+
+def test_process_file_excludes_zero_speech_episode_and_respects_force(tmp_path):
+    """Episodes yielding 0 speech segments must be excluded during processing and marked in pipeline_state.db."""
+    import json
+    from unittest.mock import patch
+    import torch
+    from deeper_dhamma.pipeline import TranscriptionPipeline
+
+    db_path = tmp_path / "chant_transcripts.db"
+    cat_path = tmp_path / "catalog.json"
+    stem = "2012-09-06_2012_april_9_day_retreat_20_ajahn_brahm"
+    cat_path.write_text(
+        json.dumps([
+            {
+                "id": "pb_chant0",
+                "title": "2012 April | 9 Day Retreat - 20 | Ajahn Brahm",
+                "media_url": "https://cdn.example.com/20_chant.mp3",
+                "upload_date": "20120906",
+            }
+        ]),
+        encoding="utf-8",
+    )
+    audio_dir = tmp_path / "archive" / "2012"
+    audio_dir.mkdir(parents=True)
+    audio_file = audio_dir / f"{stem}.mp3"
+    audio_file.write_bytes(b"fake-mp3")
+
+    with patch("deeper_dhamma.pipeline.Transcriber") as mock_transcriber, \
+         patch("deeper_dhamma.pipeline.SpeakerAligner") as mock_aligner, \
+         patch("deeper_dhamma.pipeline.SpeakerProfiler") as mock_profiler, \
+         patch("deeper_dhamma.pipeline.BuddhismLexiconDatabase") as mock_lexicon, \
+         patch("deeper_dhamma.pipeline.TerminologyEditor"), \
+         patch("deeper_dhamma.pipeline.TranscriptPostProcessor"), \
+         patch("deeper_dhamma.pipeline.StreamSeekCalibrator"), \
+         patch("deeper_dhamma.pipeline.get_audio_info", return_value={"duration": 10.0}), \
+         patch(
+             "deeper_dhamma.pipeline.load_audio_segment",
+             return_value=(torch.ones((1, 160000), dtype=torch.float32) * 0.05, 16000),
+         ):
+        pipe = TranscriptionPipeline(
+            transcripts_db_path=db_path,
+            catalog_path=cat_path,
+            device="cpu",
+        )
+        # Seed a stale DB record to verify exclusion cleans it up dynamically
+        pipe.db.save_episode(
+            episode_metadata={"id": "pb_chant0", "title": "2012 April | 9 Day Retreat - 20 | Ajahn Brahm"},
+            attributed_segments=[],
+            duration_sec=10.0,
+            year="2012",
+            filename_stem=stem,
+        )
+        assert pipe.db.get_episode("pb_chant0") is not None
+
+        mock_lexicon.return_value.get_prompt_steering_terms.return_value = "Namo"
+        mock_profiler.return_value.profile_audio.return_value = {
+            "is_multi_speaker": False,
+            "ranked_speakers": [],
+            "shares": {},
+            "clusters_count": 1,
+        }
+        mock_transcriber.return_value.transcribe.return_value = []
+
+        res = pipe.process_file(audio_path=audio_file, export_words_blob=False, show_progress=False)
+        assert res["status"] == "excluded"
+        assert res["reason"] == "no_transcribable_speech"
+        assert res["turns_count"] == 0
+        mock_aligner.return_value.align_segments.assert_not_called()
+        assert pipe.db.get_episode("pb_chant0") is None
+        assert pipe.db.is_excluded("pb_chant0") == "no_transcribable_speech"
+
+        # Non-forced call skips already-excluded file without re-running ASR
+        mock_transcriber.return_value.transcribe.reset_mock()
+        res_skip = pipe.process_file(audio_path=audio_file, export_words_blob=False, show_progress=False)
+        assert res_skip["status"] == "skipped"
+        assert "excluded" in res_skip["reason"]
+        mock_transcriber.return_value.transcribe.assert_not_called()
+
+        # Forced call re-runs ASR
+        res_force = pipe.process_file(audio_path=audio_file, force=True, export_words_blob=False, show_progress=False)
+        assert res_force["status"] == "excluded"
+        mock_transcriber.return_value.transcribe.assert_called_once()

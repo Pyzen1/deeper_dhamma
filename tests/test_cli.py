@@ -412,3 +412,56 @@ def test_transcribe_force_and_explicit_id_enable_retry_errors(tmp_path):
             cmd_transcribe(args)
 
         assert mock_pipeline.process_file.call_args.kwargs["retry_errors"] is True
+
+
+def test_cmd_transcribe_skips_excluded_and_reports_newly_excluded(tmp_path):
+    """cmd_transcribe --all skips excluded tracks; explicit processing reporting 'excluded' updates web export."""
+    from argparse import Namespace
+    from unittest.mock import MagicMock, patch
+    from deeper_dhamma.cli import cmd_transcribe
+
+    audio_excl = tmp_path / "2012" / "already_excl.mp3"
+    audio_new = tmp_path / "2012" / "new_chant.mp3"
+    audio_excl.parent.mkdir(parents=True)
+    audio_excl.write_bytes(b"mp3")
+    audio_new.write_bytes(b"mp3")
+
+    mock_tdb = MagicMock()
+    mock_tdb.has_episode.return_value = False
+    mock_tdb.is_excluded.side_effect = lambda stem: "no_transcribable_speech" if stem == "already_excl" else None
+
+    mock_pipeline = MagicMock()
+    mock_pipeline.process_file.return_value = {
+        "status": "excluded",
+        "reason": "no_transcribable_speech",
+        "episode_id": "pb_new_chant",
+        "elapsed_sec": 0.5,
+        "turns_count": 0,
+    }
+    args = Namespace(
+        id=None,
+        file=None,
+        year=None,
+        series=None,
+        all=True,
+        limit=None,
+        force=False,
+        retry_errors=False,
+        max_duration=None,
+        device="cpu",
+        model_size="turbo",
+        batch_size=1,
+        archive_dir=str(tmp_path),
+        check_updates=False,
+        no_progress=True,
+    )
+    with patch("deeper_dhamma.storage.TranscriptDatabase", return_value=mock_tdb), \
+         patch("deeper_dhamma.pipeline.TranscriptionPipeline", return_value=mock_pipeline), \
+         patch("deeper_dhamma.export_web.export_static_site") as mock_export, \
+         patch("sys.stdout", new_callable=StringIO) as mock_out:
+        cmd_transcribe(args)
+
+    mock_pipeline.process_file.assert_called_once()
+    assert "new_chant.mp3" in str(mock_pipeline.process_file.call_args.kwargs["audio_path"])
+    assert "0 successful, 1 excluded, 0 failed" in mock_out.getvalue()
+    mock_export.assert_called_once()

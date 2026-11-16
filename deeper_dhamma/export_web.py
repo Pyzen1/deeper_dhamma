@@ -281,12 +281,15 @@ def compile_static_database(output_db_path: Path, version_int: int) -> dict:
         conn.execute("PRAGMA foreign_keys = OFF;")
         _copy_lexicon_to_conn(conn)
 
-        # Safety guard: ensure only playable or transcribed talks remain in the exported web DB
+        # Safety guard: ensure only playable or genuinely transcribed talks remain in the exported web DB
         conn.execute(
             """
             DELETE FROM main.episodes
-            WHERE is_transcribed = 0
-              AND (media_url IS NULL OR media_url = '');
+            WHERE (
+                is_transcribed = 1
+                AND NOT EXISTS (SELECT 1 FROM main.speech_segments s WHERE s.episode_id = main.episodes.id)
+            )
+               OR (is_transcribed = 0 AND (media_url IS NULL OR media_url = ''));
             """
         )
         conn.execute("DELETE FROM main.episode_teachers WHERE episode_id NOT IN (SELECT id FROM main.episodes);")
@@ -359,7 +362,11 @@ def compile_sharded_static_databases(
         valid_ep_rows = src_conn.execute(
             """
             SELECT * FROM episodes
-            WHERE is_transcribed = 1 OR (media_url IS NOT NULL AND media_url != '');
+            WHERE (
+                is_transcribed = 1
+                AND EXISTS (SELECT 1 FROM speech_segments s WHERE s.episode_id = episodes.id)
+            )
+               OR (is_transcribed = 0 AND media_url IS NOT NULL AND media_url != '');
             """
         ).fetchall()
         ep_cols = [desc[0] for desc in src_conn.execute("SELECT * FROM episodes LIMIT 0;").description]

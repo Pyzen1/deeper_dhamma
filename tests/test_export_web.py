@@ -482,7 +482,8 @@ def test_about_view_and_navigation_integrity():
     assert ".about-dana-card" in style_css, "Must have .about-dana-card in CSS"
 
     # 5. English talks count, Bhante Sujato naming, and telemetry/privacy adjustments
-    assert "3,246 English" in index_html, "Must specify 3,246 English talks"
+    assert "2,971 English" in index_html, "Must specify 2,971 English talks"
+    assert "3,246 English" not in index_html, "Must remove stale 3,246 English talks count"
     assert "(Ajahn Sujato)" not in index_html, "Must remove '(Ajahn Sujato)' side parens"
     assert "anonymous usage" in index_html, "Must state collection of anonymous usage statistics"
     assert "Zero tracking, zero telemetry" not in index_html, "Must remove strict no-telemetry note"
@@ -1268,6 +1269,258 @@ def test_headless_chrome_search_jump_to_exact_phrase_location():
                 assert abs(j["seekTargetTime"] - j["realWordTime"]) < 0.2, (
                     f"Seek target {j['seekTargetTime']} != realWordTime {j['realWordTime']} for {j}"
                 )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_archive_notes_view_and_transcribed_only_ui_cleanup():
+    """
+    Verifies:
+    1. Browse Talks and sidebar stats no longer imply untranscribed talks exist
+       (no #browse-transcribed-only-btn, no 'Toggle off \"Transcribed Only\"',
+        no 'audio talks' suffix on #stat-episodes).
+    2. Archive Notes view (#notes-view), sidebar button (#tab-notes-btn), routing ('notes'),
+       and About cross-link (#btn-about-archive-notes) are properly wired.
+    3. Archive Notes compiles the full catalog reconciliation and pipeline documentation.
+    """
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
+    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+
+    # 1. No misleading untranscribed-talks WUI controls or redundant transcribed pills
+    assert 'id="browse-transcribed-only-btn"' not in index_html
+    assert "Toggle off \"Transcribed Only\"" not in app_js
+    assert "Show All Audio Talks" not in app_js
+    assert "audio talks`" not in app_js
+    assert "transcribed-pill" not in app_js
+    assert "transcribedOnly: true" in app_js
+
+    # 2. Archive Notes navigation, view, and routing
+    assert 'id="tab-notes-btn"' in index_html
+    assert 'data-tab="notes-view"' in index_html
+    assert 'id="notes-view"' in index_html
+    assert 'id="btn-about-archive-notes"' in index_html
+    assert "tabNotesBtn: document.getElementById('tab-notes-btn')" in app_js
+    assert "notesView: document.getElementById('notes-view')" in app_js
+    assert "case 'notes':" in app_js
+    assert "'notes-view': 'notes'" in app_js
+    assert ".notes-table" in style_css
+    assert ".notes-diagram-card" in style_css
+    assert ".notes-diagram-svg" in style_css
+
+    # 3. Plain-language reconciliation & process details via SVG (no internal file/symbol names or static distribution section)
+    notes_html = index_html.split('id="notes-view"')[1].split('id="transcript-view"')[0]
+    assert "```mermaid" not in notes_html.lower()
+    assert "notes-ascii-diagram" not in notes_html
+    assert 'class="notes-diagram-svg"' in notes_html
+    assert "<svg" in notes_html
+    for forbidden in (
+        "pipeline_state.db",
+        "TranscriptPostProcessor",
+        "catalog.json",
+        "core.db.gz",
+        "voiceprints.db",
+        "archive.log",
+        "archive/",
+        "is_english_talk",
+        "Static Distribution",
+        "Silent retreat",
+        "Non-Speech Recording",
+    ):
+        assert forbidden not in notes_html, f"Found internal/removed term '{forbidden}' in Archive Notes"
+    for token in (
+        "3,323",
+        "2,971",
+        "-279",
+        "72",
+        "272",
+        "1994",
+        "2012 April | 9 Day Retreat - 20",
+        "2012 January Retreat - 18 Metta Chanting",
+        "2009 November Retreat - Chanting",
+        "2016 March | 02. Weekend Meditation Retreat",
+        "raw speech segments are preserved",
+        "no spoken segments",
+    ):
+        assert token in notes_html, f"Missing '{token}' in Archive Notes view"
+
+
+def test_compile_sharded_excludes_zero_segment_transcribed_rows(tmp_path: Path):
+    """Static sharded export must exclude any is_transcribed=1 episode that has zero speech segments."""
+    from deeper_dhamma.export_web import compile_sharded_static_databases
+    from deeper_dhamma.storage import TranscriptDatabase
+
+    if not BUDDHISM_LEXICON_DB_PATH.exists():
+        pytest.skip("Lexicon database not present")
+
+    src_db_path = tmp_path / "filter_transcripts.db"
+    tdb = TranscriptDatabase(db_path=src_db_path, pipeline_db_path=tmp_path / "filter_pipe.db")
+    tdb.save_episode(
+        episode_metadata={"id": "pb_spoken", "title": "Spoken Talk", "primary_teacher": "ajahn_brahm", "upload_date": "20200101", "media_url": "https://example.com/1.mp3"},
+        attributed_segments=[{"start": 0.0, "end": 1.0, "speaker_slug": "ajahn_brahm", "speaker_display": "Ajahn Brahm", "text": "Namo Buddhaya."}],
+        duration_sec=10.0,
+        year="2020",
+        filename_stem="spoken",
+    )
+    tdb.save_episode(
+        episode_metadata={"id": "pb_empty", "title": "Group Chanting", "primary_teacher": "ajahn_brahm", "upload_date": "20200102", "media_url": "https://example.com/2.mp3"},
+        attributed_segments=[],
+        duration_sec=10.0,
+        year="2020",
+        filename_stem="empty",
+    )
+
+    out_dir = tmp_path / "dist"
+    res = compile_sharded_static_databases(out_dir, version_int=20261116, transcripts_db_path=src_db_path, show_progress=False)
+    manifest = res["manifest"]
+    assert manifest["episodes"] == 1
+    assert manifest["transcribed_episodes"] == 1
+
+
+def test_headless_chrome_archive_notes_and_browse_count_parity():
+    """
+    Runs the compiled dist/index.html in headless Chrome to verify:
+    1. #stat-episodes reports transcribed talks without implying missing audio talks.
+    2. #browse-count-badge equals the transcribed episodes count (e.g. 2972).
+    3. Navigating to #notes activates #notes-view and hydrates live bundle metrics.
+    """
+    import http.server
+    import json
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found")
+    if not (DIST_DIR / "db_manifest.json").exists() or not (DIST_DIR / "index.html").exists():
+        pytest.skip("Built static bundle not present in dist/")
+
+    report = {}
+
+    class NotesUIHandler(StaticPreviewHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__notes_ui_report":
+                length = int(self.headers.get("Content-Length", 0))
+                payload = self.rfile.read(length)
+                report.update(json.loads(payload.decode("utf-8")))
+                self.send_response(200)
+                self.end_headers()
+                return
+            self.send_error(404)
+
+        def do_GET(self):
+            if self.path == "/__notes_ui_e2e.html":
+                raw_html = (DIST_DIR / "index.html").read_text(encoding="utf-8")
+                harness_js = """
+                <script>
+                (async () => {
+                  const res = { ok: false };
+                  const waitFor = async (fn, timeoutMs = 45000) => {
+                    const start = Date.now();
+                    while (Date.now() - start < timeoutMs) {
+                      const val = fn();
+                      if (val) return val;
+                      await new Promise(r => setTimeout(r, 80));
+                    }
+                    throw new Error('Timed out waiting for Archive Notes UI condition');
+                  };
+                  try {
+                    await waitFor(() => {
+                      const b = document.getElementById('browse-count-badge')?.textContent?.trim();
+                      const s = document.getElementById('stat-episodes')?.textContent?.trim();
+                      const cards = document.querySelectorAll('#browse-episodes-grid .episode-card').length;
+                      return b && b !== '0' && s && !s.includes('Loading') && cards > 0;
+                    });
+                    res.statText = document.getElementById('stat-episodes').textContent.trim();
+                    res.browseBadge = document.getElementById('browse-count-badge').textContent.trim();
+                    res.hasBrowseToggle = Boolean(document.getElementById('browse-transcribed-only-btn'));
+                    res.browseCardCount = document.querySelectorAll('#browse-episodes-grid .episode-card').length;
+                    res.transcribedPillCount = document.querySelectorAll('#browse-episodes-grid .transcribed-pill, #browse-episodes-grid .status-pill').length;
+                    res.transcriptBtnCount = document.querySelectorAll('#browse-episodes-grid .episode-card button[data-action="view-transcript"]').length;
+
+                    document.getElementById('tab-notes-btn').click();
+                    await waitFor(() => document.getElementById('notes-view')?.classList.contains('active'));
+                    res.hashAfterNotes = window.location.hash;
+                    res.notesTranscribed = document.getElementById('notes-tbl-transcribed')?.textContent?.trim();
+                    res.notesSvgTranscribed = document.getElementById('notes-svg-transcribed')?.textContent?.trim();
+                    const svgRect = document.querySelector('#notes-view svg.notes-diagram-svg')?.getBoundingClientRect();
+                    res.svgWidth = svgRect ? Math.round(svgRect.width) : 0;
+                    res.svgHeight = svgRect ? Math.round(svgRect.height) : 0;
+                    res.notesTableRows = document.querySelectorAll('#notes-view .notes-table tbody tr').length;
+                    res.ok = true;
+                  } catch (err) {
+                    res.error = err && err.message ? err.message : String(err);
+                  }
+                  await fetch('/__notes_ui_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(res),
+                  });
+                })();
+                </script>
+                """
+                injected = raw_html.replace("</body>", harness_js + "\n</body>").encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(injected)))
+                self.end_headers()
+                self.wfile.write(injected)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: NotesUIHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_dir:
+            cmd = [
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_dir}",
+                f"http://127.0.0.1:{port}/__notes_ui_e2e.html",
+            ]
+            proc = subprocess.Popen(cmd)
+            try:
+                deadline = time.time() + 45.0
+                while time.time() < deadline and not report:
+                    time.sleep(0.25)
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        manifest = json.loads((DIST_DIR / "db_manifest.json").read_text(encoding="utf-8"))
+        expected_trans = str(manifest["transcribed_episodes"])
+
+        assert report.get("ok") is True, f"Notes UI E2E failed: {report}"
+        assert report["hasBrowseToggle"] is False
+        assert report["browseCardCount"] > 0
+        assert report["transcribedPillCount"] == 0
+        assert report["transcriptBtnCount"] == report["browseCardCount"]
+        assert report["browseBadge"] == expected_trans
+        assert "audio talks" not in report["statText"]
+        assert f"{int(expected_trans):,} transcribed talks" in report["statText"]
+        assert report["hashAfterNotes"] == "#notes"
+        assert report["notesTranscribed"] == f"{int(expected_trans):,}"
+        assert report["notesSvgTranscribed"] == f"{int(expected_trans):,}"
+        assert report["svgWidth"] > 400 and report["svgHeight"] > 200
+        assert report["notesTableRows"] == 8
     finally:
         server.shutdown()
         server.server_close()
