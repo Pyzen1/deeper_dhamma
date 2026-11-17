@@ -50,19 +50,20 @@ In accordance with the monastic Vinaya and the living Buddhist tradition of gene
   - 100% dynamic, on-demand querying directly from SQLite (zero hardcoded HTML).
   - **Sharded PWA Bundle & OPFS/IndexedDB Streaming Sync**: Compiles the static database into `<50 MB` gzipped shards (`core.db.gz`, `talks_1..4.db.gz`, `words_1..4.db.gz`, `db_manifest.json`) with PWA install icons and progressive background sync so GitHub Pages hosting stays well under size limits while enabling offline search and word sync.
   - **Stopword-Aware FTS5 Search, BM25 Ranking & 50-Result Pagination**: Preserves stopwords in Tier 1 exact-phrase queries (`"mindfulness of breathing"`), strips stopwords from Tiers 2–6 fallback expansions and sentence highlighting, ranks episodes by BM25 + hit density (`Best Match` default), and paginates search/filter views at 50 talks per page (`#search-pagination`) while keeping full multi-page Filtered Archive exports.
-  - **Deterministic Click-to-Jump Precision**: Synchronously parses attached `words_blob` timings on drawer open (`WordSync.prepareEpisodeSync`), guards pre-seek audio frames (`_awaitingInitialSeek`), and scrolls target phrases squarely into the unobstructed reading zone between the sticky transcript toolbar and bottom audio player bar.
+  - **`100dvh` CSS Grid App Shell & Mobile-Locked Chrome**: Separates `<aside class="app-sidebar">`, independently scrollable `<main class="app-main">`, and docked `<footer class="audio-player-bar">` into non-overlapping grid regions (`260px` desktop, `76px` tablet, stacked top/middle/bottom on `<= 600px` mobile) so browser dynamic toolbars or viewport zoom never push navigation, Word Sync controls, or the audio player bar off screen.
+  - **Deterministic Click-to-Jump Precision**: Synchronously parses attached `words_blob` timings on drawer open (`WordSync.prepareEpisodeSync`), guards pre-seek audio frames (`_awaitingInitialSeek`), and scrolls `#main-content` so target phrases land squarely in the unobstructed reading zone between `#transcript-sticky-toolbar` and `#audio-player-bar` / `#transcript-lexicon-companion`.
   - Diacritic-insensitive real-time search filtering across all lexicon terms and authority documents.
   - **Multi-Faceted Browse Filtering & Shareable Catalog Views**: Filter the transcribed archive in Browse Talks (`#browse`) by multiple monastics with `Any (OR)` or co-taught `All (AND)` matching (exact slug/token resolution avoiding `Ajahn Brahm` / `Ajahn Brahmali` substring collisions), groupable years with decade presets and custom spans, diacritic-insensitive title filtering (`MN`, `MN OR DN`, `-exclude`, `"phrase"`, and `Whole Word` boundary matching for codes like `AN` with live match highlighting), talk length presets and custom minute bounds, Sutta collection (`MN`, `DN`, `SN`, `AN`, `KN`) and talk format facets (`Retreat`, `Non-Retreat`, `Q&A`, `Meditation`, `Workshop`, `Co-taught`, `Bookmarked Only`), recorded-year sorting, removable filter chips, URL-hash persistence (`#browse?...`), and filtered ZIP archive exports.
   - Live audio companion highlighting Pali terms dynamically during playback.
   - Full browser Back and Forward history support (`popstate` SPA history routing) without interrupting audio streaming.
   - Universal shareable URLs for text messages and email: supports hashes (`/#talk/pb28113880`), query parameters (`/?talk=pb28113880`), and clean server paths (`/talk/pb28113880`).
   - Precision timestamp links (`?t=125` or `?t=2m05s` or `?t=02:05`): automatically scrolls to the turn, highlights the speech segment, and starts playback at that exact second.
-  - **Sticky Transcript Toolbar & Triple-Option Word Sync (`Off | On | Track`)**:
-    - Glassmorphic sticky header (`#transcript-sticky-toolbar`) keeps synchronization and export controls permanently reachable during long reads.
+  - **Sticky Transcript Toolbar, Mobile Bottom Sheet & Triple-Option Word Sync (`Off | On | Track`)**:
+    - Glassmorphic sticky header (`#transcript-sticky-toolbar`) locks at `top: 0` inside `<main>` (with collapsible actions on `<= 1024px`), while `#transcript-lexicon-companion` stays sticky at `bottom: 0` via CSS Grid row spanning (`display: contents` on `.transcript-layout-container`) so it expands upward cleanly even on short mobile screens.
     - Global in-memory state (`WordSync.mode`) with three dedicated operational modes:
       - **`Off`**: Completely disables word-level highlight tracking.
       - **`On`**: Highlights active words in real time with audio playback; preserves 100% manual scroll control.
-      - **`Track`** (default): Seamless teleprompter auto-scrolling that continuously interpolates vertical reading progression across each spoken line with sub-pixel damping, smoothly gliding upward without jarring line-break jumps. Temporarily yields to manual user touch/wheel interaction with automatic resumption.
+      - **`Track`** (default): Seamless teleprompter auto-scrolling on `#main-content` that continuously interpolates vertical reading progression across each spoken line with sub-pixel damping, smoothly gliding upward without jarring line-break jumps. Temporarily yields to manual user touch/wheel interaction with automatic resumption.
   - Deterministic zero-loss sentence scanner (`splitSentences`) in WordSync: preserves internal decimals (`6.15`, `5.30`, `3.14`), spaced dots (`6 .15`), quotes, and abbreviations without regex backtracking or dropping DOM tokens, guaranteeing 100% word-highlight synchronization.
   - **Atomic Service Worker Versioning & Network-First Navigation**:
     - Pre-rendered Service Worker (`svc_worker.js`) stamped with dynamic Unix build version (`deeper_dhamma_shell_{timestamp}`), automatically rotating caches and purging obsolete assets across builds.
@@ -144,7 +145,7 @@ python main.py status --pending -y 2001 # List audio files in archive ready to b
 python main.py status --completed       # List already transcribed talks in database
 
 # 11. Static Web Application & SQLite WASM Compiler (Zero-Backend Serverless)
-python main.py web --build              # Compiles vacuumed dhamma_web.db & static bundle into dist/
+python main.py web --build              # Compiles sharded core/talks/words SQLite WASM bundle & static site into dist/
 python main.py web --run                # Preview static site with native HTTP Range support
 python main.py web --build --run        # Compile and immediately preview
 python main.py web --deploy             # Compiles & deploys dist/ directly to GitHub Pages (deeperdhamma.com)
@@ -154,7 +155,7 @@ python main.py web -r --port 8080       # Custom port or output directory
 python main.py serve --run              # Serve static bundle on http://127.0.0.1:34266
 python main.py serve -r --port 34266    # Custom port (requires -r/--run to start)
 
-# 13. Run Full Verification & Unit Test Suite (209 tests)
+# 13. Run Full Verification & Unit Test Suite (214 tests)
 python -m pytest tests -p no:cov        # Execute all unit and integration tests
 pytest --cov=deeper_dhamma              # Generate full code coverage report
 ```
@@ -199,7 +200,7 @@ deeper_dhamma/
 │       ├── static/             # CSS, app.js, word_sync.js, db_worker.js, sqlite3.wasm
 │       │   └── adapters/       # In-browser SQLite WASM adapter (wasm_client.js)
 │       └── views/              # Static HTML template (index.html)
-├── tests/                      # Comprehensive Unit & Integration Test Suite (209 tests)
+├── tests/                      # Comprehensive Unit & Integration Test Suite (214 tests)
 │   ├── test_cli.py             # CLI parser, "One Obvious Way" flags, subcommands dispatch
 │   ├── test_audit.py           # Ghost files, temp fragments, html error pages, archive cleanup
 │   ├── test_benchmark.py       # Precision, recall, F1, and sequence-aligned WER evaluation

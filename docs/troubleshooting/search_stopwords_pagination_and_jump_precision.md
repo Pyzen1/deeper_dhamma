@@ -38,8 +38,8 @@
 |  - WordSync.prepareEpisodeSync() clears stale turnWordMap and parses        |
 |    attached words_blob synchronously before initial render/jump             |
 |  - WordSync._awaitingInitialSeek blocks pre-seek 0:00 / stale frames        |
-|  - scrollElementIntoReadingZone() centers target between sticky toolbar &   |
-|    bottom audio player bar; re-seeks if async enrichment shifts > 0.15s     |
+|  - scrollElementIntoReadingZone() centers target in #main-content between   |
+|    sticky toolbar & bottom player/companion; re-seeks if shift > 0.15s      |
 +-----------------------------------------------------------------------------+
 ```
 
@@ -64,7 +64,7 @@
 - **[word_sync.js](file:///c:/dev/deeper_dhamma/deeper_dhamma/web/static/word_sync.js)** & **[app.js](file:///c:/dev/deeper_dhamma/deeper_dhamma/web/static/app.js)**:
   - `WordSync.prepareEpisodeSync(episode)` resets stale `turnWordMap` on episode switches and parses attached `words_blob` synchronously before `renderDrawerTurns()`.
   - `WordSync._awaitingInitialSeek` prevents pre-seek `0:00` or stale-position frames from hijacking `WordSync.update()` / `syncProgress()` until `doSeek()` sets `audio.currentTime`, while preserving `WordSync._seekTargetWordTime` across same-episode enrichment.
-  - `applyTargetOpts()` uses `matchedW.domId || matchedW.id`, validates `sentEl.contains(targetWordEl)`, scrolls via `scrollElementIntoReadingZone()` inside the unobstructed `[toolbarBottom .. playerTop]` band, and re-seeks if async word enrichment moves `exactWordSec` by `> 0.15s`.
+  - `applyTargetOpts()` uses `matchedW.domId || matchedW.id`, validates `sentEl.contains(targetWordEl)`, scrolls `#main-content` via `scrollElementIntoReadingZone()` inside the unobstructed reading band between the sticky transcript toolbar and docked bottom chrome (`#transcript-lexicon-companion` on `<= 1024px` or `#main-content` bottom edge), and re-seeks if async word enrichment moves `exactWordSec` by `> 0.15s`.
 
 ---
 

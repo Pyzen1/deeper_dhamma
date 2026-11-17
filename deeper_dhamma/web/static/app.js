@@ -2568,7 +2568,7 @@
         if (state.lexicon.page > 1) {
           state.lexicon.page = 1;
           loadLexiconView();
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          scrollContentTo(0, 'smooth');
         }
       });
     }
@@ -2577,7 +2577,7 @@
         if (state.lexicon.page > 1) {
           state.lexicon.page--;
           loadLexiconView();
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          scrollContentTo(0, 'smooth');
         }
       });
     }
@@ -2586,7 +2586,7 @@
         if (state.lexicon.page < state.lexicon.totalPages) {
           state.lexicon.page++;
           loadLexiconView();
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          scrollContentTo(0, 'smooth');
         }
       });
     }
@@ -2595,7 +2595,7 @@
         if (state.lexicon.page < state.lexicon.totalPages) {
           state.lexicon.page = state.lexicon.totalPages;
           loadLexiconView();
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          scrollContentTo(0, 'smooth');
         }
       });
     }
@@ -5718,7 +5718,7 @@
     if (els.lexPagination) els.lexPagination.style.display = 'none';
     if (els.lexCountText) els.lexCountText.textContent = `Search results for "${termKey}"`;
     executeLexiconSearch(termKey);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollContentTo(0, 'smooth');
   }
 
   function createCompanionCard(term, idx) {
@@ -5890,17 +5890,46 @@
     }
   }
 
+  function getScrollContainer() {
+    return document.getElementById('main-content') || window;
+  }
+
+  function getScrollTopPos() {
+    const sc = getScrollContainer();
+    return sc === window ? (window.scrollY || window.pageYOffset || 0) : sc.scrollTop;
+  }
+
+  function scrollContentTo(top, behavior = 'auto') {
+    const sc = getScrollContainer();
+    if (sc === window) {
+      window.scrollTo({ top, behavior });
+    } else if (typeof sc.scrollTo === 'function') {
+      sc.scrollTo({ top, behavior });
+    } else {
+      sc.scrollTop = top;
+    }
+  }
+
   function scrollElementIntoReadingZone(el, behavior = 'auto') {
     if (!el) return;
+    const sc = getScrollContainer();
+    const mainRect = sc !== window ? sc.getBoundingClientRect() : null;
     const viewportH = window.innerHeight || document.documentElement.clientHeight;
+    const topFloor = mainRect ? Math.max(0, mainRect.top) : 0;
+    let bottomLimit = mainRect ? Math.min(viewportH, mainRect.bottom) : viewportH;
+
     const toolbar = document.getElementById('transcript-sticky-toolbar');
-    const toolbarBottom = toolbar ? Math.max(0, toolbar.getBoundingClientRect().bottom) : 0;
+    const toolbarBottom = toolbar ? Math.max(topFloor, toolbar.getBoundingClientRect().bottom) : topFloor;
     const playerBar = document.getElementById('audio-player-bar');
-    let bottomLimit = playerBar ? Math.min(viewportH, playerBar.getBoundingClientRect().top) : viewportH;
+    if (playerBar) {
+      bottomLimit = Math.min(bottomLimit, playerBar.getBoundingClientRect().top);
+    }
     const companionBar = document.getElementById('transcript-lexicon-companion');
     if (companionBar) {
       const compStyle = window.getComputedStyle(companionBar);
-      if (compStyle.display !== 'none' && compStyle.position === 'fixed') {
+      const viewportW = document.documentElement.clientWidth || window.innerWidth;
+      const isBottomSheet = compStyle.position === 'fixed' || (sc !== window && viewportW <= 1024);
+      if (compStyle.display !== 'none' && isBottomSheet) {
         const compRect = companionBar.getBoundingClientRect();
         if (compRect.height > 0) {
           bottomLimit = Math.min(bottomLimit, compRect.top);
@@ -5909,11 +5938,10 @@
     }
 
     const rect = el.getBoundingClientRect();
-    const docTop = rect.top + (window.scrollY || window.pageYOffset || 0);
     const availableH = Math.max(80, bottomLimit - toolbarBottom);
     const desiredTopInViewport = toolbarBottom + Math.min(availableH * 0.35, Math.max(20, (availableH - rect.height) / 2));
-    const targetScrollY = Math.max(0, docTop - desiredTopInViewport);
-    window.scrollTo({ top: targetScrollY, behavior });
+    const targetScrollY = Math.max(0, getScrollTopPos() + (rect.top - desiredTopInViewport));
+    scrollContentTo(targetScrollY, behavior);
   }
 
   function jumpToCompanionTerm(idx) {
@@ -6091,7 +6119,7 @@
     }
 
     if (!targetOpts) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollContentTo(0, 'smooth');
     }
 
     if (els.drawerTurns) {
@@ -6352,17 +6380,18 @@
     let isScrubbing = false;
     let scrubCommitted = false;
 
-    const sidebarEl = document.getElementById('app-sidebar');
+    const mainEl = document.getElementById('main-content');
     function updateLayoutChromeVars() {
       if (els.playerBar) {
         const rectH = els.playerBar.getBoundingClientRect().height;
         const h = Math.ceil(rectH) || els.playerBar.offsetHeight || 78;
         document.documentElement.style.setProperty('--player-height', `${h}px`);
       }
-      if (sidebarEl) {
-        const rectSh = sidebarEl.getBoundingClientRect().height;
-        const sh = Math.ceil(rectSh) || sidebarEl.offsetHeight || 52;
-        document.documentElement.style.setProperty('--sidebar-height', `${sh}px`);
+      if (mainEl) {
+        const rectMh = mainEl.getBoundingClientRect().height;
+        if (rectMh > 0) {
+          document.documentElement.style.setProperty('--main-height', `${Math.floor(rectMh)}px`);
+        }
       }
       if (els.transcriptStickyToolbar && !els.transcriptStickyToolbar.classList.contains('is-actions-open')) {
         const rectTh = els.transcriptStickyToolbar.getBoundingClientRect().height;
@@ -6385,7 +6414,7 @@
     if (typeof ResizeObserver !== 'undefined') {
       const ro = new ResizeObserver(() => updateLayoutChromeVars());
       if (els.playerBar) ro.observe(els.playerBar);
-      if (sidebarEl) ro.observe(sidebarEl);
+      if (mainEl) ro.observe(mainEl);
       if (els.transcriptStickyToolbar) ro.observe(els.transcriptStickyToolbar);
     }
 

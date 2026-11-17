@@ -126,9 +126,9 @@ ORDER BY turn_count DESC;
 
 ---
 
-## Static Web Distribution Compilation (`dhamma_web.db`)
+## Static Web Distribution Compilation (Sharded `dist/` Bundle)
 
-While `buddhism_lexicon.db`, `voiceprints.db`, `pipeline_state.db`, and `dhamma_transcripts.db` remain strictly separated during ingestion, training, and transcription on the developer system, the web application runs 100% serverless via in-browser **SQLite WASM**:
+While `buddhism_lexicon.db`, `voiceprints.db`, `pipeline_state.db`, and `dhamma_transcripts.db` remain strictly separated during ingestion, training, and transcription on the developer system, the web application runs 100% serverless via in-browser **SQLite WASM** using gzipped database shards:
 
 ```text
 =========================== DEVELOPMENT / INGESTION (Source) ===========================
@@ -137,24 +137,22 @@ While `buddhism_lexicon.db`, `voiceprints.db`, `pipeline_state.db`, and `dhamma_
   - Doctrinal reference    - 192-d ECAPA       - Local filepaths &    - Pure domain records
                              vectors             error logs             (keyed by pbXXXXXXX)
            |                      |                   |                         |
-           | (Doctrinal terms)    x (EXCLUDED)        x (EXCLUDED)              | (Episodes, FTS5)
-           +----------------------+-------------------+-------------------------+
+           | (Doctrinal terms)    x (EXCLUDED)        x (EXCLUDED)              | (Episodes, FTS5,
+           +----------------------+-------------------+-------------------------+  utterances, words)
                                               |
                                               v  python main.py web --build
 =========================== STATIC WEB DISTRIBUTION (dist/) ============================
-                                       [dhamma_web.db]
-                               - episodes & speech_segments
-                               - transcripts_fts (FTS5)
-                               - terms, source_documents & v_terms
-                               - PRAGMA user_version = <timestamp>
-                               - VACUUM (zero fragmentation, ~4.14 MB)
+   [db_manifest.json (sharded_v1)]  ->  Version metadata (PRAGMA user_version + SHA-256)
+   [core.db.gz]                     ->  episodes metadata, transcripts_fts (FTS5), lexicon
+   [talks_1..4.db.gz]               ->  Sharded utterances/dialogue turns per episode
+   [words_1..4.db.gz]               ->  Sharded word timings & binary VBR1 seek trailers
                                               |
                                               v
                                      Shipped to Browser
 ```
 
-* **Why Combine for Web?** The browser is 100% read-only (zero write lock contention) and does not perform acoustic inference or local filesystem operations (`voiceprints.db` and `pipeline_state.db` are excluded). Consolidating `dhamma_transcripts.db` and `buddhism_lexicon.db` into `dhamma_web.db` allows the browser to download and query a single vacuumed file with zero post-hoc scrubbing.
-* **Cache Validation**: The build script stamps `PRAGMA user_version = <YYYYMMDD>` at byte offset 60..63 of the file header. The client worker issues a 100-byte HTTP Range probe (`Range: bytes=0-99`) to validate local `IndexedDB` caching before fetching any updates.
+* **Why Shard & Compress for Web?** The browser is 100% read-only (zero write lock contention) and does not perform acoustic inference or local filesystem operations (`voiceprints.db` and `pipeline_state.db` are excluded). Splitting `dhamma_transcripts.db` + `buddhism_lexicon.db` into a compact `core.db.gz` (~3.14 MB gzipped) plus sharded `talks_1..4.db.gz` and `words_1..4.db.gz` allows fast initial boot (loading core search & metadata immediately) while hydrating dialogue turns and word-sync shards in OPFS/IndexedDB.
+* **Cache Validation**: Each build stamps a Unix timestamp into `PRAGMA user_version` and emits `db_manifest.json` (`sharded_v1`) with per-shard `sha256` checksums and versions so `db_worker.js` can detect updates and atomically hot-swap changed shards (retaining a `Range: bytes=0-99` probe on `./dhamma_web.db` only as a legacy fallback).
 
 ## Serverless Web Architecture: Pure SQLite WASM & Service Worker
 
@@ -165,7 +163,7 @@ Data access is executed directly in-browser without any REST API or backend serv
 ```text
 +---------------------------------------------------------------------------------+
 |                         Unified Frontend (100% Client-Side)                     |
-|  views/index.html + static/style.css + static/app.js (calls window.DeeperDhammaDB)
+|  views/index.html + static/style.css + static/app.js + static/word_sync.js      |
 +---------------------------------------------------------------------------------+
                                          |
                        loads <script src="db_client.js">
@@ -181,8 +179,8 @@ Data access is executed directly in-browser without any REST API or backend serv
              +---------------------------+---------------------------+
              |                                                       |
              v                                                       v
-   [ Official SQLite WASM ]                                [ IndexedDB Persistence ]
-   - Runs FTS5 full-text queries                           - Caches dhamma_web.db locally
-   - Queries episode_words table for word sync             - Fast cold starts & offline access
-   - Zero backend server or REST API required              - Validated via 100-byte Range probe
+   [ Official SQLite WASM ]                              [ OPFS Pool & IndexedDB ]
+   - Queries core.db FTS5 & lexicon                      - Persists core/talks/words
+   - Opens attached talks_N & words_N shards             - Fast cold starts & offline
+   - Zero backend server or REST API required            - Synced via db_manifest.json
 ```

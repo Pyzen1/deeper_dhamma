@@ -74,7 +74,7 @@ Previously, `StreamSeekCalibrator` pre-warped segment and word timestamps using 
 
 ## 3. Architectural Solution (100% Serverless Static Web Application)
 
-Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` hosted on GitHub Pages, Cloudflare Pages, or S3) streaming audio directly from Podbean CDN (`https://mcdn.podbean.com/...`) with **zero Python backend**, the entire VBR synchronization engine operates purely in client-side JavaScript (`word_sync.js`) powered by the binary `VBR1` trailer stored in the `episode_words` SQLite table in `dhamma_web.db`:
+Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` hosted on GitHub Pages, Cloudflare Pages, or S3) streaming audio directly from Podbean CDN (`https://mcdn.podbean.com/...`) with **zero Python backend**, the entire VBR synchronization engine operates purely in client-side JavaScript (`word_sync.js`) powered by the binary `VBR1` trailer stored in the `episode_words` SQLite table in the sharded `words_1..4.db.gz` SQLite WASM databases (originally consolidated in `dhamma_web.db`):
 
 ```text
 +-----------------------------------------------------------------------------+

@@ -1216,6 +1216,30 @@
       }).join('');
     },
 
+    getScrollContainer: function () {
+      if (typeof document !== 'undefined') {
+        const mainEl = document.getElementById('main-content');
+        if (mainEl) return mainEl;
+      }
+      return typeof window !== 'undefined' ? window : null;
+    },
+
+    getScrollTop: function () {
+      const sc = this.getScrollContainer();
+      if (!sc) return 0;
+      return sc === window ? (window.scrollY || window.pageYOffset || 0) : sc.scrollTop;
+    },
+
+    setScrollTop: function (y) {
+      const sc = this.getScrollContainer();
+      if (!sc) return;
+      if (sc === window) {
+        window.scrollTo(0, y);
+      } else {
+        sc.scrollTop = y;
+      }
+    },
+
     /**
      * Resolves the visual line geometry and speech timing for continuous teleprompter interpolation.
      * Caches line boundaries so lookup across words on the same line is O(1).
@@ -1227,8 +1251,9 @@
         return this._teleprompterLine;
       }
 
+      const scrollTop = this.getScrollTop();
       const rect = wordEl.getBoundingClientRect();
-      const currentDocY = rect.top + window.scrollY;
+      const currentDocY = rect.top + scrollTop;
       const wordHeight = rect.height || 28;
       const currentLineCenterY = currentDocY + wordHeight / 2;
 
@@ -1237,7 +1262,7 @@
       for (let i = targetIdx - 1; i >= Math.max(0, targetIdx - 25); i--) {
         const prevSpan = document.getElementById(this.words[i].domId || this.words[i].id);
         if (!prevSpan) break;
-        const prevDocY = prevSpan.getBoundingClientRect().top + window.scrollY;
+        const prevDocY = prevSpan.getBoundingClientRect().top + scrollTop;
         if (Math.abs(prevDocY - currentDocY) > 8) {
           // Found previous line
           break;
@@ -1254,7 +1279,7 @@
       for (let i = targetIdx + 1; i < Math.min(this.words.length, targetIdx + 30); i++) {
         const nextSpan = document.getElementById(this.words[i].domId || this.words[i].id);
         if (!nextSpan) continue;
-        const nextDocY = nextSpan.getBoundingClientRect().top + window.scrollY;
+        const nextDocY = nextSpan.getBoundingClientRect().top + scrollTop;
         if (nextDocY > currentDocY + 10) {
           // Found first word on next line
           nextLineStartIdx = i;
@@ -1289,19 +1314,24 @@
       // If user recently scrolled manually (wheel or touch), pause teleprompter for 2.5s
       if (performance.now() - this._userInteractedAt < 2500) return;
 
+      const sc = this.getScrollContainer();
+      const isShell = Boolean(sc && sc !== window);
+      const mainRect = isShell ? sc.getBoundingClientRect() : null;
       const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+      const topFloor = mainRect ? Math.max(0, mainRect.top) : 0;
 
       // 1. Calculate active reading viewport bounds between sticky toolbar and audio player
       const toolbar = document.getElementById('transcript-sticky-toolbar');
-      let toolbarBottom = 0;
+      let toolbarBottom = topFloor;
       if (toolbar) {
-        toolbarBottom = Math.max(0, toolbar.getBoundingClientRect().bottom);
+        toolbarBottom = Math.max(topFloor, toolbar.getBoundingClientRect().bottom);
       }
 
       const playerBar = document.getElementById('audio-player-bar');
-      let playerTop = viewportHeight;
+      let playerTop = mainRect ? Math.min(viewportHeight, mainRect.bottom) : viewportHeight;
       if (playerBar) {
-        playerTop = Math.min(viewportHeight, playerBar.getBoundingClientRect().top);
+        playerTop = Math.min(playerTop, playerBar.getBoundingClientRect().top);
       }
 
       const companionBar = document.getElementById('transcript-lexicon-companion');
@@ -1309,7 +1339,11 @@
         const compStyle = typeof window !== 'undefined' && window.getComputedStyle
           ? window.getComputedStyle(companionBar)
           : null;
-        if (!compStyle || (compStyle.display !== 'none' && compStyle.position === 'fixed')) {
+        const isBottomSheet = !compStyle || (
+          compStyle.display !== 'none' &&
+          (compStyle.position === 'fixed' || (isShell && viewportWidth <= 1024))
+        );
+        if (isBottomSheet) {
           const compRect = companionBar.getBoundingClientRect();
           if (compRect.height > 0) {
             playerTop = Math.min(playerTop, compRect.top);
@@ -1331,13 +1365,13 @@
       const targetScrollY = Math.max(0, idealDocY - centerLine);
 
       // 3. Smooth continuous damping
-      const currentScrollY = window.scrollY || window.pageYOffset || 0;
+      const currentScrollY = this.getScrollTop();
       const diff = targetScrollY - currentScrollY;
 
       if (Math.abs(diff) >= 0.4) {
         // Fast glide for seeks (> 150px), silky sub-pixel drift for continuous playback
         const factor = Math.abs(diff) > 150 ? 0.15 : 0.08;
-        window.scrollTo(0, currentScrollY + diff * factor);
+        this.setScrollTop(currentScrollY + diff * factor);
       }
     },
 

@@ -150,7 +150,7 @@ Autoregressive Whisper decoding at `batch_size=1` (`beam_size=5`) streams decode
 
 - **Non-Destructive Raw ASR Baseline (`pipeline_state.db` -> `episode_raw_asr`)**:
   - When `TranscriptDatabase.save_episode()` commits a talk, `PipelineStateDatabase.save_raw_asr()` persists the pristine pre-postprocessing turns (`raw_text` and `raw_words` including per-word `prob`, `start`, `end`) as a `zlib`-compressed JSON BLOB in `databases/pipeline_state.db`.
-  - Storing this baseline in `pipeline_state.db` keeps `dhamma_transcripts.db` (and the browser SQLite WASM bundle `dhamma_web.db`) 100% free of duplicate text bloat, while enabling `TranscriptDatabase.reprocess_episodes()` to re-run updated post-processing rules across the entire archive in seconds on CPU—preserving `VBR1` seek trailers and automatically updating FTS5 triggers.
+  - Storing this baseline in `pipeline_state.db` keeps `dhamma_transcripts.db` (and the sharded browser SQLite WASM bundle in `dist/`) 100% free of duplicate text bloat, while enabling `TranscriptDatabase.reprocess_episodes()` to re-run updated post-processing rules across the entire archive in seconds on CPU—preserving `VBR1` seek trailers and automatically updating FTS5 triggers.
 
 ---
 

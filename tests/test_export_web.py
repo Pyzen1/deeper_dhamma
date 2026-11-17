@@ -1873,28 +1873,28 @@ def test_responsive_small_screen_layout_contract():
     view_fade_css = style_css.split("@keyframes viewFadeIn {", 1)[1].split("\n}", 1)[0]
     assert "transform" not in view_fade_css
 
-    # 2. Mobile 600px nav wrapping + sticky toolbar dynamic top + lexicon companion left: 0 after 900px
+    # 2. App-shell grid layout & mobile wrapping + sticky toolbar/companion inside <main>
+    assert "height: 100dvh;" in style_css
+    assert 'grid-template-areas:\n    "sidebar main"\n    "footer footer";' in style_css
+
     mobile_block = style_css.split("@media (max-width: 600px)")[1]
     assert "flex-wrap: wrap" in mobile_block
     assert "width: auto" in mobile_block
-    assert "var(--sidebar-height" in mobile_block
+    assert '"sidebar"\n      "main"\n      "footer"' in mobile_block
 
-    idx_900 = style_css.rfind(".transcript-lexicon-companion {\n    left: 76px;")
-    idx_600 = style_css.rfind(".transcript-lexicon-companion {\n    left: 0;")
-    assert idx_900 != -1 and idx_600 > idx_900, "600px left: 0 override must come after 900px left: 76px rule"
-
-    comp_expanded_1024 = style_css.split("@media (max-width: 1024px)")[1].split(".transcript-lexicon-companion.is-expanded {", 1)[1].split("}", 1)[0]
-    assert "var(--player-height" in comp_expanded_1024
+    comp_1024 = style_css.split("@media (max-width: 1024px)")[1]
+    assert "position: sticky;" in comp_1024
+    comp_expanded_1024 = comp_1024.split(".transcript-lexicon-companion.is-expanded {", 1)[1].split("}", 1)[0]
+    assert "var(--main-height" in comp_expanded_1024
+    assert "var(--toolbar-height" in comp_expanded_1024
     comp_stack_1024 = style_css.split(".transcript-lexicon-companion.is-expanded .lexicon-stack-container {", 1)[1].split("}", 1)[0]
     assert "min-height: 0" in comp_stack_1024
-    comp_expanded_600 = style_css[idx_600:].split(".transcript-lexicon-companion.is-expanded {", 1)[1].split("}", 1)[0]
-    assert "var(--sidebar-height" in comp_expanded_600
-    assert "var(--player-height" in comp_expanded_600
 
-    # 3. Viewport clamping helper & layout chrome height observers in app.js
+    # 3. Viewport clamping helper, <main> scroll helpers & layout chrome height observers in app.js
     assert "function clampFloatingPanelToViewport(" in app_js
     assert "function resetFloatingPanelPosition(" in app_js
-    assert "--sidebar-height" in app_js
+    assert "function getScrollContainer(" in app_js
+    assert "--main-height" in app_js
     assert "--toolbar-height" in app_js
 
     # 4. Fluent mic track icon and Podbean CDN badge removed; Bookmark stays top-right;
@@ -2091,12 +2091,14 @@ def test_headless_chrome_small_screen_no_overflow():
                         const curRect = timeCur ? timeCur.getBoundingClientRect() : null;
                         const totRect = timeTot ? timeTot.getBoundingClientRect() : null;
                         extra.compLeft = comp ? Math.round(comp.getBoundingClientRect().left) : null;
+                        const mainEl = doc.getElementById('main-content');
+                        const mainRightEdge = mainEl ? Math.round(mainEl.getBoundingClientRect().left + mainEl.clientWidth) : docW;
                         extra.toolbarIsAsideTopDocked = Boolean(
                           tb && tb.tagName.toLowerCase() === 'aside' && (
                             vw <= 1024
                               ? (
-                                  win.getComputedStyle(tb).position === 'fixed' &&
-                                  Math.round(tb.getBoundingClientRect().right) === docW &&
+                                  win.getComputedStyle(tb).position === 'sticky' &&
+                                  Math.abs(Math.round(tb.getBoundingClientRect().right) - mainRightEdge) <= 1 &&
                                   (vw <= 600
                                     ? (Math.round(tb.getBoundingClientRect().left) === 0 && sb && Math.abs(tb.getBoundingClientRect().top - sb.getBoundingClientRect().bottom) <= 1)
                                     : (Math.round(tb.getBoundingClientRect().top) === 0 && Math.round(tb.getBoundingClientRect().left) === (vw <= 900 ? 76 : 260))
@@ -2244,6 +2246,8 @@ def test_headless_chrome_small_screen_no_overflow():
                       await waitFor(() => doc.querySelectorAll('#drawer-turns-container .transcript-turn').length > 0);
                       const txPlay = doc.getElementById('transcript-play-btn');
                       if (txPlay) txPlay.click();
+                      const mainScrollReset = doc.getElementById('main-content');
+                      if (mainScrollReset) mainScrollReset.scrollTop = 0;
                       win.scrollTo(0, 0);
                       await wait(240);
                       states.push(auditState('transcript_view', vw));
@@ -2481,6 +2485,7 @@ def test_headless_chrome_pb9577355_lexicon_companion_track_sync():
                     await wait(200);
 
                     const ws = win.WordSync;
+                    const mainEl = doc.getElementById('main-content');
                     const stack = doc.getElementById('transcript-lexicon-stack');
                     const comp = doc.getElementById('transcript-lexicon-companion');
 
@@ -2491,34 +2496,38 @@ def test_headless_chrome_pb9577355_lexicon_companion_track_sync():
                     out.missingDom = missingDom;
                     out.wordsLen = ws.words.length;
 
-                    // 1. Trigger Pali term updates while at top of talk: window.scrollY must remain 0 while stack scrolls
-                    win.scrollTo(0, 0);
+                    // 1. Trigger Pali term updates while at top of talk: main/window scroll must remain 0 while stack scrolls
+                    mainEl.scrollTop = 0;
                     await wait(50);
-                    const winBeforePali = win.scrollY;
+                    const mainBeforePali = mainEl.scrollTop;
                     ws.setMode('on');
                     const paliTimeEl = doc.getElementById('lex-card-40');
                     const wordTarget = doc.getElementById('tw-1383');
                     const tTarget = wordTarget ? parseFloat(wordTarget.dataset.start) : 520;
                     ws.update(tTarget + 0.05);
                     await wait(350);
-                    out.stackScrolledWithoutWindow = Math.round(win.scrollY) === Math.round(winBeforePali) && stack.scrollTop > 0;
+                    out.stackScrolledWithoutWindow = (
+                      Math.round(mainEl.scrollTop) === Math.round(mainBeforePali) &&
+                      Math.round(win.scrollY) === 0 &&
+                      stack.scrollTop > 0
+                    );
 
-                    // 2. Click companion card #40 from scrollY=0 -> transcript word lands inside viewport
-                    win.scrollTo(0, 0);
+                    // 2. Click companion card #40 from scrollTop=0 -> transcript word lands inside viewport
+                    mainEl.scrollTop = 0;
                     await wait(60);
                     paliTimeEl.click();
                     await wait(1200);
                     const rect40 = wordTarget.getBoundingClientRect();
                     out.jumpCardInViewport = rect40.top >= 60 && rect40.bottom <= 680;
-                    out.jumpScrollY = Math.round(win.scrollY);
+                    out.jumpScrollY = Math.round(mainEl.scrollTop);
 
-                    // 3. Clicking 'Active' scrolls companion stack only, leaving window.scrollY unchanged
+                    // 3. Clicking 'Active' scrolls companion stack only, leaving main/window scroll unchanged
                     stack.scrollTop = 0;
                     await wait(50);
-                    const yBeforeActive = Math.round(win.scrollY);
+                    const yBeforeActive = Math.round(mainEl.scrollTop);
                     doc.getElementById('btn-clear-lex-stack').click();
                     await wait(600);
-                    out.activeBtnWinUnchanged = Math.abs(win.scrollY - yBeforeActive) <= 1;
+                    out.activeBtnWinUnchanged = Math.abs(mainEl.scrollTop - yBeforeActive) <= 1 && Math.round(win.scrollY) === 0;
                     out.activeBtnStackScrolled = stack.scrollTop > 100;
 
                     // 4. Wheel on companion does not pause teleprompter tracking; wheel on transcript does
@@ -2529,7 +2538,7 @@ def test_headless_chrome_pb9577355_lexicon_companion_track_sync():
                     out.wheelTranscriptPauses = ws._userInteractedAt > 0;
                     ws._userInteractedAt = 0;
 
-                    // 5. Continuous 'track' mode progression on mobile stays above fixed lexicon companion bar
+                    // 5. Continuous 'track' mode progression on mobile stays above sticky lexicon companion bar
                     frame.style.width = '393px';
                     frame.style.height = '851px';
                     await wait(180);
@@ -2552,7 +2561,8 @@ def test_headless_chrome_pb9577355_lexicon_companion_track_sync():
                       mobWordBottom: mobWordRect ? Math.round(mobWordRect.bottom) : null,
                       tbBottom: Math.round(tbRect.bottom),
                       compTop: Math.round(compRect.top),
-                      scrollY: Math.round(win.scrollY),
+                      scrollY: Math.round(mainEl.scrollTop),
+                      winScrollY: Math.round(win.scrollY),
                     };
                     out.mobileTrackClearOfCompanion = Boolean(
                       mobWordRect && mobWordRect.top >= tbRect.bottom - 1 && mobWordRect.bottom <= compRect.top + 1
@@ -2629,6 +2639,263 @@ def test_headless_chrome_pb9577355_lexicon_companion_track_sync():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_headless_chrome_app_shell_layout_e2e():
+    """
+    Verifies the 100dvh CSS Grid app-shell layout on index.html:
+    1. Separates <aside.app-sidebar>, <main.app-main>, and <footer.audio-player-bar> into
+       non-overlapping grid regions at both mobile (412x915) and desktop (1280x800).
+    2. Locks outer html/body scroll (scrollHeight <= clientHeight) while <main> scrolls internally.
+    3. Keeps mobile Word Sync toolbar and Lexicon companion pinned cleanly inside <main> on scroll
+       and verifies WordSync teleprompter scrolls <main> rather than window.scrollY.
+    """
+    import http.server
+    import json
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found")
+    if not (DIST_DIR / "db_manifest.json").exists() or not (DIST_DIR / "index.html").exists():
+        pytest.skip("Built static bundle not present in dist/")
+
+    assert not (DIST_DIR / "index_shell.html").exists(), "Temporary index_shell.html should be pruned"
+    assert not (DIST_DIR / "style_shell.css").exists(), "Temporary style_shell.css should be pruned"
+
+    report = {}
+
+    class ShellAuditHandler(StaticPreviewHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__shell_report":
+                length = int(self.headers.get("Content-Length", 0))
+                payload = self.rfile.read(length)
+                report.update(json.loads(payload.decode("utf-8")))
+                self.send_response(200)
+                self.end_headers()
+                return
+            self.send_error(404)
+
+        def do_GET(self):
+            if self.path == "/__shell_host.html":
+                html = r"""<!DOCTYPE html>
+                <html><head><meta charset="utf-8"></head>
+                <body style="margin:0;padding:0;">
+                <iframe id="f" style="border:0;width:412px;height:915px;display:block;" src="about:blank"></iframe>
+                <script>
+                (async () => {
+                  const frame = document.getElementById('f');
+                  const wait = ms => new Promise(r => setTimeout(r, ms));
+                  const waitFor = async (fn, timeoutMs = 45000) => {
+                    const start = Date.now();
+                    while (Date.now() - start < timeoutMs) {
+                      const val = fn();
+                      if (val) return val;
+                      await wait(80);
+                    }
+                    throw new Error('Timed out waiting for shell layout condition');
+                  };
+
+                  const out = { ok: false };
+                  try {
+                    await new Promise(res => {
+                      frame.onload = () => {
+                        if (frame.contentWindow.location.pathname === '/index.html') res();
+                      };
+                      frame.src = '/index.html';
+                    });
+
+                    const doc = frame.contentDocument;
+                    const win = frame.contentWindow;
+                    await waitFor(() => parseInt(doc.getElementById('browse-count-badge')?.textContent?.trim() || '0', 10) > 1000);
+
+                    // Open search -> transcript
+                    const searchInput = doc.getElementById('search-input');
+                    searchInput.value = 'five hindrances';
+                    searchInput.dispatchEvent(new win.Event('input', { bubbles: true }));
+                    await waitFor(() => doc.querySelectorAll('#search-results-list .result-card').length > 0);
+                    doc.querySelector('#search-results-list [data-action="view-transcript"]').click();
+                    await waitFor(() => doc.querySelectorAll('#drawer-turns-container .transcript-turn').length > 0);
+                    const txPlay = doc.getElementById('transcript-play-btn');
+                    if (txPlay) txPlay.click();
+                    await wait(300);
+
+                    const mainEl = doc.getElementById('main-content');
+                    const sbEl = doc.getElementById('app-sidebar');
+                    const barEl = doc.getElementById('audio-player-bar');
+                    const tbEl = doc.getElementById('transcript-sticky-toolbar');
+                    const compEl = doc.getElementById('transcript-lexicon-companion');
+
+                    function snapMobile() {
+                      const sb = sbEl.getBoundingClientRect();
+                      const main = mainEl.getBoundingClientRect();
+                      const bar = barEl.getBoundingClientRect();
+                      const tb = tbEl.getBoundingClientRect();
+                      const comp = compEl.getBoundingClientRect();
+                      return {
+                        docScrollH: doc.documentElement.scrollHeight,
+                        docClientH: doc.documentElement.clientHeight,
+                        docScrollW: doc.documentElement.scrollWidth,
+                        docClientW: doc.documentElement.clientWidth,
+                        winScrollY: win.scrollY,
+                        mainScrollTop: Math.round(mainEl.scrollTop),
+                        mainScrollHeight: Math.round(mainEl.scrollHeight),
+                        mainClientHeight: Math.round(mainEl.clientHeight),
+                        sbTop: Math.round(sb.top),
+                        sbBottom: Math.round(sb.bottom),
+                        mainTop: Math.round(main.top),
+                        mainBottom: Math.round(main.bottom),
+                        barTop: Math.round(bar.top),
+                        barBottom: Math.round(bar.bottom),
+                        tbTop: Math.round(tb.top),
+                        tbBottom: Math.round(tb.bottom),
+                        compTop: Math.round(comp.top),
+                        compBottom: Math.round(comp.bottom),
+                      };
+                    }
+
+                    out.mobileAt0 = snapMobile();
+                    mainEl.scrollTop = 1800;
+                    await wait(160);
+                    out.mobileAt1800 = snapMobile();
+
+                    // Test WordSync teleprompter scrolls <main> rather than window
+                    const ws = win.WordSync;
+                    if (ws && ws.words && ws.words.length > 200) {
+                      const targetW = ws.words[Math.floor(ws.words.length * 0.45)];
+                      mainEl.scrollTop = 0;
+                      await wait(80);
+                      ws._userInteractedAt = 0;
+                      ws.setMode('track');
+                      ws.playingEpisodeId = ws.currentEpisodeId;
+                      ws._teleprompterLine = null;
+                      for (let f = 0; f < 40; f++) {
+                        ws.update(targetW.s + 0.05);
+                        await wait(16);
+                      }
+                      out.mobileAfterTeleprompter = snapMobile();
+                    }
+
+                    // Expand companion sheet on mobile and verify it stays bounded inside <main>
+                    const toggleBtn = doc.getElementById('btn-toggle-lex-sheet');
+                    toggleBtn.click();
+                    await wait(350);
+                    out.mobileCompanionExpanded = snapMobile();
+                    toggleBtn.click();
+                    await wait(200);
+
+                    // Resize to desktop 1280x800 and verify non-overlapping sidebar | main above footer
+                    frame.style.width = '1280px';
+                    frame.style.height = '800px';
+                    await wait(220);
+                    mainEl.scrollTop = 900;
+                    await wait(120);
+                    const dSb = sbEl.getBoundingClientRect();
+                    const dMain = mainEl.getBoundingClientRect();
+                    const dBar = barEl.getBoundingClientRect();
+                    const dTb = tbEl.getBoundingClientRect();
+                    out.desktop = {
+                      docScrollH: doc.documentElement.scrollHeight,
+                      docClientH: doc.documentElement.clientHeight,
+                      docScrollW: doc.documentElement.scrollWidth,
+                      docClientW: doc.documentElement.clientWidth,
+                      winScrollY: win.scrollY,
+                      sbLeft: Math.round(dSb.left),
+                      sbRight: Math.round(dSb.right),
+                      sbBottom: Math.round(dSb.bottom),
+                      mainLeft: Math.round(dMain.left),
+                      mainTop: Math.round(dMain.top),
+                      mainBottom: Math.round(dMain.bottom),
+                      barTop: Math.round(dBar.top),
+                      barBottom: Math.round(dBar.bottom),
+                      tbTop: Math.round(dTb.top),
+                    };
+
+                    out.ok = true;
+                  } catch (err) {
+                    out.error = err && err.stack ? err.stack : String(err);
+                  }
+                  await fetch('/__shell_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(out),
+                  });
+                })();
+                </script>
+                </body></html>"""
+                body = html.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: ShellAuditHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_dir:
+            proc = subprocess.Popen([
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_dir}",
+                f"http://127.0.0.1:{port}/__shell_host.html",
+            ])
+            try:
+                deadline = time.time() + 50.0
+                while time.time() < deadline and not report:
+                    time.sleep(0.25)
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        assert report.get("ok") is True, f"Parallel shell layout audit failed: {report}"
+
+        for key in ("mobileAt0", "mobileAt1800"):
+            st = report[key]
+            assert st["docScrollH"] <= st["docClientH"], f"Outer document scrolled vertically in {key}: {st}"
+            assert st["docScrollW"] <= st["docClientW"], f"Horizontal overflow in {key}: {st}"
+            assert st["winScrollY"] == 0, f"window.scrollY moved in {key}: {st}"
+            assert st["sbTop"] == 0 and st["sbBottom"] <= st["mainTop"] + 1, f"Sidebar overlapped main in {key}: {st}"
+            assert st["mainBottom"] <= st["barTop"] + 1 and st["barBottom"] == 915, f"Main overlapped footer in {key}: {st}"
+            assert st["tbTop"] == st["mainTop"], f"Word sync toolbar not flush at top of main in {key}: {st}"
+            assert st["compBottom"] == st["mainBottom"], f"Companion not flush at bottom of main in {key}: {st}"
+
+        tp = report.get("mobileAfterTeleprompter")
+        assert tp is not None and tp["mainScrollTop"] > 100 and tp["winScrollY"] == 0, f"Teleprompter did not scroll <main>: {tp}"
+
+        exp = report["mobileCompanionExpanded"]
+        assert exp["compTop"] >= exp["tbBottom"] - 1 and exp["compBottom"] <= exp["barTop"] + 1, (
+            f"Expanded companion escaped main region: {exp}"
+        )
+
+        desk = report["desktop"]
+        assert desk["docScrollH"] <= desk["docClientH"], f"Desktop outer document scrolled: {desk}"
+        assert desk["docScrollW"] <= desk["docClientW"], f"Desktop horizontal overflow: {desk}"
+        assert desk["winScrollY"] == 0
+        assert desk["sbLeft"] == 0 and desk["sbRight"] <= desk["mainLeft"] + 1, f"Desktop sidebar overlapped main: {desk}"
+        assert desk["sbBottom"] <= desk["barTop"] + 1 and desk["mainBottom"] <= desk["barTop"] + 1 and desk["barBottom"] == 800
+        assert desk["tbTop"] == desk["mainTop"], f"Desktop sticky toolbar not pinned at top of main: {desk}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
 
 
 def test_deploy_to_github_pages_excludes_staging_raw_db_and_crlf_warnings(tmp_path: Path, monkeypatch, capfd):
@@ -2734,6 +3001,8 @@ def test_deploy_to_github_pages_excludes_staging_raw_db_and_crlf_warnings(tmp_pa
     )
     deployed_files = set(tree_out.splitlines())
     assert "index.html" in deployed_files
+    assert "index_shell.html" not in deployed_files
+    assert "style_shell.css" not in deployed_files
     assert "core.db.gz" in deployed_files
     assert "talks_1.db.gz" in deployed_files
     assert "words_1.db.gz" in deployed_files

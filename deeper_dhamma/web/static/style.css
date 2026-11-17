@@ -50,16 +50,28 @@
   padding: 0;
 }
 
+html,
+body {
+  height: 100%;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--bg-canvas);
   color: var(--text-primary);
   line-height: 1.6;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow-x: hidden;
-  overflow-x: clip;
+  width: 100%;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "sidebar main"
+    "footer footer";
   -webkit-font-smoothing: antialiased;
 }
 
@@ -82,11 +94,11 @@ body::before {
    ========================================================================== */
 
 .app-sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 78px;
-  width: 260px;
+  grid-area: sidebar;
+  position: static;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   background: rgba(9, 13, 22, 0.96);
   backdrop-filter: blur(24px);
   border-right: 1px solid var(--border-medium);
@@ -94,7 +106,7 @@ body::before {
   flex-direction: column;
   justify-content: space-between;
   padding: 1.75rem 1.25rem;
-  z-index: 70;
+  z-index: 60;
   box-sizing: border-box;
   overflow-y: auto;
 }
@@ -275,19 +287,25 @@ body::before {
    ========================================================================== */
 
 .app-main {
-  margin-left: 260px;
-  flex: 1;
-  max-width: 1200px;
-  width: calc(100% - 260px);
+  grid-area: main;
+  width: 100%;
   min-width: 0;
-  margin-right: auto;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: clip;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
   box-sizing: border-box;
-  padding: 2.5rem 3rem 8.5rem 3rem;
+  padding: 0 3rem 3rem 3rem;
 }
 
 .views-wrapper {
   min-width: 0;
-  max-width: 100%;
+  max-width: 1200px;
+  width: 100%;
+  margin-right: auto;
+  padding-top: 2.5rem;
 }
 
 .search-hero {
@@ -2757,22 +2775,15 @@ select:hover, select:focus {
    ========================================================================== */
 
 .audio-player-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  grid-area: footer;
+  position: static;
+  width: 100%;
   background: rgba(12, 18, 30, 0.95);
   backdrop-filter: blur(20px);
   border-top: 1px solid var(--border-medium);
   box-shadow: var(--shadow-dock);
   z-index: 80;
   padding: 0.75rem 1.5rem;
-  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes slideUp {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
 }
 
 .player-container {
@@ -3291,8 +3302,11 @@ select:hover, select:focus {
    ========================================================================== */
 
 @media (max-width: 900px) {
+  body {
+    grid-template-columns: 76px minmax(0, 1fr);
+  }
+
   .app-sidebar {
-    width: 76px;
     padding: 1.25rem 0.5rem;
     align-items: center;
   }
@@ -3318,9 +3332,19 @@ select:hover, select:focus {
   }
 
   .app-main {
-    margin-left: 76px;
-    width: calc(100% - 76px);
-    padding: 1.75rem 1.25rem 8.5rem 1.25rem;
+    padding: 0 1.25rem 2.25rem 1.25rem;
+  }
+
+  .views-wrapper {
+    padding-top: 1.75rem;
+  }
+
+  .views-wrapper:has(#transcript-view.active) {
+    padding-top: 0;
+  }
+
+  .app-main:has(#transcript-view.active) {
+    padding: 0;
   }
 }
 
@@ -3345,17 +3369,25 @@ select:hover, select:focus {
     flex: 0 0 auto;
   }
   .app-main {
-    padding-bottom: calc(var(--player-height, 140px) + 2.5rem);
+    padding-bottom: 2.25rem;
+  }
+  .app-main:has(#transcript-view.active) {
+    padding: 0;
   }
 }
 
 @media (max-width: 600px) {
+  body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "sidebar"
+      "main"
+      "footer";
+  }
+
   .app-sidebar {
-    position: sticky;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: auto;
+    position: static;
     width: 100%;
     height: auto;
     flex-direction: column;
@@ -3365,7 +3397,7 @@ select:hover, select:focus {
     border-right: none;
     border-bottom: 1px solid var(--border-subtle);
     overflow: visible;
-    z-index: 950;
+    z-index: 60;
   }
 
   .sidebar-top {
@@ -3444,11 +3476,22 @@ select:hover, select:focus {
   }
 
   .app-main {
-    margin-left: 0;
     width: 100%;
     max-width: 100%;
     min-width: 0;
-    padding: 0.9rem 0.75rem calc(var(--player-height, 170px) + 2.5rem) 0.75rem;
+    padding: 0 0.75rem 1.5rem 0.75rem;
+  }
+
+  .views-wrapper {
+    padding-top: 0.9rem;
+  }
+
+  .views-wrapper:has(#transcript-view.active) {
+    padding-top: 0;
+  }
+
+  .app-main:has(#transcript-view.active) {
+    padding: 0;
   }
 
   .search-box-wrapper {
@@ -3553,7 +3596,11 @@ select:hover, select:focus {
 
   .transcript-view-header {
     padding: 1rem;
-    margin-bottom: 1.25rem;
+    margin: 0.9rem 0.75rem 1.25rem 0.75rem;
+  }
+
+  .transcript-reader-container {
+    padding: 0 0.75rem 4.5rem 0.75rem;
   }
 
   .transcript-title {
@@ -3565,7 +3612,7 @@ select:hover, select:focus {
   }
 
   .transcript-sticky-toolbar {
-    top: var(--sidebar-height, 74px);
+    top: 0;
     padding: 0.45rem 0.75rem;
     gap: 0.5rem;
   }
@@ -4095,8 +4142,8 @@ select:hover, select:focus {
 /* Pali Lexicon Companion Sidebar (Desktop) */
 .transcript-lexicon-companion {
   position: sticky;
-  top: 1.5rem;
-  max-height: calc(100vh - 140px);
+  top: calc(var(--toolbar-height, 50px) + 0.75rem);
+  max-height: calc(var(--main-height, 640px) - var(--toolbar-height, 50px) - 2rem);
   display: flex;
   flex-direction: column;
   background: var(--bg-card);
@@ -4398,12 +4445,38 @@ select:hover, select:focus {
 
 /* Responsive: Mobile & Tablet Small Screen Styling */
 @media (max-width: 1024px) {
+  .app-main:has(#transcript-view.active) {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+  }
+
+  .views-wrapper:has(#transcript-view.active) {
+    max-width: 100%;
+    padding-top: 0;
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #transcript-view.active {
+    flex: 1 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
   .transcript-sticky-toolbar {
-    position: fixed;
+    grid-column: 1;
+    grid-row: 1;
+    position: sticky;
     top: 0;
-    left: 260px;
-    right: 0;
-    z-index: 75;
+    width: 100%;
+    z-index: 45;
     margin-bottom: 0;
     background: rgba(12, 18, 30, 0.98);
     backdrop-filter: blur(16px);
@@ -4417,7 +4490,7 @@ select:hover, select:focus {
   }
 
   .transcript-sticky-toolbar.is-actions-open {
-    z-index: 76;
+    z-index: 46;
   }
 
   .toolbar-sync-group {
@@ -4441,23 +4514,32 @@ select:hover, select:focus {
     display: flex;
   }
 
-  #transcript-view {
-    max-width: 900px;
-    padding-top: max(0px, calc(var(--toolbar-height, 46px) - 1.5rem));
-    padding-bottom: calc(var(--player-height, 80px) + 65px);
+  .transcript-view-header {
+    grid-column: 1;
+    grid-row: 2;
+    margin: 1.25rem 1.25rem 1.5rem 1.25rem;
   }
 
   .transcript-layout-container {
-    display: block;
+    display: contents;
+  }
+
+  .transcript-reader-container {
+    grid-column: 1;
+    grid-row: 3;
+    padding: 0 1.25rem 4.5rem 1.25rem;
   }
 
   .transcript-lexicon-companion {
-    position: fixed;
+    grid-column: 1;
+    grid-row: 2 / 4;
+    align-self: end;
+    position: sticky;
+    bottom: 0;
     top: auto !important;
-    bottom: var(--player-height, 78px);
-    left: 260px;
-    right: 0;
-    z-index: 75;
+    width: 100%;
+    z-index: 40;
+    margin-top: 0;
     background: rgba(12, 18, 30, 0.98);
     backdrop-filter: blur(16px);
     border-top: 1px solid var(--border-medium);
@@ -4469,8 +4551,8 @@ select:hover, select:focus {
   }
 
   .transcript-lexicon-companion.is-expanded {
-    max-height: min(60vh, calc(100vh - var(--player-height, 78px) - 8px));
-    max-height: min(60dvh, calc(100dvh - var(--player-height, 78px) - 8px));
+    max-height: min(60vh, calc(var(--main-height, 520px) - var(--toolbar-height, 48px) - 4px));
+    max-height: min(60dvh, calc(var(--main-height, 520px) - var(--toolbar-height, 48px) - 4px));
     border-top-left-radius: 16px;
     border-top-right-radius: 16px;
     box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.65);
@@ -4589,41 +4671,6 @@ select:hover, select:focus {
     flex: 1 1 auto;
     min-height: 0;
     max-height: none;
-  }
-}
-
-@media (max-width: 900px) {
-  #transcript-view {
-    padding-top: max(0px, calc(var(--toolbar-height, 46px) - 0.75rem));
-  }
-
-  .transcript-sticky-toolbar {
-    left: 76px;
-  }
-
-  .transcript-lexicon-companion {
-    left: 76px;
-  }
-}
-
-@media (max-width: 600px) {
-  #transcript-view {
-    padding-top: var(--toolbar-height, 46px);
-  }
-
-  .transcript-sticky-toolbar {
-    top: var(--sidebar-height, 74px);
-    left: 0;
-    padding: 0.45rem 0.75rem;
-  }
-
-  .transcript-lexicon-companion {
-    left: 0;
-  }
-
-  .transcript-lexicon-companion.is-expanded {
-    max-height: min(60vh, calc(100vh - var(--player-height, 170px) - var(--sidebar-height, 74px) - var(--toolbar-height, 46px) - 4px));
-    max-height: min(60dvh, calc(100dvh - var(--player-height, 170px) - var(--sidebar-height, 74px) - var(--toolbar-height, 46px) - 4px));
   }
 }
 

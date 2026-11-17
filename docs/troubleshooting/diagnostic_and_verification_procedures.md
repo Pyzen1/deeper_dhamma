@@ -21,13 +21,13 @@ Specifically:
 
 ## 2. Rebuilding Static Web Assets & Resetting Browser Cache
 
-Whenever `dhamma_transcripts.db`, `word_sync.js`, or `app.js` are updated, recompile the static `dist/` bundle:
+Whenever `dhamma_transcripts.db`, `word_sync.js`, `app.js`, `style.css`, or `index.html` are updated, recompile the static `dist/` bundle:
 
 ```powershell
 python main.py web --build
 ```
 
-Each build stamps a fresh Unix timestamp into `PRAGMA user_version` in `dist/dhamma_web.db`. Additionally, `python main.py web --run` automatically checks `_is_dist_stale(dist_path)` and rebuilds `dist/` whenever `word_sync.js`, `app.js`, `index.html`, or `dhamma_transcripts.db` is newer than `dist/index.html`, and serves static preview assets with `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` headers.
+Each build emits gzipped database shards (`core.db.gz`, `talks_1..4.db.gz`, `words_1..4.db.gz`) plus `db_manifest.json` (`sharded_v1`) stamped with a fresh Unix timestamp in `PRAGMA user_version` and SHA-256 digests. Additionally, `python main.py web --run` automatically checks `_is_dist_stale(dist_path)` and rebuilds `dist/` whenever `word_sync.js`, `app.js`, `index.html`, or `dhamma_transcripts.db` is newer than `dist/index.html`, and serves static preview assets with `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` headers.
 
 If a browser tab has cached old OPFS or IndexedDB database state:
 1. Perform a hard reload (`Ctrl+Shift+R` or `Ctrl+F5` in Firefox / Chrome), or
@@ -39,8 +39,9 @@ If a browser tab has cached old OPFS or IndexedDB database state:
 
 | Target Area | Test Command |
 | :--- | :--- |
-| **All Web & Synchronization Tests** | `pytest tests/test_export_web.py tests/test_cross_browser_word_sync.py` |
-| **Headless Cross-Browser Word Sync** | `pytest tests/test_cross_browser_word_sync.py -v` |
-| **Service Worker & Atomic DB Hot-Swap** | `pytest tests/test_export_web.py -k "test_service_worker or test_atomic"` |
-| **Downloader & Parity Checks** | `pytest tests/test_downloader_parity.py tests/test_sync_repair.py` |
+| **All Web & Synchronization Tests** | `python -m pytest tests/test_export_web.py tests/test_cross_browser_word_sync.py` |
+| **App-Shell Layout & Responsive Chrome** | `python -m pytest tests/test_export_web.py -k "app_shell or companion"` |
+| **Headless Cross-Browser Word Sync** | `python -m pytest tests/test_cross_browser_word_sync.py -v` |
+| **Service Worker & Atomic DB Hot-Swap** | `python -m pytest tests/test_export_web.py -k "test_service_worker or test_atomic"` |
+| **Downloader & Parity Checks** | `python -m pytest tests/test_downloader_parity.py tests/test_sync_repair.py` |
 

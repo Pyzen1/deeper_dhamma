@@ -50,7 +50,7 @@
 
 ## 3. Architectural Solution: Atomic Background Invalidation & In-Memory Hot-Swap
 
-To guarantee that database updates never stall user interactions, survive network drops, and update seamlessly without manual cache resets:
+To guarantee that database updates never stall user interactions, survive network drops, and update seamlessly without manual cache resets (later extended from monolithic `dhamma_web.db` to `db_manifest.json` + `.db.gz` shards using the same isolated validation and `db_hot_swapped` lifecycle):
 
 ```text
 +---------------------------------------------------------------------------------------+
