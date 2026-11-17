@@ -1519,7 +1519,7 @@
         </div>
 
         <!-- Sticky Transcript Toolbar -->
-        <div class="transcript-sticky-toolbar" id="transcript-sticky-toolbar">
+        <aside class="transcript-sticky-toolbar" id="transcript-sticky-toolbar" aria-label="Transcript Controls">
           <div class="toolbar-sync-group">
             <div class="word-sync-control" id="word-sync-control" role="group" aria-label="Word Synchronization Mode">
               <span class="sync-control-label">Word Sync:</span>
@@ -1529,9 +1529,14 @@
                 <button type="button" class="seg-btn active" data-mode="track" title="Highlight words and scroll to top when off screen">Track</button>
               </div>
             </div>
+            <button type="button" class="btn-toggle-toolbar-actions" id="btn-toggle-toolbar-actions" aria-expanded="false" aria-controls="toolbar-actions-group" title="Show transcript actions" aria-label="Show transcript actions">
+              <svg class="toolbar-actions-arrow" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">
+                <path d="M2.25 4.25L6 8.25L9.75 4.25H2.25Z"></path>
+              </svg>
+            </button>
           </div>
 
-          <div class="toolbar-actions-group">
+          <div class="toolbar-actions-group" id="toolbar-actions-group">
             <div class="download-dropdown-wrapper" id="single-talk-dropdown-wrapper">
               <button type="button" class="btn-secondary download-dropdown-btn" id="drawer-download-btn" title="Download transcript in selected format">
                 📥 Download Transcript ▾
@@ -1587,7 +1592,7 @@
               🔗 Share Talk
             </button>
           </div>
-        </div>
+        </aside>
 
         <div class="transcript-layout-container" id="transcript-layout-container">
           <div class="transcript-reader-container" id="drawer-turns-container">
@@ -1647,69 +1652,66 @@
     <div class="player-container">
       <!-- Track Information -->
       <div class="track-info">
-        <div class="track-icon-wrapper" aria-hidden="true">
-          <div class="track-pulse"></div>
-          <span class="track-icon">
-            <svg class="fluent-icon fluent-mic" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path d="M17.2889 2H14.7289C12.1789 2 10.0989 4.07 10.0989 6.63V8.12H14.8589C15.2789 8.12 15.6089 8.46 15.6089 8.87C15.6089 9.27999 15.2789 9.62 14.8589 9.62H10.0989V11.3101H14.8589C15.2789 11.3101 15.6089 11.6401 15.6089 12.0601C15.6089 12.4701 15.2789 12.8101 14.8589 12.8101H10.0989V14.49H14.8589C15.2789 14.49 15.6089 14.83 15.6089 15.24C15.6089 15.65 15.2789 15.99 14.8589 15.99H10.0989V17.37C10.0989 19.93 12.1689 22 14.7289 22H17.2889C19.8489 22 21.9189 19.93 21.9189 17.37V6.63C21.9189 4.07 19.8389 2 17.2889 2ZM21.9188 8.12V9.62H17.1588C16.7388 9.62 16.4088 9.27999 16.4088 8.87C16.4088 8.46 16.7388 8.12 17.1588 8.12H21.9188ZM17.1588 11.3101H21.9188V12.8101H17.1588C16.7388 12.8101 16.4088 12.4701 16.4088 12.0601C16.4088 11.6401 16.7388 11.3101 17.1588 11.3101ZM21.9188 14.49V15.99H17.1588C16.7388 15.99 16.4088 15.65 16.4088 15.24C16.4088 14.83 16.7388 14.49 17.1588 14.49H21.9188Z" fill="currentColor"/>
-              <path d="M23.9189 12.88C24.4712 12.88 24.9189 13.3277 24.9189 13.88V18.17C24.9189 21.9419 21.8618 24.9994 18.0901 25H18.0889L13.8289 25.01C10.0655 25.01 7.00891 21.9512 7.00891 18.18V13.89C7.00891 13.3377 7.45663 12.89 8.00891 12.89C8.5612 12.89 9.00891 13.3377 9.00891 13.89V18.18C9.00891 20.8485 11.1717 23.0094 13.8278 23.01H13.8289L18.0889 23C20.7566 23 22.9189 20.8377 22.9189 18.17V13.88C22.9189 13.3277 23.3666 12.88 23.9189 12.88Z" fill="currentColor"/>
-              <path d="M11.2889 26H13.819V25.01H18.209V26H20.7289C21.6589 26 22.5089 26.51 22.9389 27.32L23.9289 29.14C24.1388 29.53 23.8588 30 23.4188 30H8.58885C8.14885 30 7.86885 29.53 8.07885 29.14L9.06885 27.32C9.50885 26.51 10.3689 26 11.2889 26Z" fill="currentColor"/>
-            </svg>
-          </span>
-        </div>
         <div class="track-details">
           <div class="track-title" id="player-track-title">Ready to Play</div>
           <div class="track-meta">
             <span class="track-speaker" id="player-track-speaker">Select a talk or segment to begin</span>
-            <span class="bullet-sep">•</span>
-            <span class="track-stream-badge">Podbean CDN</span>
           </div>
         </div>
         <button type="button" class="btn-bookmark-icon btn-player-bookmark" id="btn-player-bookmark" title="Bookmark current talk" aria-label="Bookmark current talk" style="display: none;">
           <svg class="bookmark-ribbon-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
         </button>
-        <button type="button" class="btn-player-transcript" id="btn-player-transcript" title="View transcript for actively playing talk" aria-label="View transcript for actively playing talk" style="display: none;">
-          <span class="btn-player-transcript-icon">📜</span>
-          <span class="btn-player-transcript-label">Transcript</span>
-        </button>
       </div>
 
       <!-- Player Center Controls -->
       <div class="player-controls">
-        <div class="control-buttons">
-          <button type="button" class="btn-ctl btn-ctl-track" id="btn-prev-track" title="Previous Talk" aria-label="Previous Talk">
-            <svg class="fluent-icon fluent-skip-back" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path class="fluent-symbol" d="M17 9.68977V15.0378L23.3066 8.9692C23.9419 8.35788 25 8.80811 25 9.68977V22.3102C25 23.1919 23.9419 23.6421 23.3066 23.0308L17 16.9622V22.3102C17 23.1919 15.9419 23.6421 15.3066 23.0308L9 16.9623V22.5C9 22.7761 8.77614 23 8.5 23H7.5C7.22386 23 7 22.7761 7 22.5V9.5C7 9.22386 7.22386 9 7.5 9H8.5C8.77614 9 9 9.22386 9 9.5V15.0378L15.3066 8.9692C15.9419 8.35788 17 8.80811 17 9.68977Z" fill="currentColor"/>
-              <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
+        <div class="player-controls-top-row">
+          <button type="button" class="btn-player-settings" id="btn-player-settings" title="Player settings" aria-label="Open player settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="player-settings-view">
+            <svg class="player-settings-gear-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
             </svg>
           </button>
 
-          <button type="button" class="btn-ctl btn-ctl-seek" id="btn-skip-back" title="Rewind 15 seconds" aria-label="Rewind 15 seconds">
-            <svg class="fluent-icon fluent-rewind" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path class="fluent-symbol" d="M15 15.0378V9.68977C15 8.80811 13.9419 8.35788 13.3066 8.9692L6.74885 15.2794C6.34001 15.6728 6.34001 16.3272 6.74885 16.7206L13.3066 23.0308C13.9419 23.6421 15 23.1919 15 22.3102V16.9622L21.3066 23.0308C21.9419 23.6421 23 23.1919 23 22.3102V9.68977C23 8.80811 21.9419 8.35788 21.3066 8.9692L15 15.0378Z" fill="currentColor"/>
-              <path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/>
-            </svg>
-          </button>
+          <div class="control-buttons">
+            <button type="button" class="btn-ctl btn-ctl-track" id="btn-prev-track" title="Previous Talk" aria-label="Previous Talk">
+              <svg class="fluent-icon fluent-skip-back" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path class="fluent-symbol" d="M17 9.68977V15.0378L23.3066 8.9692C23.9419 8.35788 25 8.80811 25 9.68977V22.3102C25 23.1919 23.9419 23.6421 23.3066 23.0308L17 16.9622V22.3102C17 23.1919 15.9419 23.6421 15.3066 23.0308L9 16.9623V22.5C9 22.7761 8.77614 23 8.5 23H7.5C7.22386 23 7 22.7761 7 22.5V9.5C7 9.22386 7.22386 9 7.5 9H8.5C8.77614 9 9 9.22386 9 9.5V15.0378L15.3066 8.9692C15.9419 8.35788 17 8.80811 17 9.68977Z" fill="currentColor"/>
+                <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
+              </svg>
+            </button>
 
-          <button type="button" class="btn-ctl-main" id="btn-play-pause" title="Play or Pause (Space)" aria-label="Play or Pause">
-            <svg class="fluent-icon fluent-play" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path class="fluent-symbol" d="M23.5 16.866C24.1667 16.4811 24.1667 15.5189 23.5 15.134L11.5 8.20577C10.8333 7.82087 10 8.302 10 9.0718L10 22.9282C10 23.698 10.8333 24.1791 11.5 23.7942L23.5 16.866Z" fill="currentColor"/>
-              <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
-            </svg>
-          </button>
+            <button type="button" class="btn-ctl btn-ctl-seek" id="btn-skip-back" title="Rewind 15 seconds" aria-label="Rewind 15 seconds">
+              <svg class="fluent-icon fluent-rewind" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path class="fluent-symbol" d="M15 15.0378V9.68977C15 8.80811 13.9419 8.35788 13.3066 8.9692L6.74885 15.2794C6.34001 15.6728 6.34001 16.3272 6.74885 16.7206L13.3066 23.0308C13.9419 23.6421 15 23.1919 15 22.3102V16.9622L21.3066 23.0308C21.9419 23.6421 23 23.1919 23 22.3102V9.68977C23 8.80811 21.9419 8.35788 21.3066 8.9692L15 15.0378Z" fill="currentColor"/>
+                <path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/>
+              </svg>
+            </button>
 
-          <button type="button" class="btn-ctl btn-ctl-seek" id="btn-skip-fwd" title="Skip forward 15 seconds" aria-label="Skip forward 15 seconds">
-            <svg class="fluent-icon fluent-fast-forward" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path class="fluent-symbol" d="M17 15.0377L10.6934 8.9692C10.0581 8.35788 9 8.80811 9 9.68977L9 22.3102C9 23.1919 10.0581 23.6421 10.6934 23.0308L17 16.9622V22.3102C17 23.1919 18.0581 23.6421 18.6934 23.0308L25.2512 16.7206C25.66 16.3272 25.66 15.6728 25.2512 15.2794L18.6934 8.9692C18.0581 8.35788 17 8.80811 17 9.68977V15.0377Z" fill="currentColor"/>
-              <path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/>
-            </svg>
-          </button>
+            <button type="button" class="btn-ctl-main" id="btn-play-pause" title="Play or Pause (Space)" aria-label="Play or Pause">
+              <svg class="fluent-icon fluent-play" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path class="fluent-symbol" d="M23.5 16.866C24.1667 16.4811 24.1667 15.5189 23.5 15.134L11.5 8.20577C10.8333 7.82087 10 8.302 10 9.0718L10 22.9282C10 23.698 10.8333 24.1791 11.5 23.7942L23.5 16.866Z" fill="currentColor"/>
+                <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
+              </svg>
+            </button>
 
-          <button type="button" class="btn-ctl btn-ctl-track" id="btn-next-track" title="Next Talk" aria-label="Next Talk">
-            <svg class="fluent-icon fluent-skip-fwd" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path class="fluent-symbol" d="M9.69338 8.9692L16 15.0378V9.68977C16 8.80811 17.0581 8.35788 17.6934 8.9692L24 15.0377V9.5C24 9.22386 24.2239 9 24.5 9H25.5C25.7761 9 26 9.22386 26 9.5V22.5C26 22.7761 25.7761 23 25.5 23H24.5C24.2239 23 24 22.7761 24 22.5V16.9622L17.6934 23.0308C17.0581 23.6421 16 23.1919 16 22.3102V16.9622L9.69338 23.0308C9.05807 23.6421 8 23.1919 8 22.3102L8 9.68977C8 8.80811 9.05807 8.35788 9.69338 8.9692Z" fill="currentColor"/>
-              <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
-            </svg>
+            <button type="button" class="btn-ctl btn-ctl-seek" id="btn-skip-fwd" title="Skip forward 15 seconds" aria-label="Skip forward 15 seconds">
+              <svg class="fluent-icon fluent-fast-forward" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path class="fluent-symbol" d="M17 15.0377L10.6934 8.9692C10.0581 8.35788 9 8.80811 9 9.68977L9 22.3102C9 23.1919 10.0581 23.6421 10.6934 23.0308L17 16.9622V22.3102C17 23.1919 18.0581 23.6421 18.6934 23.0308L25.2512 16.7206C25.66 16.3272 25.66 15.6728 25.2512 15.2794L18.6934 8.9692C18.0581 8.35788 17 8.80811 17 9.68977V15.0377Z" fill="currentColor"/>
+                <path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/>
+              </svg>
+            </button>
+
+            <button type="button" class="btn-ctl btn-ctl-track" id="btn-next-track" title="Next Talk" aria-label="Next Talk">
+              <svg class="fluent-icon fluent-skip-fwd" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path class="fluent-symbol" d="M9.69338 8.9692L16 15.0378V9.68977C16 8.80811 17.0581 8.35788 17.6934 8.9692L24 15.0377V9.5C24 9.22386 24.2239 9 24.5 9H25.5C25.7761 9 26 9.22386 26 9.5V22.5C26 22.7761 25.7761 23 25.5 23H24.5C24.2239 23 24 22.7761 24 22.5V16.9622L17.6934 23.0308C17.0581 23.6421 16 23.1919 16 22.3102V16.9622L9.69338 23.0308C9.05807 23.6421 8 23.1919 8 22.3102L8 9.68977C8 8.80811 9.05807 8.35788 9.69338 8.9692Z" fill="currentColor"/>
+                <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+
+          <button type="button" class="btn-player-transcript" id="btn-player-transcript" title="View transcript for actively playing talk" aria-label="View transcript for actively playing talk" style="display: none;">
+            <span class="btn-player-transcript-icon" aria-hidden="true">📜</span>
           </button>
         </div>
 
@@ -1719,14 +1721,37 @@
           <span class="time-label" id="time-total">0:00</span>
         </div>
       </div>
+    </div>
 
-      <!-- Right Audio Extras -->
-      <div class="player-extras">
-        <div class="speed-selector">
+    <!-- Hidden Native Audio Engine -->
+    <audio id="native-audio" preload="none"></audio>
+  </footer>
+
+  <!-- Player Settings View (Speed & Volume) -->
+  <div class="player-settings-backdrop" id="player-settings-view" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="player-settings-title">
+    <div class="player-settings-card" id="player-settings-card">
+      <div class="player-settings-header">
+        <h3 class="player-settings-title" id="player-settings-title">Player Settings</h3>
+        <button type="button" class="btn-close-player-settings" id="btn-close-player-settings" title="Close player settings" aria-label="Close player settings">✕</button>
+      </div>
+
+      <div class="player-settings-section">
+        <div class="player-settings-label-row">
+          <span class="player-settings-label">Playback Speed</span>
+          <span class="player-settings-value" id="player-settings-speed-val">1.0x</span>
+        </div>
+        <div class="speed-selector" role="group" aria-label="Playback speed">
           <button type="button" class="speed-btn active" data-speed="1.0">1.0x</button>
           <button type="button" class="speed-btn" data-speed="1.25">1.25x</button>
           <button type="button" class="speed-btn" data-speed="1.5">1.5x</button>
           <button type="button" class="speed-btn" data-speed="1.75">1.75x</button>
+        </div>
+      </div>
+
+      <div class="player-settings-section">
+        <div class="player-settings-label-row">
+          <span class="player-settings-label">Volume</span>
+          <span class="player-settings-value" id="player-settings-vol-val">100%</span>
         </div>
         <div class="volume-control">
           <button type="button" class="vol-btn" id="vol-toggle-btn" title="Mute audio" aria-label="Mute or unmute">
@@ -1742,10 +1767,7 @@
         </div>
       </div>
     </div>
-
-    <!-- Hidden Native Audio Engine -->
-    <audio id="native-audio" preload="none"></audio>
-  </footer>
+  </div>
 
   <!-- Archive Compilation Progress Modal -->
   <div class="archive-modal-backdrop" id="archive-progress-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="archive-modal-title">

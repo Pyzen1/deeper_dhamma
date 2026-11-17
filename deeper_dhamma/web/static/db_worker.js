@@ -145,7 +145,14 @@ async function fetchManifestJson(manifestUrl) {
 }
 
 async function tryInitOpfsPool(requiredCapacity = 12) {
-  if (opfsPool) return opfsPool;
+  if (opfsPool) {
+    if (typeof opfsPool.reserveMinimumCapacity === 'function') {
+      try {
+        await opfsPool.reserveMinimumCapacity(requiredCapacity);
+      } catch (_) {}
+    }
+    return opfsPool;
+  }
   if (opfsInitAttempted) return null;
   opfsInitAttempted = true;
   if (!sqlite3 || typeof sqlite3.installOpfsSAHPoolVfs !== 'function') {
@@ -871,7 +878,7 @@ async function initDatabase(initArg = { manifestUrl: './db_manifest.json' }) {
     await setCachedDatabase('dhamma_web', versionToStore, coreBuffer);
     await setCachedDatabase('sharded_manifest', versionToStore, null, { manifest: remoteManifest });
 
-    // Trigger non-blocking offline download of talks_1..4 then words_1..2
+    // Trigger non-blocking offline download of talks_1..4 then words_1..4
     setTimeout(() => {
       syncRemainingShardsInBackground(remoteManifest).catch((err) => {
         console.warn('[DB Worker] Initial offline shard sync error:', err);

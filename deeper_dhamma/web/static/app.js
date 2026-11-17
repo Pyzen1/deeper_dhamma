@@ -98,8 +98,7 @@
     skipFwd: `<svg class="fluent-icon fluent-skip-fwd" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path class="fluent-symbol" d="M9.69338 8.9692L16 15.0378V9.68977C16 8.80811 17.0581 8.35788 17.6934 8.9692L24 15.0377V9.5C24 9.22386 24.2239 9 24.5 9H25.5C25.7761 9 26 9.22386 26 9.5V22.5C26 22.7761 25.7761 23 25.5 23H24.5C24.2239 23 24 22.7761 24 22.5V16.9622L17.6934 23.0308C17.0581 23.6421 16 23.1919 16 22.3102V16.9622L9.69338 23.0308C9.05807 23.6421 8 23.1919 8 22.3102L8 9.68977C8 8.80811 9.05807 8.35788 9.69338 8.9692Z" fill="currentColor"/><path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/></svg>`,
     speakerHigh: `<svg class="fluent-icon fluent-speaker-high" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7.99756 23.001L16.6106 26.8308C17.7343 27.3704 19.0356 26.551 19.0356 25.3044V19.0768C20.6809 19.0289 21.9999 17.6801 21.9999 16.0232C21.9999 14.3663 20.6809 13.0175 19.0356 12.9696V6.49639C19.0356 5.25508 17.1704 4.70337 16.0474 5.23141L8.01223 9.0124V9H3.80282C2.80707 9 2 9.84705 2 10.8921V21.1079C2 22.153 2.80707 23 3.80282 23L7.99756 23.001ZM17.0356 7.03194V24.831L9.99756 21.7015L9.99758 10.2885L16.8909 7.04485L16.8926 7.04443C16.9011 7.04219 16.9385 7.03229 17.0069 7.03165C17.0165 7.03156 17.0261 7.03166 17.0356 7.03194Z" fill="currentColor"/><path d="M24.11 11.0695C23.9694 10.9151 23.8237 10.7676 23.6725 10.6276C23.035 10.0376 22 10.4914 22 11.3601V11.3876C22 11.6595 22.1181 11.9164 22.3175 12.1007C23.3031 13.0139 23.9212 14.3189 23.9212 15.7682C23.9212 17.2176 23.3037 18.5226 22.3175 19.4357C22.1119 19.6257 22 19.8964 22 20.1764C22 21.047 23.0369 21.4976 23.6756 20.9057C23.7419 20.8445 23.8069 20.782 23.8706 20.7176C25.2437 19.3445 25.9762 17.5014 25.9175 15.5514C25.8681 13.8932 25.2256 12.2976 24.11 11.0695Z" fill="currentColor"/><path d="M23.5063 7.97456C23.195 7.79455 23 7.46518 23 7.1058C23 6.3333 23.8369 5.85705 24.5056 6.24455C27.79 8.14705 30 11.6989 30 15.7683C30 19.8371 27.7906 23.3896 24.505 25.2921C23.8363 25.6796 22.9994 25.2027 22.9994 24.4302C22.9994 24.0714 23.1931 23.7427 23.5038 23.5627C24.1756 23.1739 24.8006 22.6952 25.3638 22.1321C27.0863 20.4096 28.0244 18.1121 27.9994 15.6721C27.9763 13.4202 27.1031 11.2471 25.56 9.60643C24.9475 8.95518 24.2556 8.40893 23.5063 7.97456Z" fill="currentColor"/></svg>`,
     speakerLow: `<svg class="fluent-icon fluent-speaker-low" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M16.6106 26.8308L7.99756 23.001L3.80282 23C2.80707 23 2 22.153 2 21.1079V10.8921C2 9.84705 2.80707 9 3.80282 9H8.01223V9.0124L16.0474 5.23141C17.1704 4.70337 19.0356 5.25508 19.0356 6.49639V12.9696C20.6809 13.0175 21.9999 14.3663 21.9999 16.0232C21.9999 17.6801 20.6809 19.0289 19.0356 19.0768V25.3044C19.0356 26.551 17.7343 27.3704 16.6106 26.8308ZM17.0356 24.831V7.03194C17.0261 7.03166 17.0165 7.03156 17.0069 7.03165C16.9385 7.03229 16.9011 7.04219 16.8926 7.04443L16.8909 7.04485L9.99758 10.2885L9.99756 21.7015L17.0356 24.831Z" fill="currentColor"/><path d="M24.11 11.0695C23.9694 10.9151 23.8237 10.7676 23.6725 10.6276C23.035 10.0376 22 10.4914 22 11.3601V11.3876C22 11.6595 22.1181 11.9164 22.3175 12.1007C23.3031 13.0139 23.9212 14.3189 23.9212 15.7682C23.9212 17.2176 23.3037 18.5226 22.3175 19.4357C22.1119 19.6257 22 19.8964 22 20.1764C22 21.047 23.0369 21.4976 23.6756 20.9057C23.7419 20.8445 23.8069 20.782 23.8706 20.7176C25.2437 19.3445 25.9762 17.5014 25.9175 15.5514C25.8681 13.8932 25.2256 12.2976 24.11 11.0695Z" fill="currentColor"/></svg>`,
-    speakerMute: `<svg class="fluent-icon fluent-speaker-mute" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M19.0356 20.7181L24.9692 26.6519C25.4342 27.1161 26.1866 27.1161 26.6509 26.6511C27.1151 26.1869 27.1151 25.4337 26.6509 24.9694L6.83142 5.14994C6.36718 4.6857 5.61394 4.6857 5.1497 5.14994C4.68545 5.61418 4.68545 6.36742 5.1497 6.83167L7.31807 9.00012H3.80282C2.80707 9.00012 2 9.84717 2 10.8922V21.108C2 22.1531 2.80707 23.0001 3.80282 23.0001L7.99756 23.0011L16.6106 26.8309C17.7343 27.3705 19.0356 26.5512 19.0356 25.3045V20.7181ZM17.0356 18.718V24.8311L9.99756 21.7016L9.99758 11.6797L17.0356 18.718Z" fill="currentColor"/><path d="M21.9999 16.0233C21.9999 16.5266 21.8782 17.0015 21.6626 17.4201L17.0356 12.7931V7.03206C17.0261 7.03178 17.0165 7.03168 17.0069 7.03177C16.9385 7.03241 16.9011 7.04231 16.8926 7.04455L16.8909 7.04498L13.0805 8.83799L11.5774 7.33491L16.0474 5.23153C17.1704 4.70349 19.0356 5.2552 19.0356 6.49651V12.9697C20.6809 13.0176 21.9999 14.3664 21.9999 16.0233Z" fill="currentColor"/></svg>`,
-    mic: `<svg class="fluent-icon fluent-mic" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M17.2889 2H14.7289C12.1789 2 10.0989 4.07 10.0989 6.63V8.12H14.8589C15.2789 8.12 15.6089 8.46 15.6089 8.87C15.6089 9.27999 15.2789 9.62 14.8589 9.62H10.0989V11.3101H14.8589C15.2789 11.3101 15.6089 11.6401 15.6089 12.0601C15.6089 12.4701 15.2789 12.8101 14.8589 12.8101H10.0989V14.49H14.8589C15.2789 14.49 15.6089 14.83 15.6089 15.24C15.6089 15.65 15.2789 15.99 14.8589 15.99H10.0989V17.37C10.0989 19.93 12.1689 22 14.7289 22H17.2889C19.8489 22 21.9189 19.93 21.9189 17.37V6.63C21.9189 4.07 19.8389 2 17.2889 2ZM21.9188 8.12V9.62H17.1588C16.7388 9.62 16.4088 9.27999 16.4088 8.87C16.4088 8.46 16.7388 8.12 17.1588 8.12H21.9188ZM17.1588 11.3101H21.9188V12.8101H17.1588C16.7388 12.8101 16.4088 12.4701 16.4088 12.0601C16.4088 11.6401 16.7388 11.3101 17.1588 11.3101ZM21.9188 14.49V15.99H17.1588C16.7388 15.99 16.4088 15.65 16.4088 15.24C16.4088 14.83 16.7388 14.49 17.1588 14.49H21.9188Z" fill="currentColor"/><path d="M23.9189 12.88C24.4712 12.88 24.9189 13.3277 24.9189 13.88V18.17C24.9189 21.9419 21.8618 24.9994 18.0901 25H18.0889L13.8289 25.01C10.0655 25.01 7.00891 21.9512 7.00891 18.18V13.89C7.00891 13.3377 7.45663 12.89 8.00891 12.89C8.5612 12.89 9.00891 13.3377 9.00891 13.89V18.18C9.00891 20.8485 11.1717 23.0094 13.8278 23.01H13.8289L18.0889 23C20.7566 23 22.9189 20.8377 22.9189 18.17V13.88C22.9189 13.3377 23.3666 12.88 23.9189 12.88Z" fill="currentColor"/><path d="M11.2889 26H13.819V25.01H18.209V26H20.7289C21.6589 26 22.5089 26.51 22.9389 27.32L23.9289 29.14C24.1388 29.53 23.8588 30 23.4188 30H8.58885C8.14885 30 7.86885 29.53 8.07885 29.14L9.06885 27.32C9.50885 26.51 10.3689 26 11.2889 26Z" fill="currentColor"/></svg>`
+    speakerMute: `<svg class="fluent-icon fluent-speaker-mute" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M19.0356 20.7181L24.9692 26.6519C25.4342 27.1161 26.1866 27.1161 26.6509 26.6511C27.1151 26.1869 27.1151 25.4337 26.6509 24.9694L6.83142 5.14994C6.36718 4.6857 5.61394 4.6857 5.1497 5.14994C4.68545 5.61418 4.68545 6.36742 5.1497 6.83167L7.31807 9.00012H3.80282C2.80707 9.00012 2 9.84717 2 10.8922V21.108C2 22.1531 2.80707 23.0001 3.80282 23.0001L7.99756 23.0011L16.6106 26.8309C17.7343 27.3705 19.0356 26.5512 19.0356 25.3045V20.7181ZM17.0356 18.718V24.8311L9.99756 21.7016L9.99758 11.6797L17.0356 18.718Z" fill="currentColor"/><path d="M21.9999 16.0233C21.9999 16.5266 21.8782 17.0015 21.6626 17.4201L17.0356 12.7931V7.03206C17.0261 7.03178 17.0165 7.03168 17.0069 7.03177C16.9385 7.03241 16.9011 7.04231 16.8926 7.04455L16.8909 7.04498L13.0805 8.83799L11.5774 7.33491L16.0474 5.23153C17.1704 4.70349 19.0356 5.2552 19.0356 6.49651V12.9697C20.6809 13.0176 21.9999 14.3664 21.9999 16.0233Z" fill="currentColor"/></svg>`
   };
 
   function renderBookmarkRibbonSvg(isBookmarked = false) {
@@ -290,6 +289,8 @@
     // Transcript View Elements
     transcriptBackBtn: document.getElementById('transcript-back-btn'),
     transcriptPlayBtn: document.getElementById('transcript-play-btn'),
+    transcriptStickyToolbar: document.getElementById('transcript-sticky-toolbar'),
+    btnToggleToolbarActions: document.getElementById('btn-toggle-toolbar-actions'),
     drawerTitle: document.getElementById('drawer-episode-title'),
     drawerDateTag: document.getElementById('drawer-date-tag'),
     drawerMetaInfo: document.getElementById('drawer-meta-info'),
@@ -318,6 +319,11 @@
     playerSpeaker: document.getElementById('player-track-speaker'),
     btnPlayerTranscript: document.getElementById('btn-player-transcript'),
     btnPlayerBookmark: document.getElementById('btn-player-bookmark'),
+    btnPlayerSettings: document.getElementById('btn-player-settings'),
+    playerSettingsView: document.getElementById('player-settings-view'),
+    btnClosePlayerSettings: document.getElementById('btn-close-player-settings'),
+    playerSettingsSpeedVal: document.getElementById('player-settings-speed-val'),
+    playerSettingsVolVal: document.getElementById('player-settings-vol-val'),
     transcriptBookmarkBtn: document.getElementById('transcript-bookmark-btn'),
     transcriptBookmarkIcon: document.getElementById('transcript-bookmark-icon'),
     transcriptBookmarkLabel: document.getElementById('transcript-bookmark-label'),
@@ -1848,10 +1854,58 @@
     }
   }
 
+  function resetFloatingPanelPosition(panel) {
+    if (!panel) return;
+    panel.style.left = '';
+    panel.style.right = '';
+    panel.style.maxWidth = '';
+  }
+
+  function clampFloatingPanelToViewport(wrapper, panel, margin = 8) {
+    if (!wrapper || !panel) return;
+    resetFloatingPanelPosition(panel);
+
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const maxW = Math.max(160, vw - margin * 2);
+    if (panel.offsetWidth > maxW) {
+      panel.style.maxWidth = `${maxW}px`;
+    }
+
+    const panelW = panel.offsetWidth;
+    if (!panelW) return;
+
+    const wRect = wrapper.getBoundingClientRect();
+    const r = panel.getBoundingClientRect();
+    const animPad = Math.ceil(panelW * 0.02) + 1;
+
+    // Preserve default CSS right/left anchoring if it already fits with margin.
+    if (r.left - animPad >= margin && r.right + animPad <= vw - margin) {
+      return;
+    }
+
+    panel.style.left = '0px';
+    panel.style.right = 'auto';
+    const baseLeft = wRect.left;
+    const baseRight = baseLeft + panelW;
+    const minShift = margin - baseLeft;
+    const maxShift = (vw - margin) - baseRight;
+
+    let shift = 0;
+    if (baseRight > vw - margin) {
+      shift = Math.max(minShift, maxShift);
+    } else if (baseLeft < margin) {
+      shift = minShift;
+    }
+    if (shift !== 0) {
+      panel.style.left = `${Math.round(shift)}px`;
+    }
+  }
+
   function setupDownloadDropdowns() {
     function closeAllDropdowns() {
       document.querySelectorAll('.download-dropdown-wrapper.open').forEach(w => {
         w.classList.remove('open');
+        resetFloatingPanelPosition(w.querySelector('.download-dropdown-menu'));
         const pc = w.closest('.episode-card, .result-card');
         if (pc) pc.classList.remove('dropdown-active');
       });
@@ -1870,6 +1924,7 @@
         document.querySelectorAll('.download-dropdown-wrapper.open').forEach(w => {
           if (w !== wrapper) {
             w.classList.remove('open');
+            resetFloatingPanelPosition(w.querySelector('.download-dropdown-menu'));
             const pc = w.closest('.episode-card, .result-card');
             if (pc) pc.classList.remove('dropdown-active');
           }
@@ -1877,6 +1932,14 @@
 
         const willOpen = !isOpen;
         wrapper.classList.toggle('open', willOpen);
+        const menu = wrapper.querySelector('.download-dropdown-menu');
+        if (menu) {
+          if (willOpen) {
+            clampFloatingPanelToViewport(wrapper, menu);
+          } else {
+            resetFloatingPanelPosition(menu);
+          }
+        }
         const parentCard = wrapper.closest('.episode-card, .result-card');
         if (parentCard) {
           parentCard.classList.toggle('dropdown-active', willOpen);
@@ -1891,6 +1954,7 @@
         const wrapper = opt.closest('.download-dropdown-wrapper');
         if (wrapper) {
           wrapper.classList.remove('open');
+          resetFloatingPanelPosition(wrapper.querySelector('.download-dropdown-menu'));
           const pc = wrapper.closest('.episode-card, .result-card');
           if (pc) pc.classList.remove('dropdown-active');
         }
@@ -2277,6 +2341,13 @@
       });
     }
 
+    if (els.btnToggleToolbarActions) {
+      els.btnToggleToolbarActions.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleToolbarActions();
+      });
+    }
+
     // Lexicon Live Companion Controls
     if (els.btnToggleLexSheet) {
       els.btnToggleLexSheet.addEventListener('click', (e) => {
@@ -2301,7 +2372,7 @@
         if (state.lexCompanion.currentActiveIdx >= 0 && els.lexiconStack) {
           const activeCard = els.lexiconStack.querySelector('.lex-stack-card.current-companion-term');
           if (activeCard) {
-            activeCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            scrollCardIntoCompanionStack(activeCard, 'smooth', 'center');
           }
         }
       });
@@ -2625,8 +2696,11 @@
 
     // Global Keyboard Shortcuts (designed to avoid browser navigation & text-selection conflicts)
     window.addEventListener('keydown', (e) => {
-      // 'Escape' closes open browse popovers, clears doc filter, or returns to previous view
+      // 'Escape' closes player settings, open browse popovers, clears doc filter, or returns to previous view
       if (e.key === 'Escape') {
+        if (closePlayerSettings()) {
+          return;
+        }
         if (closeAllBrowsePopovers()) {
           return;
         }
@@ -3673,6 +3747,7 @@
         w.classList.remove('open');
         const btn = w.querySelector('.browse-filter-btn');
         if (btn) btn.setAttribute('aria-expanded', 'false');
+        resetFloatingPanelPosition(w.querySelector('.browse-popover-panel'));
         closedAny = true;
       }
     });
@@ -4159,16 +4234,10 @@
         btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
         const panel = wrapper.querySelector('.browse-popover-panel');
         if (panel) {
-          panel.style.left = '';
-          panel.style.right = '';
           if (willOpen) {
-            const wRect = wrapper.getBoundingClientRect();
-            const pRect = panel.getBoundingClientRect();
-            const maxRight = window.innerWidth - 12;
-            if (pRect.right > maxRight) {
-              const shiftLeft = Math.max(12 - wRect.left, -(pRect.right - maxRight));
-              panel.style.left = `${shiftLeft}px`;
-            }
+            clampFloatingPanelToViewport(wrapper, panel);
+          } else {
+            resetFloatingPanelPosition(panel);
           }
         }
         if (willOpen && wrapper.id === 'browse-teachers-dropdown' && els.browseTeachersSearch) {
@@ -5503,6 +5572,26 @@
     }
   }
 
+  function toggleToolbarActions(forceOpen) {
+    if (!els.transcriptStickyToolbar) return;
+    const isCurrentlyOpen = els.transcriptStickyToolbar.classList.contains('is-actions-open');
+    const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !isCurrentlyOpen;
+    els.transcriptStickyToolbar.classList.toggle('is-actions-open', shouldOpen);
+    if (els.btnToggleToolbarActions) {
+      els.btnToggleToolbarActions.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+      const label = shouldOpen ? 'Hide transcript actions' : 'Show transcript actions';
+      els.btnToggleToolbarActions.title = label;
+      els.btnToggleToolbarActions.setAttribute('aria-label', label);
+    }
+    if (!shouldOpen) {
+      const openDropdown = els.transcriptStickyToolbar.querySelector('.download-dropdown-wrapper.open');
+      if (openDropdown) {
+        openDropdown.classList.remove('open');
+        resetFloatingPanelPosition(openDropdown.querySelector('.download-dropdown-menu'));
+      }
+    }
+  }
+
   function toggleMobileLexSheet(forceOpen) {
     if (!els.lexCompanion) return;
     const isCurrentlyExpanded = els.lexCompanion.classList.contains('is-expanded');
@@ -5517,7 +5606,7 @@
       requestAnimationFrame(() => {
         const activeCard = els.lexiconStack.querySelector('.lex-stack-card.current-companion-term');
         if (activeCard) {
-          activeCard.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+          scrollCardIntoCompanionStack(activeCard, 'auto', 'nearest');
         }
       });
     }
@@ -5767,6 +5856,66 @@
     renderCompanionCards(allTerms);
   }
 
+  /**
+   * Scrolls only the lexicon companion container (never ancestor/window scroll)
+   * so tracking words in the transcript cannot be hijacked by companion updates.
+   */
+  function scrollCardIntoCompanionStack(cardEl, behavior = 'smooth', align = 'nearest') {
+    const stackEl = els.lexiconStack;
+    if (!stackEl || !cardEl) return;
+    if (stackEl.offsetParent === null || window.getComputedStyle(stackEl).display === 'none') return;
+    const stackRect = stackEl.getBoundingClientRect();
+    const cardRect = cardEl.getBoundingClientRect();
+    if (stackRect.height <= 0 || cardRect.height <= 0) return;
+
+    const relativeTop = cardRect.top - stackRect.top + stackEl.scrollTop;
+    const relativeBottom = relativeTop + cardRect.height;
+    let targetTop = stackEl.scrollTop;
+
+    if (align === 'center') {
+      targetTop = relativeTop - Math.max(0, (stackEl.clientHeight - cardRect.height) / 2);
+    } else if (cardRect.top < stackRect.top) {
+      targetTop = relativeTop - 8;
+    } else if (cardRect.bottom > stackRect.bottom) {
+      targetTop = relativeBottom - stackEl.clientHeight + 8;
+    } else {
+      return;
+    }
+
+    targetTop = Math.max(0, targetTop);
+    if (typeof stackEl.scrollTo === 'function') {
+      stackEl.scrollTo({ top: targetTop, behavior });
+    } else {
+      stackEl.scrollTop = targetTop;
+    }
+  }
+
+  function scrollElementIntoReadingZone(el, behavior = 'auto') {
+    if (!el) return;
+    const viewportH = window.innerHeight || document.documentElement.clientHeight;
+    const toolbar = document.getElementById('transcript-sticky-toolbar');
+    const toolbarBottom = toolbar ? Math.max(0, toolbar.getBoundingClientRect().bottom) : 0;
+    const playerBar = document.getElementById('audio-player-bar');
+    let bottomLimit = playerBar ? Math.min(viewportH, playerBar.getBoundingClientRect().top) : viewportH;
+    const companionBar = document.getElementById('transcript-lexicon-companion');
+    if (companionBar) {
+      const compStyle = window.getComputedStyle(companionBar);
+      if (compStyle.display !== 'none' && compStyle.position === 'fixed') {
+        const compRect = companionBar.getBoundingClientRect();
+        if (compRect.height > 0) {
+          bottomLimit = Math.min(bottomLimit, compRect.top);
+        }
+      }
+    }
+
+    const rect = el.getBoundingClientRect();
+    const docTop = rect.top + (window.scrollY || window.pageYOffset || 0);
+    const availableH = Math.max(80, bottomLimit - toolbarBottom);
+    const desiredTopInViewport = toolbarBottom + Math.min(availableH * 0.35, Math.max(20, (availableH - rect.height) / 2));
+    const targetScrollY = Math.max(0, docTop - desiredTopInViewport);
+    window.scrollTo({ top: targetScrollY, behavior });
+  }
+
   function jumpToCompanionTerm(idx) {
     const terms = state.lexCompanion.allTerms;
     if (!terms || !terms[idx]) return;
@@ -5783,7 +5932,7 @@
       });
     }
 
-    // 2. Scroll transcript smoothly to spoken word or turn
+    // 2. Scroll transcript cleanly to spoken word or turn
     let scrollTarget = null;
     if (term.wordId) {
       scrollTarget = document.getElementById(term.wordId);
@@ -5793,7 +5942,11 @@
     }
 
     if (scrollTarget) {
-      scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (window.WordSync) {
+        window.WordSync._userInteractedAt = 0;
+        window.WordSync._teleprompterLine = null;
+      }
+      scrollElementIntoReadingZone(scrollTarget, 'smooth');
       if (term.wordId && scrollTarget.classList.contains('transcript-word')) {
         if (window.WordSync) {
           window.WordSync.clearHighlights();
@@ -5806,7 +5959,7 @@
       }
     }
 
-    // 3. Highlight this card in companion
+    // 3. Highlight this card in companion (scrolling only the companion stack)
     setActiveCompanionTerm(idx, { scrollCompanion: true });
   }
 
@@ -5816,7 +5969,7 @@
     state.lexCompanion.currentActiveIdx = idx;
     const term = terms[idx];
 
-    // 1. Update card highlights and keep in rolling 5-term view
+    // 1. Update card highlights and keep inside companion stack viewport
     if (els.lexiconStack) {
       const cards = els.lexiconStack.querySelectorAll('.lex-stack-card');
       cards.forEach(c => {
@@ -5824,7 +5977,7 @@
         if (cardIdx === idx) {
           c.classList.add('current-companion-term');
           if (options.scrollCompanion !== false) {
-            c.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            scrollCardIntoCompanionStack(c, 'smooth', 'nearest');
           }
         } else {
           c.classList.remove('current-companion-term');
@@ -5920,6 +6073,7 @@
 
   async function openTranscriptDrawer(episodeId, targetOpts = null, options = {}) {
     resetLexCompanion();
+    toggleToolbarActions(false);
     if (state.activeTab !== 'transcript-view') {
       state.previousTab = state.activeTab;
     }
@@ -6032,22 +6186,6 @@
       }
 
       window.renderActiveTranscript = renderDrawerTurns;
-
-      function scrollElementIntoReadingZone(el, behavior = 'auto') {
-        if (!el) return;
-        const viewportH = window.innerHeight || document.documentElement.clientHeight;
-        const toolbar = document.getElementById('transcript-sticky-toolbar');
-        const toolbarBottom = toolbar ? Math.max(0, toolbar.getBoundingClientRect().bottom) : 0;
-        const playerBar = document.getElementById('audio-player-bar');
-        const playerTop = playerBar ? Math.min(viewportH, playerBar.getBoundingClientRect().top) : viewportH;
-
-        const rect = el.getBoundingClientRect();
-        const docTop = rect.top + (window.scrollY || window.pageYOffset || 0);
-        const availableH = Math.max(80, playerTop - toolbarBottom);
-        const desiredTopInViewport = toolbarBottom + Math.min(availableH * 0.35, Math.max(20, (availableH - rect.height) / 2));
-        const targetScrollY = Math.max(0, docTop - desiredTopInViewport);
-        window.scrollTo({ top: targetScrollY, behavior });
-      }
 
       let initialStartedSec = null;
 
@@ -6166,6 +6304,11 @@
         const needsReRender = !(wordsReadySync && paliReadySync);
         if (needsReRender) {
           renderDrawerTurns();
+          if (window.WordSync) {
+            window.WordSync._teleprompterLine = null;
+            window.WordSync.activeWordEl = null;
+            window.WordSync.activeWordIdx = -1;
+          }
         }
         buildCompanionTermsList();
         if (targetOpts && needsReRender) {
@@ -6174,6 +6317,9 @@
         if (state.playingEpisode && state.currentEpisode && state.playingEpisode.id === state.currentEpisode.id && els.nativeAudio && els.nativeAudio.currentTime > 0) {
           const rawCur = els.nativeAudio.currentTime;
           const physCur = window.WordSync ? window.WordSync.getPhysicalTime(rawCur) : rawCur;
+          if (window.WordSync && needsReRender) {
+            window.WordSync.update(rawCur);
+          }
           updateActiveCompanionTerm(physCur);
         }
         updateHeaderPlayButton();
@@ -6206,17 +6352,41 @@
     let isScrubbing = false;
     let scrubCommitted = false;
 
-    function updatePlayerHeight() {
+    const sidebarEl = document.getElementById('app-sidebar');
+    function updateLayoutChromeVars() {
       if (els.playerBar) {
-        const h = els.playerBar.offsetHeight || 78;
+        const rectH = els.playerBar.getBoundingClientRect().height;
+        const h = Math.ceil(rectH) || els.playerBar.offsetHeight || 78;
         document.documentElement.style.setProperty('--player-height', `${h}px`);
       }
+      if (sidebarEl) {
+        const rectSh = sidebarEl.getBoundingClientRect().height;
+        const sh = Math.ceil(rectSh) || sidebarEl.offsetHeight || 52;
+        document.documentElement.style.setProperty('--sidebar-height', `${sh}px`);
+      }
+      if (els.transcriptStickyToolbar && !els.transcriptStickyToolbar.classList.contains('is-actions-open')) {
+        const rectTh = els.transcriptStickyToolbar.getBoundingClientRect().height;
+        if (rectTh > 0) {
+          const th = Math.ceil(rectTh);
+          document.documentElement.style.setProperty('--toolbar-height', `${th}px`);
+        }
+      }
     }
-    updatePlayerHeight();
-    window.addEventListener('resize', updatePlayerHeight, { passive: true });
-    if (typeof ResizeObserver !== 'undefined' && els.playerBar) {
-      const ro = new ResizeObserver(() => updatePlayerHeight());
-      ro.observe(els.playerBar);
+    updateLayoutChromeVars();
+    window.addEventListener('resize', () => {
+      updateLayoutChromeVars();
+      document.querySelectorAll('.download-dropdown-wrapper.open').forEach((w) => {
+        clampFloatingPanelToViewport(w, w.querySelector('.download-dropdown-menu'));
+      });
+      document.querySelectorAll('.browse-popover-wrapper.open').forEach((w) => {
+        clampFloatingPanelToViewport(w, w.querySelector('.browse-popover-panel'));
+      });
+    }, { passive: true });
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => updateLayoutChromeVars());
+      if (els.playerBar) ro.observe(els.playerBar);
+      if (sidebarEl) ro.observe(sidebarEl);
+      if (els.transcriptStickyToolbar) ro.observe(els.transcriptStickyToolbar);
     }
 
     function getTotalDuration() {
@@ -6430,6 +6600,45 @@
     els.scrubber.addEventListener('mouseup', commitScrub);
     els.scrubber.addEventListener('touchend', commitScrub);
 
+    // Player Settings View toggle & close handlers
+    function syncPlayerSettingsIndicators() {
+      const vol = els.nativeAudio ? els.nativeAudio.volume : 1.0;
+      const spd = state.playbackSpeed || 1.0;
+      if (els.playerSettingsSpeedVal) {
+        els.playerSettingsSpeedVal.textContent = Number.isInteger(spd) ? `${spd.toFixed(1)}x` : `${spd}x`;
+      }
+      if (els.playerSettingsVolVal) {
+        els.playerSettingsVolVal.textContent = vol === 0 ? 'Muted' : `${Math.round(vol * 100)}%`;
+      }
+      if (els.btnPlayerSettings) {
+        els.btnPlayerSettings.classList.toggle('has-custom', spd !== 1.0 || vol === 0);
+      }
+    }
+
+    if (els.btnPlayerSettings && els.playerSettingsView) {
+      els.btnPlayerSettings.addEventListener('click', () => {
+        if (isPlayerSettingsOpen()) {
+          closePlayerSettings();
+        } else {
+          openPlayerSettings();
+        }
+      });
+    }
+
+    if (els.btnClosePlayerSettings) {
+      els.btnClosePlayerSettings.addEventListener('click', () => {
+        closePlayerSettings();
+      });
+    }
+
+    if (els.playerSettingsView) {
+      els.playerSettingsView.addEventListener('click', (e) => {
+        if (e.target === els.playerSettingsView) {
+          closePlayerSettings();
+        }
+      });
+    }
+
     // Speed selector
     els.speedBtns.forEach(btn => {
       btn.addEventListener('click', () => {
@@ -6437,22 +6646,25 @@
         audio.playbackRate = speed;
         state.playbackSpeed = speed;
         els.speedBtns.forEach(b => b.classList.toggle('active', b === btn));
+        syncPlayerSettingsIndicators();
       });
     });
 
     // Volume handling
     function updateVolumeIcon(vol) {
-      if (!els.volIcon) return;
-      if (vol === 0) {
-        els.volIcon.innerHTML = FLUENT_ICONS.speakerMute;
-        if (els.volToggleBtn) els.volToggleBtn.title = 'Unmute audio';
-      } else if (vol < 0.5) {
-        els.volIcon.innerHTML = FLUENT_ICONS.speakerLow;
-        if (els.volToggleBtn) els.volToggleBtn.title = 'Mute audio';
-      } else {
-        els.volIcon.innerHTML = FLUENT_ICONS.speakerHigh;
-        if (els.volToggleBtn) els.volToggleBtn.title = 'Mute audio';
+      if (els.volIcon) {
+        if (vol === 0) {
+          els.volIcon.innerHTML = FLUENT_ICONS.speakerMute;
+          if (els.volToggleBtn) els.volToggleBtn.title = 'Unmute audio';
+        } else if (vol < 0.5) {
+          els.volIcon.innerHTML = FLUENT_ICONS.speakerLow;
+          if (els.volToggleBtn) els.volToggleBtn.title = 'Mute audio';
+        } else {
+          els.volIcon.innerHTML = FLUENT_ICONS.speakerHigh;
+          if (els.volToggleBtn) els.volToggleBtn.title = 'Mute audio';
+        }
       }
+      syncPlayerSettingsIndicators();
     }
 
     let lastVolume = 1.0;
@@ -6461,23 +6673,55 @@
         if (audio.volume > 0) {
           lastVolume = audio.volume;
           audio.volume = 0;
-          els.volumeSlider.value = 0;
+          if (els.volumeSlider) els.volumeSlider.value = 0;
         } else {
           audio.volume = lastVolume > 0 ? lastVolume : 1.0;
-          els.volumeSlider.value = audio.volume;
+          if (els.volumeSlider) els.volumeSlider.value = audio.volume;
         }
         updateVolumeIcon(audio.volume);
       });
     }
 
-    els.volumeSlider.addEventListener('input', () => {
-      audio.volume = parseFloat(els.volumeSlider.value);
-      updateVolumeIcon(audio.volume);
-    });
+    if (els.volumeSlider) {
+      els.volumeSlider.addEventListener('input', () => {
+        audio.volume = parseFloat(els.volumeSlider.value);
+        updateVolumeIcon(audio.volume);
+      });
+    }
+
+    syncPlayerSettingsIndicators();
 
     if (window.WordSync) {
       window.WordSync.bindAudio(audio);
     }
+  }
+
+  function isPlayerSettingsOpen() {
+    return Boolean(els.playerSettingsView && els.playerSettingsView.style.display !== 'none');
+  }
+
+  function openPlayerSettings() {
+    if (!els.playerSettingsView) return;
+    els.playerSettingsView.style.display = 'flex';
+    if (els.btnPlayerSettings) {
+      els.btnPlayerSettings.setAttribute('aria-expanded', 'true');
+    }
+    if (els.btnClosePlayerSettings) {
+      els.btnClosePlayerSettings.focus();
+    }
+  }
+
+  function closePlayerSettings() {
+    if (!isPlayerSettingsOpen()) return false;
+    const activeWasInside = document.activeElement && els.playerSettingsView.contains(document.activeElement);
+    els.playerSettingsView.style.display = 'none';
+    if (els.btnPlayerSettings) {
+      els.btnPlayerSettings.setAttribute('aria-expanded', 'false');
+      if (activeWasInside) {
+        els.btnPlayerSettings.focus();
+      }
+    }
+    return true;
   }
 
   function playPrevTrack() {

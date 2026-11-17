@@ -647,9 +647,9 @@ def test_compile_sharded_static_databases_and_pwa_assets(tmp_path: Path, capsys)
     assert not (tmp_path / "dhamma_web.db").exists()
     assert (tmp_path / "db_manifest.json").exists()
     assert len(manifest["talks"]) == 4
-    assert len(manifest["words"]) == 2
+    assert len(manifest["words"]) == 4
 
-    # Every file (both gzipped and uncompressed) must stay strictly below GitHub's 100 MB limit
+    # Every file must stay below GitHub's 100 MB raw limit, and every compressed shard strictly below GitHub's 50 MB warning threshold
     max_raw = max(
         [manifest["core"]["raw_bytes"]]
         + [s["raw_bytes"] for s in manifest["talks"]]
@@ -661,7 +661,7 @@ def test_compile_sharded_static_databases_and_pwa_assets(tmp_path: Path, capsys)
         + [s["gz_bytes"] for s in manifest["words"]]
     )
     assert max_raw < 100 * 1024 * 1024, f"Raw shard exceeds 100 MB: {max_raw}"
-    assert max_gz < 100 * 1024 * 1024, f"Gzipped shard exceeds 100 MB: {max_gz}"
+    assert max_gz < 50 * 1024 * 1024, f"Gzipped shard exceeds 50 MB GitHub warning limit: {max_gz}"
 
     # Verify pb28113880 routing from core -> talks & words shards
     core_p = tmp_path / "verify_core.db"
@@ -669,7 +669,7 @@ def test_compile_sharded_static_databases_and_pwa_assets(tmp_path: Path, capsys)
     c_conn = sqlite3.connect(core_p)
     try:
         row = c_conn.execute("SELECT talks_shard, words_shard FROM episodes WHERE id = 'pb28113880';").fetchone()
-        assert row is not None and row[0] in (1, 2, 3, 4) and row[1] in (1, 2)
+        assert row is not None and row[0] in (1, 2, 3, 4) and row[1] in (1, 2, 3, 4)
         talks_p = tmp_path / "verify_talks.db"
         talks_p.write_bytes(gzip.decompress((tmp_path / f"talks_{row[0]}.db.gz").read_bytes()))
         words_p = tmp_path / "verify_words.db"
@@ -1840,3 +1840,920 @@ def test_headless_chrome_browse_multi_faceted_filtering_e2e():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_responsive_small_screen_layout_contract():
+    """
+    Verifies small-screen CSS and JS layout guards:
+    1. Search filter select-group wraps and allows flex children to shrink without overflowing.
+    2. Date Mode toggle button prevents awkward multi-line label wrapping.
+    3. Mobile top navigation bar wraps instead of clipping nav icons off-screen.
+    4. Mobile transcript lexicon companion resets left: 0 after the 900px rule.
+    5. app.js exposes clampFloatingPanelToViewport and updates --sidebar-height.
+    """
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+
+    # 1. Select group & date range wrapping
+    select_group_css = style_css.split(".select-group {", 1)[1].split("}", 1)[0]
+    assert "flex-wrap: wrap" in select_group_css
+    assert "min-width: 0" in select_group_css
+
+    date_btn_css = style_css.split(".date-mode-btn {", 1)[1].split("}", 1)[0]
+    assert "white-space: nowrap" in date_btn_css
+
+    date_inputs_css = style_css.rsplit(".date-range-inputs {", 1)[1].split("}", 1)[0]
+    assert "flex-wrap: wrap" in date_inputs_css
+    assert "min-width: 0" in date_inputs_css
+
+    # 2. View fade animation must not set transform (would trap fixed lexicon companion)
+    view_fade_css = style_css.split("@keyframes viewFadeIn {", 1)[1].split("\n}", 1)[0]
+    assert "transform" not in view_fade_css
+
+    # 2. Mobile 600px nav wrapping + sticky toolbar dynamic top + lexicon companion left: 0 after 900px
+    mobile_block = style_css.split("@media (max-width: 600px)")[1]
+    assert "flex-wrap: wrap" in mobile_block
+    assert "width: auto" in mobile_block
+    assert "var(--sidebar-height" in mobile_block
+
+    idx_900 = style_css.rfind(".transcript-lexicon-companion {\n    left: 76px;")
+    idx_600 = style_css.rfind(".transcript-lexicon-companion {\n    left: 0;")
+    assert idx_900 != -1 and idx_600 > idx_900, "600px left: 0 override must come after 900px left: 76px rule"
+
+    comp_expanded_1024 = style_css.split("@media (max-width: 1024px)")[1].split(".transcript-lexicon-companion.is-expanded {", 1)[1].split("}", 1)[0]
+    assert "var(--player-height" in comp_expanded_1024
+    comp_stack_1024 = style_css.split(".transcript-lexicon-companion.is-expanded .lexicon-stack-container {", 1)[1].split("}", 1)[0]
+    assert "min-height: 0" in comp_stack_1024
+    comp_expanded_600 = style_css[idx_600:].split(".transcript-lexicon-companion.is-expanded {", 1)[1].split("}", 1)[0]
+    assert "var(--sidebar-height" in comp_expanded_600
+    assert "var(--player-height" in comp_expanded_600
+
+    # 3. Viewport clamping helper & layout chrome height observers in app.js
+    assert "function clampFloatingPanelToViewport(" in app_js
+    assert "function resetFloatingPanelPosition(" in app_js
+    assert "--sidebar-height" in app_js
+    assert "--toolbar-height" in app_js
+
+    # 4. Fluent mic track icon and Podbean CDN badge removed; Bookmark stays top-right;
+    #    Gear sits left of play buttons above elapsed time; Transcript sits icon-only right of
+    #    play buttons above total time; toolbar-actions-group collapses under toolbar-sync-group;
+    #    transcript-sticky-toolbar uses <aside> docked at the top on small screens;
+    #    and mobile sidebar stacks Deeper Dhamma brand above nav icons.
+    index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
+    assert "fluent-mic" not in index_html
+    assert "track-icon-wrapper" not in index_html
+    assert "fluent-mic" not in app_js
+
+    assert '<aside class="transcript-sticky-toolbar" id="transcript-sticky-toolbar"' in index_html
+    toolbar_html = index_html.split('id="transcript-sticky-toolbar"', 1)[1].split('<div class="transcript-layout-container"', 1)[0]
+    sync_group_html = toolbar_html.split('<div class="toolbar-sync-group">', 1)[1].split('<div class="toolbar-actions-group"', 1)[0]
+    assert 'id="btn-toggle-toolbar-actions"' in sync_group_html
+    assert 'id="toolbar-actions-group"' in toolbar_html
+    assert "function toggleToolbarActions(" in app_js
+
+    player_bar_html = index_html.split('<footer class="audio-player-bar"', 1)[1].split("</footer>", 1)[0]
+    assert "track-stream-badge" not in player_bar_html
+    assert "Podbean CDN" not in player_bar_html
+    assert "player-extras" not in player_bar_html
+    track_info_html = player_bar_html.split('<div class="track-info">', 1)[1].split("<!-- Player Center Controls -->", 1)[0]
+    assert 'id="btn-player-bookmark"' in track_info_html
+    assert 'id="btn-player-transcript"' not in track_info_html
+    top_row_html = player_bar_html.split('<div class="player-controls-top-row">', 1)[1].split('<div class="scrubber-row">', 1)[0]
+    assert 'id="btn-player-settings"' in top_row_html
+    assert 'id="btn-player-transcript"' in top_row_html
+    assert top_row_html.index('id="btn-player-settings"') < top_row_html.index('class="control-buttons"') < top_row_html.index('id="btn-player-transcript"')
+    assert "btn-player-transcript-label" not in top_row_html
+    tx_btn_html = top_row_html.split('id="btn-player-transcript"', 1)[1].split("</button>", 1)[0]
+    assert "Transcript" not in tx_btn_html
+    assert 'class="speed-selector"' not in player_bar_html
+    assert 'id="volume-slider"' not in player_bar_html
+
+    assert ".sidebar-brand .brand-text {" in mobile_block
+    assert "flex-direction: column;" in mobile_block
+
+    settings_view_html = index_html.split('id="player-settings-view"', 1)[1].split('id="archive-progress-modal"', 1)[0]
+    assert 'class="speed-selector"' in settings_view_html
+    assert 'id="volume-slider"' in settings_view_html
+    assert 'id="vol-toggle-btn"' in settings_view_html
+    assert "openPlayerSettings" in app_js
+    assert "closePlayerSettings" in app_js
+
+
+def test_headless_chrome_small_screen_no_overflow():
+    """
+    Tests rendered UI inside headless Google Chrome across mobile/tablet widths (320px, 393px, 768px)
+    to verify zero horizontal overflow, zero clipped nav buttons, intact search filter bounds,
+    single-line Date Range toggle, clamped popovers/dropdowns, and full-width lexicon companion.
+    """
+    import http.server
+    import json
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found")
+    if not (DIST_DIR / "db_manifest.json").exists() or not (DIST_DIR / "index.html").exists():
+        pytest.skip("Built static bundle not present in dist/")
+
+    report = {}
+
+    class ResponsiveAuditHandler(StaticPreviewHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__responsive_report":
+                length = int(self.headers.get("Content-Length", 0))
+                payload = self.rfile.read(length)
+                report.update(json.loads(payload.decode("utf-8")))
+                self.send_response(200)
+                self.end_headers()
+                return
+            self.send_error(404)
+
+        def do_GET(self):
+            if self.path == "/__responsive_host.html":
+                html = r"""<!DOCTYPE html>
+                <html><head><meta charset="utf-8"></head>
+                <body style="margin:0;padding:0;">
+                <iframe id="f" style="border:0;height:851px;display:block;" src="about:blank"></iframe>
+                <script>
+                (async () => {
+                  const viewports = [
+                    { w: 320, h: 568 },
+                    { w: 358, h: 661 },
+                    { w: 371, h: 698 },
+                    { w: 393, h: 851 },
+                    { w: 768, h: 480 },
+                    { w: 1280, h: 800 }
+                  ];
+                  const frame = document.getElementById('f');
+                  const wait = ms => new Promise(r => setTimeout(r, ms));
+                  const waitFor = async (fn, timeoutMs = 45000) => {
+                    const start = Date.now();
+                    while (Date.now() - start < timeoutMs) {
+                      const val = fn();
+                      if (val) return val;
+                      await wait(80);
+                    }
+                    throw new Error('Timed out waiting for responsive test condition');
+                  };
+
+                  const out = { ok: false, widths: {} };
+                  try {
+                    await new Promise(res => {
+                      frame.onload = () => {
+                        if (frame.contentWindow.location.pathname === '/index.html') res();
+                      };
+                      frame.src = '/index.html';
+                    });
+
+                    const doc = frame.contentDocument;
+                    const win = frame.contentWindow;
+                    await waitFor(() => parseInt(doc.getElementById('browse-count-badge')?.textContent?.trim() || '0', 10) > 1000);
+
+                    const searchInput = doc.getElementById('search-input');
+                    searchInput.value = 'five hindrances';
+                    searchInput.dispatchEvent(new win.Event('input', { bubbles: true }));
+                    await waitFor(() => doc.querySelectorAll('#search-results-list .result-card').length > 0);
+
+                    function auditState(label, vw) {
+                      const docW = doc.documentElement.clientWidth;
+                      const scrollW = doc.documentElement.scrollWidth;
+                      const overflowEls = [];
+                      for (const el of doc.querySelectorAll('body *')) {
+                        const cs = win.getComputedStyle(el);
+                        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+                        const rect = el.getBoundingClientRect();
+                        if (rect.width === 0 || rect.height === 0) continue;
+                        if (el.closest('.notes-diagram-card, .notes-table-wrap, .doc-table-container')) continue;
+                        if (rect.right > docW + 1 || rect.left < -1) {
+                          overflowEls.push({
+                            tag: el.tagName.toLowerCase(),
+                            id: el.id || '',
+                            cls: typeof el.className === 'string' ? el.className : '',
+                            left: Math.round(rect.left),
+                            right: Math.round(rect.right),
+                            docW
+                          });
+                        }
+                      }
+                      const clippedNav = [];
+                      doc.querySelectorAll('.sidebar-nav-item').forEach(btn => {
+                        if (win.getComputedStyle(btn).display === 'none') return;
+                        const r = btn.getBoundingClientRect();
+                        if (r.right > docW + 1 || r.left < -1) {
+                          clippedNav.push({ id: btn.id, left: Math.round(r.left), right: Math.round(r.right), docW });
+                        }
+                      });
+                      const extra = {};
+                      if (label === 'search_year') {
+                        const rangeBtn = doc.getElementById('btn-mode-range');
+                        const wrap = doc.querySelector('.search-box-wrapper');
+                        const sortSel = doc.getElementById('sort-order-select');
+                        const resetBtn = doc.getElementById('reset-filters-btn');
+                        extra.rangeBtnHeight = rangeBtn ? Math.round(rangeBtn.getBoundingClientRect().height) : 0;
+                        extra.sortInsideWrapper = Boolean(wrap && sortSel && sortSel.getBoundingClientRect().right <= wrap.getBoundingClientRect().right + 1);
+                        extra.resetInsideWrapper = Boolean(wrap && resetBtn && resetBtn.getBoundingClientRect().right <= wrap.getBoundingClientRect().right + 1);
+                      }
+                      if (label === 'transcript_view') {
+                        const comp = doc.getElementById('transcript-lexicon-companion');
+                        const sb = doc.getElementById('app-sidebar');
+                        const brandEl = sb ? sb.querySelector('.sidebar-brand') : null;
+                        const brandTitle = doc.getElementById('site-title');
+                        const navEl = doc.getElementById('main-nav-tabs');
+                        const tb = doc.getElementById('transcript-sticky-toolbar');
+                        const tbToggle = doc.getElementById('btn-toggle-toolbar-actions');
+                        const tbActions = doc.getElementById('toolbar-actions-group');
+                        const bar = doc.getElementById('audio-player-bar');
+                        const ti = bar ? bar.querySelector('.track-info') : null;
+                        const td = bar ? bar.querySelector('.track-details') : null;
+                        const bmk = doc.getElementById('btn-player-bookmark');
+                        const txBtn = doc.getElementById('btn-player-transcript');
+                        const gearBtn = doc.getElementById('btn-player-settings');
+                        const ctlBtns = bar ? bar.querySelector('.control-buttons') : null;
+                        const timeCur = doc.getElementById('time-current');
+                        const timeTot = doc.getElementById('time-total');
+                        const tiRect = ti ? ti.getBoundingClientRect() : null;
+                        const tdRect = td ? td.getBoundingClientRect() : null;
+                        const bmkRect = bmk ? bmk.getBoundingClientRect() : null;
+                        const gearRect = gearBtn ? gearBtn.getBoundingClientRect() : null;
+                        const txRect = txBtn ? txBtn.getBoundingClientRect() : null;
+                        const ctlRect = ctlBtns ? ctlBtns.getBoundingClientRect() : null;
+                        const curRect = timeCur ? timeCur.getBoundingClientRect() : null;
+                        const totRect = timeTot ? timeTot.getBoundingClientRect() : null;
+                        extra.compLeft = comp ? Math.round(comp.getBoundingClientRect().left) : null;
+                        extra.toolbarIsAsideTopDocked = Boolean(
+                          tb && tb.tagName.toLowerCase() === 'aside' && (
+                            vw <= 1024
+                              ? (
+                                  win.getComputedStyle(tb).position === 'fixed' &&
+                                  Math.round(tb.getBoundingClientRect().right) === docW &&
+                                  (vw <= 600
+                                    ? (Math.round(tb.getBoundingClientRect().left) === 0 && sb && Math.abs(tb.getBoundingClientRect().top - sb.getBoundingClientRect().bottom) <= 1)
+                                    : (Math.round(tb.getBoundingClientRect().top) === 0 && Math.round(tb.getBoundingClientRect().left) === (vw <= 900 ? 76 : 260))
+                                  )
+                                )
+                              : win.getComputedStyle(tb).position === 'sticky'
+                          )
+                        );
+                        const txHdr = doc.querySelector('#transcript-view .transcript-view-header');
+                        extra.toolbarClearedHeader = (vw <= 1024 && tb && txHdr)
+                          ? txHdr.getBoundingClientRect().top >= tb.getBoundingClientRect().bottom - 1
+                          : true;
+                        extra.toolbarClearedSidebar = (vw <= 600 && sb && tb)
+                          ? tb.getBoundingClientRect().top >= sb.getBoundingClientRect().bottom - 1
+                          : true;
+                        extra.noCdnBadge = Boolean(bar && !bar.querySelector('.track-stream-badge') && !bar.textContent.includes('Podbean CDN'));
+                        extra.bookmarkTopRight = Boolean(
+                          tiRect && tdRect && bmkRect && bmkRect.width > 0 &&
+                          bmkRect.top <= tiRect.top + 4 &&
+                          tiRect.right - bmkRect.right <= 2 &&
+                          bmkRect.left >= tdRect.right - 1
+                        );
+                        extra.titleFullWidthMinusBookmark = Boolean(
+                          tiRect && tdRect && bmkRect && bmkRect.width > 0 &&
+                          (tiRect.width - tdRect.width - bmkRect.width) <= 16
+                        );
+                        extra.gearInlineLeftAboveElapsed = Boolean(
+                          gearRect && ctlRect && curRect && gearRect.width > 0 &&
+                          gearRect.right <= ctlRect.left + 1 &&
+                          Math.abs((gearRect.top + gearRect.height / 2) - (ctlRect.top + ctlRect.height / 2)) <= 6 &&
+                          Math.abs(gearRect.left - curRect.left) <= 2 &&
+                          gearRect.bottom <= curRect.top + 2
+                        );
+                        extra.transcriptIconInlineRightAboveTotal = Boolean(
+                          txBtn && txRect && ctlRect && totRect && txRect.width > 0 &&
+                          win.getComputedStyle(txBtn).display !== 'none' &&
+                          txRect.left >= ctlRect.right - 1 &&
+                          Math.abs((txRect.top + txRect.height / 2) - (ctlRect.top + ctlRect.height / 2)) <= 6 &&
+                          Math.abs(txRect.right - totRect.right) <= 2 &&
+                          txRect.bottom <= totRect.top + 2 &&
+                          !txBtn.textContent.toLowerCase().includes('transcript')
+                        );
+                        if (vw <= 1024) {
+                          extra.toolbarActionsCollapsedInitially = Boolean(
+                            tbToggle && tbActions &&
+                            win.getComputedStyle(tbToggle).display !== 'none' &&
+                            win.getComputedStyle(tbActions).display === 'none'
+                          );
+                          if (tbToggle && tbActions) {
+                            tbToggle.click();
+                            const expandedDisp = win.getComputedStyle(tbActions).display;
+                            const expandedOverflow = doc.documentElement.scrollWidth > doc.documentElement.clientWidth;
+                            tbToggle.click();
+                            const recollapsedDisp = win.getComputedStyle(tbActions).display;
+                            extra.toolbarActionsToggleWorks = (expandedDisp !== 'none' && !expandedOverflow && recollapsedDisp === 'none');
+                          } else {
+                            extra.toolbarActionsToggleWorks = false;
+                          }
+                        } else {
+                          extra.toolbarActionsCollapsedInitially = Boolean(
+                            tbToggle && tbActions &&
+                            win.getComputedStyle(tbToggle).display === 'none' &&
+                            win.getComputedStyle(tbActions).display !== 'none'
+                          );
+                          extra.toolbarActionsToggleWorks = true;
+                        }
+                        if (vw <= 600 && brandEl && brandTitle && navEl) {
+                          const brandRect = brandEl.getBoundingClientRect();
+                          const titleRect = brandTitle.getBoundingClientRect();
+                          const navRect = navEl.getBoundingClientRect();
+                          const navBtns = Array.from(navEl.querySelectorAll('.sidebar-nav-item')).filter(b => win.getComputedStyle(b).display !== 'none');
+                          const navTops = navBtns.map(b => Math.round(b.getBoundingClientRect().top));
+                          extra.mobileBrandVisibleAboveNav = Boolean(
+                            win.getComputedStyle(brandTitle).display !== 'none' &&
+                            titleRect.width > 40 && titleRect.height > 10 &&
+                            navRect.top >= brandRect.bottom - 1 &&
+                            navBtns.length >= 7 &&
+                            (Math.max(...navTops) - Math.min(...navTops)) <= 2
+                          );
+                        } else {
+                          extra.mobileBrandVisibleAboveNav = true;
+                        }
+                      }
+                      return {
+                        label,
+                        docW,
+                        scrollW,
+                        overflowEls: overflowEls.slice(0, 10),
+                        clippedNav,
+                        extra
+                      };
+                    }
+
+                    for (const vp of viewports) {
+                      const vw = vp.w;
+                      frame.style.width = vp.w + 'px';
+                      frame.style.height = vp.h + 'px';
+                      await wait(160);
+                      const states = [];
+
+                      doc.getElementById('tab-search-btn').click();
+                      await wait(100);
+                      doc.getElementById('btn-mode-year').click();
+                      await wait(80);
+                      states.push(auditState('search_year', vw));
+
+                      doc.getElementById('btn-mode-range').click();
+                      await wait(80);
+                      states.push(auditState('search_date_range', vw));
+                      doc.getElementById('btn-mode-year').click();
+
+                      doc.getElementById('btn-download-all-archive').click();
+                      await wait(80);
+                      states.push(auditState('search_all_dropdown', vw));
+                      doc.body.click();
+
+                      doc.getElementById('tab-browse-btn').click();
+                      await waitFor(() => doc.querySelectorAll('#browse-episodes-grid .episode-card').length > 0);
+                      await wait(100);
+                      doc.getElementById('browse-category-btn').click();
+                      await wait(80);
+                      states.push(auditState('browse_category_popover', vw));
+                      doc.body.click();
+
+                      doc.getElementById('tab-lexicon-btn').click();
+                      await waitFor(() => doc.querySelectorAll('#lexicon-results-list .lexicon-card').length > 0);
+                      await wait(80);
+                      states.push(auditState('lexicon_view', vw));
+
+                      doc.getElementById('tab-documents-btn').click();
+                      await wait(200);
+                      states.push(auditState('documents_view', vw));
+
+                      doc.getElementById('tab-about-btn').click();
+                      await wait(80);
+                      states.push(auditState('about_view', vw));
+
+                      doc.getElementById('tab-notes-btn').click();
+                      await wait(80);
+                      states.push(auditState('notes_view', vw));
+
+                      doc.getElementById('tab-search-btn').click();
+                      await wait(80);
+                      doc.querySelector('#search-results-list [data-action="view-transcript"]').click();
+                      await waitFor(() => doc.querySelectorAll('#drawer-turns-container .transcript-turn').length > 0);
+                      const txPlay = doc.getElementById('transcript-play-btn');
+                      if (txPlay) txPlay.click();
+                      win.scrollTo(0, 0);
+                      await wait(240);
+                      states.push(auditState('transcript_view', vw));
+
+                      const gearBtn = doc.getElementById('btn-player-settings');
+                      const settingsView = doc.getElementById('player-settings-view');
+                      const settingsCard = doc.getElementById('player-settings-card');
+                      const closeSettingsBtn = doc.getElementById('btn-close-player-settings');
+                      const speedValEl = doc.getElementById('player-settings-speed-val');
+                      const volValEl = doc.getElementById('player-settings-vol-val');
+                      const volToggleBtn = doc.getElementById('vol-toggle-btn');
+                      const speed125Btn = settingsView.querySelector('.speed-btn[data-speed="1.25"]');
+                      const speed100Btn = settingsView.querySelector('.speed-btn[data-speed="1.0"]');
+                      gearBtn.click();
+                      await wait(120);
+                      const settingsState = auditState('player_settings_view', vw);
+                      const cardRect = settingsCard.getBoundingClientRect();
+                      speed125Btn.click();
+                      const speedAfterClick = speedValEl ? speedValEl.textContent.trim() : '';
+                      const hasCustomWhenFast = gearBtn.classList.contains('has-custom');
+                      volToggleBtn.click();
+                      const volMutedText = volValEl ? volValEl.textContent.trim() : '';
+                      volToggleBtn.click();
+                      const volRestoredText = volValEl ? volValEl.textContent.trim() : '';
+                      speed100Btn.click();
+                      settingsState.extra = {
+                        opened: win.getComputedStyle(settingsView).display !== 'none',
+                        cardInsideViewport: cardRect.left >= -1 && cardRect.right <= settingsState.docW + 1 && cardRect.top >= -1 && cardRect.bottom <= vp.h + 1,
+                        speedAfterClick,
+                        hasCustomWhenFast,
+                        volMutedText,
+                        volRestoredText,
+                      };
+                      closeSettingsBtn.click();
+                      await wait(80);
+                      settingsState.extra.closedAfterClick = win.getComputedStyle(settingsView).display === 'none';
+                      states.push(settingsState);
+
+                      if (vw <= 1024) {
+                        const comp = doc.getElementById('transcript-lexicon-companion');
+                        const toggleBtn = doc.getElementById('btn-toggle-lex-sheet');
+                        const sb = doc.getElementById('app-sidebar');
+                        toggleBtn.click();
+                        await wait(360);
+                        const expandedState = auditState('transcript_companion_expanded', vw);
+                        const tRect = toggleBtn.getBoundingClientRect();
+                        const sbRect = sb.getBoundingClientRect();
+                        const hitX = tRect.left + tRect.width / 2;
+                        const hitY = tRect.top + tRect.height / 2;
+                        const hitEl = doc.elementFromPoint(hitX, hitY);
+                        expandedState.extra = {
+                          expanded: comp.classList.contains('is-expanded'),
+                          toggleTop: Math.round(tRect.top),
+                          sidebarBottom: Math.round(sbRect.bottom),
+                          toggleClearedSidebar: vw <= 600 ? (tRect.top >= sbRect.bottom - 1) : (tRect.top >= 0),
+                          toggleHitTestOk: Boolean(hitEl && (hitEl === toggleBtn || toggleBtn.contains(hitEl))),
+                        };
+                        if (expandedState.extra.toggleHitTestOk) {
+                          toggleBtn.click();
+                          await wait(80);
+                          expandedState.extra.collapsedAfterClick = !comp.classList.contains('is-expanded');
+                        } else {
+                          expandedState.extra.collapsedAfterClick = false;
+                        }
+                        states.push(expandedState);
+                      }
+
+                      out.widths[vw] = states;
+                    }
+                    out.ok = true;
+                  } catch (err) {
+                    out.error = err && err.message ? err.message : String(err);
+                  }
+                  await fetch('/__responsive_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(out),
+                  });
+                })();
+                </script>
+                </body></html>"""
+                body = html.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: ResponsiveAuditHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_dir:
+            cmd = [
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_dir}",
+                "http://127.0.0.1:%d/__responsive_host.html" % port,
+            ]
+            proc = subprocess.Popen(cmd)
+            try:
+                deadline = time.time() + 55.0
+                while time.time() < deadline and not report:
+                    time.sleep(0.25)
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        assert report.get("ok") is True, f"Responsive layout audit failed: {report}"
+        for vw_str, states in report["widths"].items():
+            vw = int(vw_str)
+            for st in states:
+                assert st["scrollW"] <= st["docW"], f"Horizontal scroll overflow at {vw}px in {st['label']}: {st}"
+                assert st["overflowEls"] == [], f"Overflowing elements at {vw}px in {st['label']}: {st['overflowEls']}"
+                assert st["clippedNav"] == [], f"Clipped nav buttons at {vw}px in {st['label']}: {st['clippedNav']}"
+                if st["label"] == "search_year":
+                    assert st["extra"]["rangeBtnHeight"] <= 36, f"Date Range button wrapped onto multiple lines at {vw}px: {st['extra']}"
+                    assert st["extra"]["sortInsideWrapper"] is True, f"Sort select escaped wrapper at {vw}px"
+                    assert st["extra"]["resetInsideWrapper"] is True, f"Reset button escaped wrapper at {vw}px"
+                if st["label"] == "transcript_view":
+                    assert st["extra"]["toolbarIsAsideTopDocked"] is True, f"Toolbar aside not top-docked cleanly at {vw}px: {st['extra']}"
+                    assert st["extra"]["toolbarClearedHeader"] is True, f"Fixed top toolbar covered transcript header at {vw}px: {st['extra']}"
+                    assert st["extra"]["toolbarClearedSidebar"] is True, f"Sticky toolbar overlapped mobile header at {vw}px"
+                    assert st["extra"]["noCdnBadge"] is True, f"Podbean CDN badge should be removed at {vw}px"
+                    assert st["extra"]["bookmarkTopRight"] is True, f"Bookmark button not positioned top-right in play bar at {vw}px: {st['extra']}"
+                    assert st["extra"]["titleFullWidthMinusBookmark"] is True, f"Talk title did not expand full width minus bookmark at {vw}px: {st['extra']}"
+                    assert st["extra"]["gearInlineLeftAboveElapsed"] is True, f"Gear button not inline left above elapsed time at {vw}px: {st['extra']}"
+                    assert st["extra"]["transcriptIconInlineRightAboveTotal"] is True, f"Transcript icon button not inline right above total time at {vw}px: {st['extra']}"
+                    assert st["extra"]["toolbarActionsCollapsedInitially"] is True, f"Toolbar actions not collapsed initially at {vw}px: {st['extra']}"
+                    assert st["extra"]["toolbarActionsToggleWorks"] is True, f"Toolbar actions toggle failed at {vw}px: {st['extra']}"
+                    assert st["extra"]["mobileBrandVisibleAboveNav"] is True, f"Mobile brand line or single-row nav icons failed at {vw}px: {st['extra']}"
+                    if vw <= 600:
+                        assert st["extra"]["compLeft"] == 0, f"Lexicon companion cut off on left at {vw}px: {st['extra']}"
+                if st["label"] == "player_settings_view":
+                    assert st["extra"]["opened"] is True, f"Player settings view did not open at {vw}px"
+                    assert st["extra"]["cardInsideViewport"] is True, f"Player settings card overflowed viewport at {vw}px: {st['extra']}"
+                    assert st["extra"]["speedAfterClick"] == "1.25x", f"Speed selector failed inside settings view at {vw}px: {st['extra']}"
+                    assert st["extra"]["hasCustomWhenFast"] is True
+                    assert st["extra"]["volMutedText"] == "Muted"
+                    assert st["extra"]["volRestoredText"] == "100%"
+                    assert st["extra"]["closedAfterClick"] is True, f"Player settings view did not close at {vw}px"
+                if st["label"] == "transcript_companion_expanded":
+                    assert st["extra"]["expanded"] is True, f"Lexicon companion failed to expand at {vw}px"
+                    assert st["extra"]["toggleClearedSidebar"] is True, f"Expanded lexicon collapse button hidden behind nav bar at {vw}px: {st['extra']}"
+                    assert st["extra"]["toggleHitTestOk"] is True, f"Expanded lexicon collapse button not hit-testable at {vw}px: {st['extra']}"
+                    assert st["extra"]["collapsedAfterClick"] is True, f"Clicking expanded lexicon collapse button failed at {vw}px: {st['extra']}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_headless_chrome_pb9577355_lexicon_companion_track_sync():
+    """
+    Verifies on #talk/pb9577355 (SN12.23 Upanisa Sutta) that the Lexicon Live Companion
+    never breaks WordSync 'track' mode or steals document scroll:
+    1. Every word in WordSync.words resolves to a live transcript DOM span across all 34 turns.
+    2. Updating companion cards scrolls only #transcript-lexicon-stack without moving window.scrollY.
+    3. Clicking a companion card scrolls the target word into the unobstructed reading zone.
+    4. Clicking 'Active' (#btn-clear-lex-stack) leaves window.scrollY unchanged.
+    5. Wheel events inside #transcript-lexicon-companion do not pause teleprompter tracking.
+    6. On mobile (393x851), track teleprompter respects the fixed #transcript-lexicon-companion bar.
+    """
+    import http.server
+    import json
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found")
+    if not (DIST_DIR / "db_manifest.json").exists() or not (DIST_DIR / "index.html").exists():
+        pytest.skip("Built static bundle not present in dist/")
+
+    report = {}
+
+    class TrackSyncAuditHandler(StaticPreviewHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__track_sync_report":
+                length = int(self.headers.get("Content-Length", 0))
+                report.update(json.loads(self.rfile.read(length).decode("utf-8")))
+                self.send_response(200)
+                self.end_headers()
+                return
+            self.send_error(404)
+
+        def do_GET(self):
+            if self.path == "/__track_sync_host.html":
+                html = r"""<!DOCTYPE html>
+                <html><head><meta charset="utf-8"></head>
+                <body style="margin:0;padding:0;">
+                <iframe id="f" style="border:0;width:1280px;height:720px;display:block;" src="about:blank"></iframe>
+                <script>
+                (async () => {
+                  const frame = document.getElementById('f');
+                  const wait = ms => new Promise(r => setTimeout(r, ms));
+                  const waitFor = async (fn, timeoutMs = 45000) => {
+                    const start = Date.now();
+                    while (Date.now() - start < timeoutMs) {
+                      const val = fn();
+                      if (val) return val;
+                      await wait(80);
+                    }
+                    throw new Error('Timed out waiting for pb9577355 load');
+                  };
+
+                  const out = { ok: false };
+                  try {
+                    await new Promise(res => {
+                      frame.onload = () => {
+                        if (frame.contentWindow.location.pathname === '/index.html') res();
+                      };
+                      frame.src = '/index.html#talk/pb9577355';
+                    });
+
+                    const doc = frame.contentDocument;
+                    const win = frame.contentWindow;
+                    await waitFor(() => doc.querySelectorAll('#drawer-turns-container .transcript-turn').length === 34);
+                    await waitFor(() => win.WordSync && win.WordSync.words && win.WordSync.words.length > 9000);
+                    await waitFor(() => doc.querySelectorAll('#transcript-lexicon-stack .lex-stack-card').length > 100);
+                    await wait(200);
+
+                    const ws = win.WordSync;
+                    const stack = doc.getElementById('transcript-lexicon-stack');
+                    const comp = doc.getElementById('transcript-lexicon-companion');
+
+                    let missingDom = 0;
+                    for (let i = 0; i < ws.words.length; i++) {
+                      if (!doc.getElementById(ws.words[i].domId || ws.words[i].id)) missingDom++;
+                    }
+                    out.missingDom = missingDom;
+                    out.wordsLen = ws.words.length;
+
+                    // 1. Trigger Pali term updates while at top of talk: window.scrollY must remain 0 while stack scrolls
+                    win.scrollTo(0, 0);
+                    await wait(50);
+                    const winBeforePali = win.scrollY;
+                    ws.setMode('on');
+                    const paliTimeEl = doc.getElementById('lex-card-40');
+                    const wordTarget = doc.getElementById('tw-1383');
+                    const tTarget = wordTarget ? parseFloat(wordTarget.dataset.start) : 520;
+                    ws.update(tTarget + 0.05);
+                    await wait(350);
+                    out.stackScrolledWithoutWindow = Math.round(win.scrollY) === Math.round(winBeforePali) && stack.scrollTop > 0;
+
+                    // 2. Click companion card #40 from scrollY=0 -> transcript word lands inside viewport
+                    win.scrollTo(0, 0);
+                    await wait(60);
+                    paliTimeEl.click();
+                    await wait(1200);
+                    const rect40 = wordTarget.getBoundingClientRect();
+                    out.jumpCardInViewport = rect40.top >= 60 && rect40.bottom <= 680;
+                    out.jumpScrollY = Math.round(win.scrollY);
+
+                    // 3. Clicking 'Active' scrolls companion stack only, leaving window.scrollY unchanged
+                    stack.scrollTop = 0;
+                    await wait(50);
+                    const yBeforeActive = Math.round(win.scrollY);
+                    doc.getElementById('btn-clear-lex-stack').click();
+                    await wait(600);
+                    out.activeBtnWinUnchanged = Math.abs(win.scrollY - yBeforeActive) <= 1;
+                    out.activeBtnStackScrolled = stack.scrollTop > 100;
+
+                    // 4. Wheel on companion does not pause teleprompter tracking; wheel on transcript does
+                    ws._userInteractedAt = 0;
+                    stack.dispatchEvent(new win.WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
+                    out.wheelCompanionIgnored = ws._userInteractedAt === 0;
+                    doc.getElementById('drawer-turns-container').dispatchEvent(new win.WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
+                    out.wheelTranscriptPauses = ws._userInteractedAt > 0;
+                    ws._userInteractedAt = 0;
+
+                    // 5. Continuous 'track' mode progression on mobile stays above fixed lexicon companion bar
+                    frame.style.width = '393px';
+                    frame.style.height = '851px';
+                    await wait(180);
+                    ws._awaitingInitialSeek = false;
+                    ws.setMode('track');
+                    const trackWord = doc.getElementById('tw-1383') || doc.getElementById('tw-1259');
+                    const trackStart = parseFloat(trackWord.dataset.start);
+                    const trackMid = trackStart + 0.05;
+                    for (let k = 0; k < 70; k++) {
+                      ws.update(trackStart + Math.min(k * 0.002, 0.05));
+                      await wait(16);
+                    }
+                    const mobWordRect = ws.activeWordEl ? ws.activeWordEl.getBoundingClientRect() : null;
+                    const tbRect = doc.getElementById('transcript-sticky-toolbar').getBoundingClientRect();
+                    const compRect = comp.getBoundingClientRect();
+                    out.mobDebug = {
+                      trackStart,
+                      activeId: ws.activeWordEl ? ws.activeWordEl.id : null,
+                      mobWordTop: mobWordRect ? Math.round(mobWordRect.top) : null,
+                      mobWordBottom: mobWordRect ? Math.round(mobWordRect.bottom) : null,
+                      tbBottom: Math.round(tbRect.bottom),
+                      compTop: Math.round(compRect.top),
+                      scrollY: Math.round(win.scrollY),
+                    };
+                    out.mobileTrackClearOfCompanion = Boolean(
+                      mobWordRect && mobWordRect.top >= tbRect.bottom - 1 && mobWordRect.bottom <= compRect.top + 1
+                    );
+
+                    // 6. Detached activeWordEl recovery in WordSync.update
+                    const prevActive = ws.activeWordEl;
+                    if (prevActive && prevActive.parentNode) {
+                      const clone = prevActive.cloneNode(true);
+                      prevActive.parentNode.replaceChild(clone, prevActive);
+                      ws.update(parseFloat(clone.dataset.start) + 0.02);
+                      out.reattachedAfterDetachedSpan = Boolean(ws.activeWordEl && ws.activeWordEl.isConnected && ws.activeWordEl === clone);
+                    } else {
+                      out.reattachedAfterDetachedSpan = false;
+                    }
+
+                    out.ok = true;
+                  } catch (err) {
+                    out.error = err && err.stack ? err.stack : String(err);
+                  }
+                  await fetch('/__track_sync_report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(out),
+                  });
+                })();
+                </script>
+                </body></html>"""
+                body = html.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            super().do_GET()
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: TrackSyncAuditHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_dir:
+            proc = subprocess.Popen([
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_dir}",
+                f"http://127.0.0.1:{port}/__track_sync_host.html",
+            ])
+            try:
+                deadline = time.time() + 45.0
+                while time.time() < deadline and not report:
+                    time.sleep(0.25)
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        assert report.get("ok") is True, f"pb9577355 companion/track audit failed: {report}"
+        assert report["missingDom"] == 0
+        assert report["wordsLen"] == 9602
+        assert report["stackScrolledWithoutWindow"] is True
+        assert report["jumpCardInViewport"] is True, f"Card jump stranded offscreen: {report}"
+        assert report["activeBtnWinUnchanged"] is True
+        assert report["activeBtnStackScrolled"] is True
+        assert report["wheelCompanionIgnored"] is True
+        assert report["wheelTranscriptPauses"] is True
+        assert report["mobileTrackClearOfCompanion"] is True, f"Mobile track covered by companion: {report}"
+        assert report["reattachedAfterDetachedSpan"] is True
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_deploy_to_github_pages_excludes_staging_raw_db_and_crlf_warnings(tmp_path: Path, monkeypatch, capfd):
+    """
+    Verifies export_static_site() prunes stale files and deploy_to_github_pages():
+    1. Excludes .build_stage_* and raw *.db files even if manually present in dist/.
+    2. Emits zero Git LF->CRLF warnings even when core.autocrlf=true on Windows.
+    3. Validates required manifest shards are staged and aborts before pushing >= 100 MB files.
+    """
+    import json
+    import os
+    import subprocess
+    import time
+    from deeper_dhamma.export_web import deploy_to_github_pages, export_static_site
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    subprocess.run(["git", "init", str(repo_dir)], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "-C", str(repo_dir), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(repo_dir), "config", "user.email", "test@example.com"], check=True)
+    subprocess.run(["git", "-C", str(repo_dir), "config", "core.autocrlf", "true"], check=True)
+    (repo_dir / ".gitignore").write_text("dist/\n*.db\n", encoding="utf-8", newline="\n")
+
+    remote_bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "--bare", str(remote_bare)], check=True, stdout=subprocess.DEVNULL)
+
+    dist_dir = repo_dir / "dist"
+    dist_dir.mkdir()
+
+    # Verify export_static_site prunes arbitrary leftover files/dirs after compiling
+    stale_dir = dist_dir / ".build_stage_8316"
+    stale_dir.mkdir()
+    (stale_dir / "talks_2.db").write_bytes(b"old-stage")
+    stale_file = dist_dir / "obsolete_asset.txt"
+    stale_file.write_text("stale", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "deeper_dhamma.export_web.compile_sharded_static_databases",
+        lambda out_d, version_int, show_progress=True: (
+            (Path(out_d) / "core.db.gz").write_bytes(b"\x1f\x8bcore"),
+            (Path(out_d) / "talks_1.db.gz").write_bytes(b"\x1f\x8bt1"),
+            (Path(out_d) / "words_1.db.gz").write_bytes(b"\x1f\x8bw1"),
+            (Path(out_d) / "db_manifest.json").write_text(
+                json.dumps({
+                    "format": "sharded_v1",
+                    "version": version_int,
+                    "core": {"file": "core.db.gz", "gz_bytes": 6, "raw_bytes": 10},
+                    "talks": [{"file": "talks_1.db.gz", "gz_bytes": 4, "raw_bytes": 8, "episodes": 1}],
+                    "words": [{"file": "words_1.db.gz", "gz_bytes": 4, "raw_bytes": 8, "episodes": 1}],
+                }),
+                encoding="utf-8",
+            ),
+            {
+                "version": version_int,
+                "size_bytes": 14,
+                "raw_size_bytes": 26,
+                "episodes": 1,
+                "transcribed_episodes": 1,
+                "segments": 1,
+                "terms": 1,
+                "words": 1,
+                "manifest": {
+                    "core": {"file": "core.db.gz", "gz_bytes": 6, "raw_bytes": 10},
+                    "talks": [{"file": "talks_1.db.gz", "gz_bytes": 4, "raw_bytes": 8, "episodes": 1}],
+                    "words": [{"file": "words_1.db.gz", "gz_bytes": 4, "raw_bytes": 8, "episodes": 1}],
+                },
+            },
+        )[-1],
+    )
+    export_static_site(dist_dir, show_progress=False)
+    assert not stale_dir.exists(), "export_static_site must prune leftover staging directories"
+    assert not stale_file.exists(), "export_static_site must prune leftover obsolete files"
+    assert (dist_dir / "index.html").exists()
+
+    # Re-plant a stray staging dir & raw .db file right before deploy to verify deploy exclusions too
+    future_ts = time.time() + 3600
+    for p in dist_dir.iterdir():
+        if p.is_file():
+            os.utime(p, (future_ts, future_ts))
+    stale_stage = dist_dir / ".build_stage_999999"
+    stale_stage.mkdir()
+    (stale_stage / "talks_2.db").write_bytes(b"raw-sqlite-leaked")
+    (stale_stage / "talks_3.db-journal").write_bytes(b"journal")
+    (dist_dir / "stray.db").write_bytes(b"raw-stray")
+
+    monkeypatch.setattr("deeper_dhamma.export_web._is_dist_stale", lambda _p: False)
+    capfd.readouterr()
+
+    deploy_to_github_pages(
+        dist_dir=dist_dir,
+        remote=str(remote_bare),
+        branch="gh-pages",
+        repo_root=repo_dir,
+    )
+
+    captured = capfd.readouterr()
+    assert "LF will be replaced by CRLF" not in captured.err
+    assert "LF will be replaced by CRLF" not in captured.out
+
+    tree_out = subprocess.check_output(
+        ["git", "--git-dir", str(remote_bare), "ls-tree", "-r", "--name-only", "refs/heads/gh-pages"],
+        text=True,
+    )
+    deployed_files = set(tree_out.splitlines())
+    assert "index.html" in deployed_files
+    assert "core.db.gz" in deployed_files
+    assert "talks_1.db.gz" in deployed_files
+    assert "words_1.db.gz" in deployed_files
+    assert not any(".build_stage_" in f for f in deployed_files)
+    assert not any(f.endswith((".db", ".db-journal")) for f in deployed_files)
+
+    # Verify LF preserved without autocrlf mangling
+    app_blob = subprocess.check_output(
+        ["git", "--git-dir", str(remote_bare), "show", "refs/heads/gh-pages:app.js"],
+    )
+    assert b"\r\n" not in app_blob
+
+    # Verify hard error before pushing if a staged file >= 100 MB
+    monkeypatch.setattr("deeper_dhamma.export_web._GITHUB_HARD_MAX_BYTES", 1024)
+    (dist_dir / "words_1.db.gz").write_bytes(b"x" * 2048)
+    with pytest.raises(RuntimeError, match="Refusing to deploy"):
+        deploy_to_github_pages(
+            dist_dir=dist_dir,
+            remote=str(remote_bare),
+            branch="gh-pages",
+            repo_root=repo_dir,
+        )
+

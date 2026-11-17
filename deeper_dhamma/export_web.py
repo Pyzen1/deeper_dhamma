@@ -19,7 +19,9 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
+import tempfile
 import time
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 import urllib.request
@@ -36,6 +38,9 @@ from deeper_dhamma.config import (
 from deeper_dhamma.status import make_progress_bar
 
 logger = logging.getLogger("export_web")
+
+_GITHUB_RECOMMENDED_MAX_BYTES = 50 * 1024 * 1024
+_GITHUB_HARD_MAX_BYTES = 100 * 1024 * 1024
 
 WEB_DIR = PROJECT_ROOT / "deeper_dhamma" / "web"
 STATIC_SRC_DIR = WEB_DIR / "static"
@@ -334,28 +339,28 @@ def compile_sharded_static_databases(
     output_dir: Path | str,
     version_int: int,
     num_talks_shards: int = 4,
-    num_words_shards: int = 2,
+    num_words_shards: int = 4,
     transcripts_db_path: Path | str = TRANSCRIPTS_DB_PATH,
     show_progress: bool = True,
 ) -> dict:
     """
-    Compiles a PWA-ready sharded & gzipped database bundle atomically via staging dir inside ``output_dir``:
+    Compiles a PWA-ready sharded & gzipped database bundle atomically via an isolated temp stage:
     - core.db.gz: episodes (with talks_shard / words_shard routing), teachers, lexicon, search_vocab
     - talks_1..N.db.gz: speech_segments + FTS5 transcripts_fts shards
     - words_1..M.db.gz: episode_words (binary word timings + VBR1 seek trailers) shards
     - db_manifest.json: per-shard byte sizes and SHA-256 digests for incremental updates
     """
+    if num_talks_shards < 1 or num_words_shards < 1:
+        raise ValueError("num_talks_shards and num_words_shards must both be >= 1")
+
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stage_dir = out_dir / f".build_stage_{os.getpid()}"
-    if stage_dir.exists():
-        shutil.rmtree(stage_dir, ignore_errors=True)
-    stage_dir.mkdir(parents=True, exist_ok=True)
 
     progress = _BuildProgress(enabled=show_progress)
     src_uri = Path(transcripts_db_path).resolve().as_uri()
     src_conn = sqlite3.connect(f"{src_uri}?mode=ro", uri=True)
     src_conn.execute("PRAGMA query_only = ON;")
+    stage_dir = Path(tempfile.mkdtemp(prefix="dd_build_stage_"))
 
     try:
         progress.update(2, "Scanning catalog & computing shard balance", force=True)
@@ -704,7 +709,18 @@ def compile_sharded_static_databases(
             "total_raw_bytes": total_raw_bytes,
             "total_gz_bytes": total_gz_bytes,
         }
-        (stage_dir / "db_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        (stage_dir / "db_manifest.json").write_text(
+            json.dumps(manifest, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        for shard_meta in [manifest["core"], *talks_meta, *words_meta]:
+            if shard_meta["gz_bytes"] >= _GITHUB_RECOMMENDED_MAX_BYTES:
+                logger.warning(
+                    f"Shard '{shard_meta['file']}' is {shard_meta['gz_bytes'] / (1024 * 1024):.2f} MB gzipped "
+                    f"(>= 50 MB GitHub large-file warning threshold); consider increasing shard count."
+                )
 
         # Promote staged artifacts atomically so an interrupted build never wipes prior dist/ DBs
         for pattern in ("dhamma_web.db*", "core.db*", "talks_*.db*", "words_*.db*", "db_manifest.json"):
@@ -715,7 +731,11 @@ def compile_sharded_static_databases(
                     pass
 
         for staged_file in stage_dir.iterdir():
-            staged_file.replace(out_dir / staged_file.name)
+            dst_file = out_dir / staged_file.name
+            try:
+                staged_file.replace(dst_file)
+            except OSError:
+                shutil.move(str(staged_file), str(dst_file))
 
         progress.update(100, "Sharded bundle ready", force=True)
         progress.finish()
@@ -751,18 +771,6 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
     out_path = _resolve_repo_path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
-    # Remove stale / leftover test artifacts if present in output_dir
-    for stale_item in ["test_copy.db", "transcripts", "ff_profile_test.html"]:
-        stale_p = out_path / stale_item
-        if stale_p.exists():
-            if stale_p.is_dir():
-                shutil.rmtree(stale_p, ignore_errors=True)
-            else:
-                try:
-                    stale_p.unlink()
-                except OSError:
-                    pass
-
     today = datetime.now()
     version_int = int(time.time())
     date_str = today.strftime("%Y-%m-%d")
@@ -775,7 +783,7 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
     print(f"[*] Build Date:          {date_str}")
     print("-" * 80)
 
-    # 1. Compile sharded & gzipped SQLite PWA bundle (core + talks_1..4 + words_1..2)
+    # 1. Compile sharded & gzipped SQLite PWA bundle (core + talks_1..4 + words_1..4)
     metrics = compile_sharded_static_databases(out_path, version_int=version_int, show_progress=show_progress)
     manifest = metrics["manifest"]
     print(
@@ -795,12 +803,25 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
     # 2. Ensure SQLite WASM engine assets exist
     ensure_wasm_assets(STATIC_SRC_DIR)
 
+    expected_entries = {
+        "db_manifest.json",
+        manifest["core"]["file"],
+        *(s["file"] for s in manifest["talks"]),
+        *(s["file"] for s in manifest["words"]),
+        "index.html",
+        "404.html",
+        "svc_worker.js",
+        ".nojekyll",
+        "CNAME",
+    }
+
     # 3. Copy static frontend assets (skips directories like adapters/)
     copied_files = 0
     for src_file in STATIC_SRC_DIR.iterdir():
         if src_file.is_file():
             dst_file = out_path / src_file.name
             shutil.copy2(src_file, dst_file)
+            expected_entries.add(src_file.name)
             copied_files += 1
 
     # Copy icons directory if present
@@ -810,6 +831,7 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
         if icons_dst.exists():
             shutil.rmtree(icons_dst)
         shutil.copytree(icons_src, icons_dst)
+        expected_entries.add("icons")
         copied_files += len([f for f in icons_src.iterdir() if f.is_file()])
 
 
@@ -820,6 +842,7 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
         if sources_dst.exists():
             shutil.rmtree(sources_dst)
         shutil.copytree(sources_src, sources_dst)
+        expected_entries.add("sources")
         copied_files += len([f for f in sources_src.iterdir() if f.is_file()])
 
     # Deploy pure SQLite WASM client adapter to dist/db_client.js and static/db_client.js
@@ -827,6 +850,7 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
     if wasm_adapter.exists():
         shutil.copy2(wasm_adapter, out_path / "db_client.js")
         shutil.copy2(wasm_adapter, STATIC_SRC_DIR / "db_client.js")
+        expected_entries.add("db_client.js")
         copied_files += 1
 
     print(f"[✓] Copied {copied_files} frontend/WASM assets into {out_path.name}/")
@@ -852,12 +876,12 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
     )
 
     out_index = out_path / "index.html"
-    with open(out_index, "w", encoding="utf-8") as f:
+    with open(out_index, "w", encoding="utf-8", newline="\n") as f:
         f.write(rendered_html)
 
     # 4.1 Pre-render 404.html for seamless GitHub Pages SPA routing fallback
     out_404 = out_path / "404.html"
-    with open(out_404, "w", encoding="utf-8") as f:
+    with open(out_404, "w", encoding="utf-8", newline="\n") as f:
         f.write(rendered_html)
 
     # 5. Pre-render svc_worker.js with version stamp for atomic cache invalidation
@@ -865,13 +889,25 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
     if sw_dist.exists():
         sw_content = sw_dist.read_text(encoding="utf-8")
         sw_content = sw_content.replace("{{db_version}}", str(version_int))
-        sw_dist.write_text(sw_content, encoding="utf-8")
+        sw_dist.write_text(sw_content, encoding="utf-8", newline="\n")
         print(f"[✓] Pre-rendered svc_worker.js with cache version 'deeper_dhamma_shell_{version_int}'")
 
     # 5.1 Ensure .nojekyll is present to bypass Jekyll build on GitHub Pages
     nojekyll_dist = out_path / ".nojekyll"
     if not nojekyll_dist.exists():
         nojekyll_dist.touch()
+
+    # 6. Prune any leftover files/directories from prior builds after new bundle is ready
+    for entry in list(out_path.iterdir()):
+        if entry.name in expected_entries:
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            try:
+                entry.unlink()
+            except OSError:
+                pass
 
     print(f"[✓] Pre-rendered index.html with relative asset links")
     print("-" * 80)
@@ -892,19 +928,21 @@ def _is_dist_stale(dist_path: Path) -> bool:
     dist_mtime = min(index_out.stat().st_mtime, manifest_out.stat().st_mtime)
     candidates = [
         VIEWS_SRC_DIR / "index.html",
-        STATIC_SRC_DIR / "app.js",
-        STATIC_SRC_DIR / "card_physics.js",
-        STATIC_SRC_DIR / "word_sync.js",
-        STATIC_SRC_DIR / "style.css",
-        STATIC_SRC_DIR / "db_worker.js",
-        STATIC_SRC_DIR / "svc_worker.js",
-        STATIC_SRC_DIR / "manifest.json",
-        STATIC_SRC_DIR / "icons" / "icon_192.png",
-        STATIC_SRC_DIR / "icons" / "icon_512.png",
         STATIC_SRC_DIR / "adapters" / "wasm_client.js",
         TRANSCRIPTS_DB_PATH,
         BUDDHISM_LEXICON_DB_PATH,
     ]
+    if STATIC_SRC_DIR.exists():
+        for src_p in STATIC_SRC_DIR.iterdir():
+            # db_client.js is overwritten from adapters/wasm_client.js mid-build after db_manifest.json
+            if src_p.is_file() and src_p.name != "db_client.js":
+                candidates.append(src_p)
+        icons_dir = STATIC_SRC_DIR / "icons"
+        if icons_dir.exists():
+            candidates.extend(p for p in icons_dir.iterdir() if p.is_file())
+    sources_dir = PROJECT_ROOT / "databases" / "sources"
+    if sources_dir.exists():
+        candidates.extend(p for p in sources_dir.iterdir() if p.is_file())
     for src in candidates:
         if src.exists() and src.stat().st_mtime > dist_mtime:
             return True
@@ -1039,13 +1077,87 @@ def run_web_preview(host: str = DEFAULT_WEB_HOST, port: str | int = DEFAULT_WEB_
         server.server_close()
 
 
-def deploy_to_github_pages(dist_dir: Path | str = DIST_DIR, remote: str = "origin", branch: str = "gh-pages") -> None:
+def _validate_staged_pages_index(dist_path: Path, env: dict) -> None:
+    """Verifies staged gh-pages blobs exclude staging/raw DB artifacts and fit GitHub limits."""
+    staged_raw = subprocess.check_output(
+        ["git", "ls-files", "--stage"],
+        cwd=str(dist_path),
+        env=env,
+        text=True,
+    )
+    staged_entries: List[Tuple[str, str]] = []
+    for line in staged_raw.splitlines():
+        if "\t" not in line:
+            continue
+        meta, rel_path = line.split("\t", 1)
+        parts = meta.split()
+        if len(parts) < 2:
+            continue
+        oid = parts[1]
+        norm_rel = rel_path.replace("\\", "/")
+        if any(seg.startswith(".build_stage_") for seg in norm_rel.split("/")):
+            raise RuntimeError(f"Refusing to deploy build staging artifact: {rel_path}")
+        if norm_rel.endswith((".db", ".db-journal", ".db-wal", ".db-shm")):
+            raise RuntimeError(f"Refusing to deploy uncompressed SQLite artifact: {rel_path}")
+        staged_entries.append((oid, norm_rel))
+
+    staged_paths = {rel_path for _, rel_path in staged_entries}
+    required_paths = {"index.html", "404.html", "svc_worker.js", "db_manifest.json", "core.db.gz", "CNAME", ".nojekyll"}
+    manifest_path = dist_path / "db_manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        core_file = (manifest.get("core") or {}).get("file")
+        if core_file:
+            required_paths.add(core_file)
+        for shard_group in ("talks", "words"):
+            for shard_meta in manifest.get(shard_group, []):
+                if shard_meta.get("file"):
+                    required_paths.add(shard_meta["file"])
+    missing = sorted(required_paths - staged_paths)
+    if missing:
+        raise RuntimeError(f"Refusing to deploy incomplete dist/ bundle; missing staged files: {', '.join(missing)}")
+
+    if not staged_entries:
+        raise RuntimeError("No files staged for GitHub Pages deployment.")
+
+    oid_input = "\n".join(oid for oid, _ in staged_entries) + "\n"
+    sizes_out = subprocess.check_output(
+        ["git", "cat-file", "--batch-check"],
+        input=oid_input,
+        cwd=str(dist_path),
+        env=env,
+        text=True,
+    )
+    oversized_warn: List[Tuple[str, int]] = []
+    for (_, rel_path), size_line in zip(staged_entries, sizes_out.splitlines()):
+        tokens = size_line.split()
+        if len(tokens) >= 3 and tokens[1] == "blob":
+            blob_size = int(tokens[2])
+            if blob_size >= _GITHUB_HARD_MAX_BYTES:
+                raise RuntimeError(
+                    f"Refusing to deploy '{rel_path}' ({blob_size / (1024 * 1024):.2f} MB >= 100 MB GitHub limit)"
+                )
+            if blob_size >= _GITHUB_RECOMMENDED_MAX_BYTES:
+                oversized_warn.append((rel_path, blob_size))
+
+    for rel_path, blob_size in oversized_warn:
+        print(
+            f"[!] Warning: '{rel_path}' is {blob_size / (1024 * 1024):.2f} MB "
+            f"(>= 50 MB GitHub large-file threshold).",
+            flush=True,
+        )
+
+
+def deploy_to_github_pages(
+    dist_dir: Path | str = DIST_DIR,
+    remote: str = "origin",
+    branch: str = "gh-pages",
+    repo_root: Path | str = PROJECT_ROOT,
+) -> None:
     """
     Deploys the static site distribution directly to GitHub Pages (gh-pages branch)
     using git plumbing without checking build artifacts into the main branch.
     """
-    import subprocess
-
     dist_path = _resolve_repo_path(dist_dir)
     if not dist_path.exists() or _is_dist_stale(dist_path):
         print(f"[*] Rebuilding static distribution in '{dist_path}' before deployment...")
@@ -1054,19 +1166,28 @@ def deploy_to_github_pages(dist_dir: Path | str = DIST_DIR, remote: str = "origi
     # Ensure CNAME and .nojekyll are present
     cname_path = dist_path / "CNAME"
     if not cname_path.exists():
-        cname_path.write_text("deeperdhamma.com\n", encoding="utf-8")
+        cname_path.write_text("deeperdhamma.com\n", encoding="utf-8", newline="\n")
 
     nojekyll_path = dist_path / ".nojekyll"
     if not nojekyll_path.exists():
         nojekyll_path.touch()
 
-    repo_root = PROJECT_ROOT
-    temp_index = repo_root / ".git" / "temp_pages_index"
-    if temp_index.exists():
+    repo_root_path = Path(repo_root).resolve()
+    git_dir_raw = subprocess.check_output(
+        ["git", "-C", str(repo_root_path), "rev-parse", "--git-dir"],
+        text=True,
+    ).strip()
+    git_dir_path = Path(git_dir_raw)
+    if not git_dir_path.is_absolute():
+        git_dir_path = (repo_root_path / git_dir_path).resolve()
+
+    manifest_version = None
+    manifest_file = dist_path / "db_manifest.json"
+    if manifest_file.exists():
         try:
-            temp_index.unlink()
-        except OSError:
-            pass
+            manifest_version = json.loads(manifest_file.read_text(encoding="utf-8")).get("version")
+        except Exception:
+            manifest_version = None
 
     print("\n" + "=" * 80)
     print("BSWA Deeper Dhamma: Deploy to GitHub Pages (deeperdhamma.com)")
@@ -1074,49 +1195,68 @@ def deploy_to_github_pages(dist_dir: Path | str = DIST_DIR, remote: str = "origi
     print(f"[*] Distribution Directory: {dist_path}")
     print(f"[*] Remote Repository:      {remote}")
     print(f"[*] Target Branch:          {branch}")
-    print(f"[*] Custom Domain (CNAME):  {cname_path.read_text().strip()}")
+    print(f"[*] Custom Domain (CNAME):  {cname_path.read_text(encoding='utf-8').strip()}")
     print("-" * 80)
 
-    env = os.environ.copy()
-    env["GIT_WORK_TREE"] = str(dist_path.resolve())
-    env["GIT_INDEX_FILE"] = str(temp_index.resolve())
+    with tempfile.TemporaryDirectory(prefix="dd_pages_index_") as tmp_idx_dir:
+        temp_index = Path(tmp_idx_dir) / "index"
+        env = os.environ.copy()
+        env["GIT_DIR"] = str(git_dir_path)
+        env["GIT_WORK_TREE"] = str(dist_path.resolve())
+        env["GIT_INDEX_FILE"] = str(temp_index.resolve())
 
-    try:
-        # 1. Stage all files from dist_path into temp git index
-        subprocess.run(["git", "add", "-A"], cwd=str(repo_root), env=env, check=True)
+        # 1. Stage all static files from dist_path (disabling CRLF conversion and excluding build/raw DB artifacts)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "core.autocrlf=false",
+                "add",
+                "-A",
+                "--",
+                ".",
+                ":!.build_stage_*",
+                ":!*/.build_stage_*",
+                ":!*.db",
+                ":!*.db-journal",
+                ":!*.db-wal",
+                ":!*.db-shm",
+            ],
+            cwd=str(dist_path.resolve()),
+            env=env,
+            check=True,
+        )
 
-        # 2. Write tree object
+        # 2. Verify staged files exclude staging/raw DB artifacts and stay within GitHub limits
+        _validate_staged_pages_index(dist_path, env)
+
+        # 3. Write tree object
         tree_sha = subprocess.check_output(
-            ["git", "write-tree"], cwd=str(repo_root), env=env, text=True
+            ["git", "write-tree"], cwd=str(dist_path.resolve()), env=env, text=True
         ).strip()
 
-        # 3. Create commit object
+        # 4. Create commit object
         today_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        commit_msg = f"Deploy Deeper Dhamma v{int(time.time())} to deeperdhamma.com ({today_str})"
+        deploy_ver = manifest_version if manifest_version is not None else int(time.time())
+        commit_msg = f"Deploy Deeper Dhamma v{deploy_ver} to deeperdhamma.com ({today_str})"
         commit_sha = subprocess.check_output(
             ["git", "commit-tree", tree_sha, "-m", commit_msg],
-            cwd=str(repo_root),
+            cwd=str(dist_path.resolve()),
             env=env,
             text=True,
         ).strip()
 
-        # 4. Push commit to remote branch
+        # 5. Push commit to remote branch
         print(f"[*] Pushing commit {commit_sha[:8]} to {remote}/{branch}...")
         subprocess.run(
             ["git", "push", remote, f"{commit_sha}:refs/heads/{branch}", "--force"],
-            cwd=str(repo_root),
+            cwd=str(repo_root_path),
             check=True,
         )
 
         print("-" * 80)
         print("[✓] Successfully deployed to GitHub Pages!")
         print("    Live URL:  https://deeperdhamma.com/")
-        print("    Branch:    gh-pages")
+        print(f"    Branch:    {branch}")
         print("=" * 80 + "\n")
-    finally:
-        if temp_index.exists():
-            try:
-                temp_index.unlink()
-            except OSError:
-                pass
 

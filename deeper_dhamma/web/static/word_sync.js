@@ -73,16 +73,20 @@
     init: function () {
       this.updateUI();
       if (typeof window !== 'undefined') {
-        window.addEventListener('wheel', () => this.handleUserInteraction(), { passive: true });
-        window.addEventListener('touchmove', () => this.handleUserInteraction(), { passive: true });
+        window.addEventListener('wheel', (e) => this.handleUserInteraction(e), { passive: true });
+        window.addEventListener('touchmove', (e) => this.handleUserInteraction(e), { passive: true });
         window.addEventListener('resize', () => { this._teleprompterLine = null; }, { passive: true });
       }
     },
 
     /**
-     * Handles manual user interaction (wheel/touch) by pausing teleprompter auto-centering.
+     * Handles manual user interaction (wheel/touch) on the transcript view by pausing teleprompter auto-centering.
+     * Scrolling inside the Lexicon Companion panel does not pause transcript tracking.
      */
-    handleUserInteraction: function () {
+    handleUserInteraction: function (evt) {
+      if (evt && evt.target && evt.target.closest && evt.target.closest('#transcript-lexicon-companion')) {
+        return;
+      }
       this._userInteractedAt = performance.now();
     },
 
@@ -1300,6 +1304,19 @@
         playerTop = Math.min(viewportHeight, playerBar.getBoundingClientRect().top);
       }
 
+      const companionBar = document.getElementById('transcript-lexicon-companion');
+      if (companionBar) {
+        const compStyle = typeof window !== 'undefined' && window.getComputedStyle
+          ? window.getComputedStyle(companionBar)
+          : null;
+        if (!compStyle || (compStyle.display !== 'none' && compStyle.position === 'fixed')) {
+          const compRect = companionBar.getBoundingClientRect();
+          if (compRect.height > 0) {
+            playerTop = Math.min(playerTop, compRect.top);
+          }
+        }
+      }
+
       const availableHeight = playerTop - toolbarBottom;
       if (availableHeight <= 100) return;
       const centerLine = toolbarBottom + (availableHeight * 0.46);
@@ -1358,13 +1375,16 @@
       // Binary search across words for physical currentTime
       const targetIdx = this.findWordIndex(currentTime);
       if (targetIdx >= 0) {
-        let activeSpan = this.activeWordEl;
-        if (this.activeWordIdx !== targetIdx) {
+        let activeSpan = this.activeWordEl && this.activeWordEl.isConnected ? this.activeWordEl : null;
+        if (this.activeWordIdx !== targetIdx || !activeSpan) {
           const targetWord = this.words[targetIdx];
           const spanId = targetWord.domId || targetWord.id;
           const newSpan = document.getElementById(spanId);
 
           if (newSpan) {
+            if (!activeSpan) {
+              this._teleprompterLine = null;
+            }
             this.activeWordIdx = targetIdx;
             if (this.activeWordEl && this.activeWordEl !== newSpan) {
               this.activeWordEl.classList.remove('active-word');
