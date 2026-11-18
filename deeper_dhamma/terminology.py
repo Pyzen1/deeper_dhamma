@@ -85,6 +85,7 @@ class TerminologyEditor:
         synchronized when multi-word misrecognitions are merged, and aggregates an episode changelog.
         """
         aggregated_changes: Dict[str, Dict] = {}
+        has_any_words = any(bool(s.get("words")) for s in segments)
 
         for i, seg in enumerate(segments):
             if "text" not in seg or not seg["text"]:
@@ -101,6 +102,20 @@ class TerminologyEditor:
 
             if seg.get("words"):
                 seg["words"] = self._sync_word_timings(seg["words"], corrected, orig_text=orig_text)
+            elif has_any_words and corrected.split():
+                toks = corrected.split()
+                st = float(seg.get("start", 0.0) or 0.0)
+                en = max(st, float(seg.get("end", st) or st))
+                step = (en - st) / len(toks)
+                seg["words"] = [
+                    {
+                        "word": f" {tok}",
+                        "start": round(st + k * step, 3),
+                        "end": round(max(st + k * step, st + (k + 1) * step), 3),
+                        "prob": 0.5,
+                    }
+                    for k, tok in enumerate(toks)
+                ]
 
             for change in changes:
                 key = f"{change['original']} -> {change['replacement']}"
@@ -173,6 +188,8 @@ class TerminologyEditor:
             return words
 
         orig_tokens = orig_text.split() if orig_text else [w.get("word", "").strip() for w in words]
+        if len(orig_tokens) != len(words):
+            orig_tokens = [w.get("word", "").strip() for w in words]
         if len(orig_tokens) == len(words):
             matcher = difflib.SequenceMatcher(None, orig_tokens, target_tokens)
             synced: List[Dict] = []

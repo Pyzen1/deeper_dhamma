@@ -824,15 +824,16 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
             expected_entries.add(src_file.name)
             copied_files += 1
 
-    # Copy icons directory if present
-    icons_src = STATIC_SRC_DIR / "icons"
-    if icons_src.exists() and icons_src.is_dir():
-        icons_dst = out_path / "icons"
-        if icons_dst.exists():
-            shutil.rmtree(icons_dst)
-        shutil.copytree(icons_src, icons_dst)
-        expected_entries.add("icons")
-        copied_files += len([f for f in icons_src.iterdir() if f.is_file()])
+    # Copy static asset subdirectories (icons/, fonts/) if present
+    for subdir_name in ("icons", "fonts"):
+        sub_src = STATIC_SRC_DIR / subdir_name
+        if sub_src.exists() and sub_src.is_dir():
+            sub_dst = out_path / subdir_name
+            if sub_dst.exists():
+                shutil.rmtree(sub_dst)
+            shutil.copytree(sub_src, sub_dst)
+            expected_entries.add(subdir_name)
+            copied_files += len([f for f in sub_src.iterdir() if f.is_file()])
 
 
     # Mirror pristine local document sources into dist/sources/ for user verification
@@ -937,9 +938,10 @@ def _is_dist_stale(dist_path: Path) -> bool:
             # db_client.js is overwritten from adapters/wasm_client.js mid-build after db_manifest.json
             if src_p.is_file() and src_p.name != "db_client.js":
                 candidates.append(src_p)
-        icons_dir = STATIC_SRC_DIR / "icons"
-        if icons_dir.exists():
-            candidates.extend(p for p in icons_dir.iterdir() if p.is_file())
+        for subdir_name in ("icons", "fonts"):
+            sub_dir = STATIC_SRC_DIR / subdir_name
+            if sub_dir.exists():
+                candidates.extend(p for p in sub_dir.iterdir() if p.is_file())
     sources_dir = PROJECT_ROOT / "databases" / "sources"
     if sources_dir.exists():
         candidates.extend(p for p in sources_dir.iterdir() if p.is_file())

@@ -10,6 +10,105 @@ import pytest
 from deeper_dhamma.config import BUDDHISM_LEXICON_DB_PATH, TRANSCRIPTS_DB_PATH
 from deeper_dhamma.export_web import compile_static_database
 
+APP_FRONTEND_MODULES = (
+    "speaker_palette.js",
+    "bookmarks_view.js",
+    "browse_view.js",
+    "archive_export.js",
+    "search_view.js",
+    "lexicon_views.js",
+    "audio_player.js",
+    "app.js",
+)
+
+APP_FRONTEND_STYLES = (
+    "style.css",
+    "style_browse.css",
+    "style_lexicon.css",
+    "style_player.css",
+    "style_transcript.css",
+    "style_bookmarks_about.css",
+)
+
+
+def _read_all_app_js(web_dir: Path) -> str:
+    """Reads all modular frontend JS files that compose the application shell."""
+    static_dir = web_dir / "static"
+    return "\n".join((static_dir / name).read_text(encoding="utf-8") for name in APP_FRONTEND_MODULES)
+
+
+def _read_all_style_css(web_dir: Path) -> str:
+    """Reads all modular frontend CSS files in cascade order."""
+    static_dir = web_dir / "static"
+    return "\n".join((static_dir / name).read_text(encoding="utf-8") for name in APP_FRONTEND_STYLES)
+
+
+def test_standalone_frontend_modules_architecture():
+    """
+    Verifies the standalone frontend module architecture:
+    1. All 8 JS modules (<2000 lines) and 6 CSS modules (<1500 lines) exist in web/static/ with LF endings.
+    2. index.html and svc_worker.js reference all JS and CSS modules in exact dependency/cascade order.
+    3. dist/ matches web/static/ byte-for-byte for every module when built.
+    """
+    from deeper_dhamma.config import DIST_DIR, PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    static_dir = web_dir / "static"
+    index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
+    svc_worker_js = (static_dir / "svc_worker.js").read_text(encoding="utf-8")
+
+    html_positions = []
+    sw_positions = []
+    for mod_name in APP_FRONTEND_MODULES:
+        mod_path = static_dir / mod_name
+        assert mod_path.exists(), f"Missing standalone frontend module: {mod_name}"
+        raw = mod_path.read_bytes()
+        assert b"\r\n" not in raw, f"{mod_name} must use LF line endings"
+        line_count = len(raw.decode("utf-8").splitlines())
+        assert line_count < 2000, f"{mod_name} must stay under 2000 lines (got {line_count})"
+
+        script_ref = f'/static/{mod_name}?v='
+        assert script_ref in index_html, f"index.html must load {mod_name}"
+        html_positions.append(index_html.index(script_ref))
+
+        sw_ref = f"'./{mod_name}'"
+        assert sw_ref in svc_worker_js, f"svc_worker.js must precache {mod_name}"
+        sw_positions.append(svc_worker_js.index(sw_ref))
+
+        if (DIST_DIR / "index.html").exists():
+            dist_mod = DIST_DIR / mod_name
+            assert dist_mod.exists(), f"dist/ missing {mod_name}"
+            assert dist_mod.read_bytes() == raw, f"dist/{mod_name} out of sync with web/static/{mod_name}"
+
+    assert html_positions == sorted(html_positions), "index.html script tags must preserve exact module load order"
+    assert sw_positions == sorted(sw_positions), "svc_worker.js CORE_ASSETS must include all modules in order"
+
+    css_html_positions = []
+    css_sw_positions = []
+    for css_name in APP_FRONTEND_STYLES:
+        css_path = static_dir / css_name
+        assert css_path.exists(), f"Missing standalone frontend stylesheet: {css_name}"
+        raw = css_path.read_bytes()
+        assert b"\r\n" not in raw, f"{css_name} must use LF line endings"
+        line_count = len(raw.decode("utf-8").splitlines())
+        assert line_count < 1500, f"{css_name} must stay under 1500 lines (got {line_count})"
+
+        link_ref = f'/static/{css_name}?v='
+        assert link_ref in index_html, f"index.html must link {css_name}"
+        css_html_positions.append(index_html.index(link_ref))
+
+        sw_ref = f"'./{css_name}'"
+        assert sw_ref in svc_worker_js, f"svc_worker.js must precache {css_name}"
+        css_sw_positions.append(svc_worker_js.index(sw_ref))
+
+        if (DIST_DIR / "index.html").exists():
+            dist_css = DIST_DIR / css_name
+            assert dist_css.exists(), f"dist/ missing {css_name}"
+            assert dist_css.read_bytes() == raw, f"dist/{css_name} out of sync with web/static/{css_name}"
+
+    assert css_html_positions == sorted(css_html_positions), "index.html stylesheet links must preserve exact cascade order"
+    assert css_sw_positions == sorted(css_sw_positions), "svc_worker.js CORE_ASSETS must include all stylesheets in order"
+
 
 def test_compile_static_database_header_version_and_vocab_table(tmp_path: Path):
     """
@@ -210,13 +309,14 @@ def test_bookmark_feature_and_view_integrity():
 
     web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
     index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
-    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    app_js = _read_all_app_js(web_dir)
+    bookmarks_view_js = (web_dir / "static" / "bookmarks_view.js").read_text(encoding="utf-8")
     card_physics_js = (web_dir / "static" / "card_physics.js").read_text(encoding="utf-8")
     db_worker_js = (web_dir / "static" / "db_worker.js").read_text(encoding="utf-8")
     wasm_client_js = (web_dir / "static" / "adapters" / "wasm_client.js").read_text(encoding="utf-8")
     db_client_js = (web_dir / "static" / "db_client.js").read_text(encoding="utf-8")
     svc_worker_js = (web_dir / "static" / "svc_worker.js").read_text(encoding="utf-8")
-    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+    style_css = _read_all_style_css(web_dir)
 
     # 1. Navigation & View elements in index.html
     assert 'id="tab-bookmarks-btn"' in index_html, "Must have bookmarks nav tab"
@@ -227,9 +327,11 @@ def test_bookmark_feature_and_view_integrity():
     assert 'id="transcript-bookmark-btn"' in index_html, "Must have transcript drawer bookmark button"
     assert 'id="btn-player-bookmark"' in index_html, "Must have audio player bar bookmark button"
     assert 'card_physics.js' in index_html, "Must load decoupled card_physics.js engine"
+    assert 'bookmarks_view.js' in index_html, "Must load decoupled bookmarks_view.js module"
     assert '__DEEPER_DHAMMA_VERSION__' in index_html, "Must stamp global version in index.html"
     assert '__DEEPER_DHAMMA_VERSION__' in wasm_client_js, "Must propagate version query to db_worker.js"
     assert 'card_physics.js' in svc_worker_js, "Must cache card_physics.js in svc_worker.js"
+    assert 'bookmarks_view.js' in svc_worker_js, "Must cache bookmarks_view.js in svc_worker.js"
 
     # 2. Worker & Client APIs for batch fetching by IDs
     assert "handleGetEpisodesByIds" in db_worker_js
@@ -246,23 +348,23 @@ def test_bookmark_feature_and_view_integrity():
     assert "_updateIndicator(" in card_physics_js
     assert "_finishDrag(" in card_physics_js
 
-    # 4. BookmarkStore & reordering integration in app.js
-    assert "BookmarkStore" in app_js
-    assert "deeper_dhamma_bookmarks" in app_js
+    # 4. BookmarkStore & reordering integration in bookmarks_view.js + speaker_palette.js
+    assert "BookmarkStore" in bookmarks_view_js
+    assert "deeper_dhamma_bookmarks" in bookmarks_view_js
     assert "renderBookmarkRibbonSvg" in app_js
     assert "bookmark-ribbon-icon" in app_js
-    assert "loadBookmarksView" in app_js
-    assert "renderBookmarksList" in app_js
-    assert "Waiting for database to load..." in app_js
-    assert "moveUp(" in app_js
-    assert "moveDown(" in app_js
-    assert "moveRelativeTo(" in app_js
-    assert "CardPhysics" in app_js
-    assert "bookmarkPhysics" in app_js
-    assert "bookmark-floating-drag-card" in app_js
-    assert "bookmark-drop-indicator" in app_js
-    assert "is-ghost" in app_js
-    assert "bookmark-order-badge" in app_js
+    assert "loadBookmarksView" in bookmarks_view_js
+    assert "renderBookmarksList" in bookmarks_view_js
+    assert "Waiting for database to load..." in bookmarks_view_js
+    assert "moveUp(" in bookmarks_view_js
+    assert "moveDown(" in bookmarks_view_js
+    assert "moveRelativeTo(" in bookmarks_view_js
+    assert "CardPhysics" in bookmarks_view_js
+    assert "bookmarkPhysics" in bookmarks_view_js
+    assert "bookmark-floating-drag-card" in bookmarks_view_js
+    assert "bookmark-drop-indicator" in bookmarks_view_js
+    assert "is-ghost" in bookmarks_view_js
+    assert "bookmark-order-badge" in bookmarks_view_js
     assert "btn-bookmark-icon" in app_js
 
     # 5. CSS styling (Generic & Bookmark-Specific)
@@ -298,15 +400,16 @@ def test_bookmark_reorder_persistence_and_episodes_sync():
 
     web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
     app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    bookmarks_view_js = (web_dir / "static" / "bookmarks_view.js").read_text(encoding="utf-8")
     card_physics_js = (web_dir / "static" / "card_physics.js").read_text(encoding="utf-8")
 
-    # 1. Verify app.js dynamic state synchronization
+    # 1. Verify app.js & bookmarks_view.js dynamic state synchronization
     assert "bookmarkEpisodes:" in app_js, "state must define bookmarkEpisodes"
-    assert "state.bookmarkEpisodes = " in app_js, "Must store episodes on state"
-    assert "BookmarkStore.getAll().map(id => epMap.get(id)).filter(Boolean)" in app_js, (
+    assert "state.bookmarkEpisodes = " in bookmarks_view_js, "Must store episodes on state"
+    assert "BookmarkStore.getAll().map(id => epMap.get(id)).filter(Boolean)" in bookmarks_view_js, (
         "Must resequence state.bookmarkEpisodes from BookmarkStore.getAll() in onExchange and onReorder"
     )
-    assert "renderBookmarksList(state.bookmarkEpisodes)" in app_js, (
+    assert "renderBookmarksList(state.bookmarkEpisodes)" in bookmarks_view_js, (
         "onRender must render the dynamic state.bookmarkEpisodes"
     )
 
@@ -399,9 +502,9 @@ def test_bookmark_finger_touch_and_physical_exchange_animation():
     from deeper_dhamma.config import PROJECT_ROOT
 
     web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
-    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    app_js = _read_all_app_js(web_dir)
     card_physics_js = (web_dir / "static" / "card_physics.js").read_text(encoding="utf-8")
-    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+    style_css = _read_all_style_css(web_dir)
 
     # 1. 6-dots icon removed from bookmark list cards
     assert "bookmark-drag-handle" not in app_js, "Six dots handle must be removed from bookmark cards"
@@ -445,7 +548,7 @@ def test_about_view_and_navigation_integrity():
     web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
     index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
     app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
-    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+    style_css = _read_all_style_css(web_dir)
 
     # 1. Navigation & DOM elements in index.html
     assert 'id="tab-about-btn"' in index_html, "Must have about nav tab button"
@@ -901,9 +1004,9 @@ def test_search_stopword_filtering_and_pagination_ui():
 
     web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
     index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
-    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    search_view_js = (web_dir / "static" / "search_view.js").read_text(encoding="utf-8")
     worker_js = (web_dir / "static" / "db_worker.js").read_text(encoding="utf-8")
-    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+    style_css = _read_all_style_css(web_dir)
 
     for dom_id in (
         'id="search-pagination"',
@@ -916,9 +1019,9 @@ def test_search_stopword_filtering_and_pagination_ui():
         assert dom_id in index_html, f"Missing {dom_id} in index.html"
 
     assert ".search-pagination" in style_css
-    assert "APP_SEARCH_STOPWORDS" in app_js
-    assert "updateSearchPagination" in app_js
-    assert "episodeLimit" in app_js
+    assert "APP_SEARCH_STOPWORDS" in search_view_js
+    assert "updateSearchPagination" in search_view_js
+    assert "episodeLimit" in search_view_js
     assert "episodeLimit" in worker_js
     assert "all_episode_ids" in worker_js
 
@@ -1289,15 +1392,16 @@ def test_archive_notes_view_and_transcribed_only_ui_cleanup():
     web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
     index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
     app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
-    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+    all_app_js = _read_all_app_js(web_dir)
+    style_css = _read_all_style_css(web_dir)
 
     # 1. No misleading untranscribed-talks WUI controls or redundant transcribed pills
     assert 'id="browse-transcribed-only-btn"' not in index_html
-    assert "Toggle off \"Transcribed Only\"" not in app_js
-    assert "Show All Audio Talks" not in app_js
-    assert "audio talks`" not in app_js
-    assert "transcribed-pill" not in app_js
-    assert "transcribedOnly: true" in app_js
+    assert "Toggle off \"Transcribed Only\"" not in all_app_js
+    assert "Show All Audio Talks" not in all_app_js
+    assert "audio talks`" not in all_app_js
+    assert "transcribed-pill" not in all_app_js
+    assert "transcribedOnly: true" in all_app_js
 
     # 2. Archive Notes navigation, view, and routing
     assert 'id="tab-notes-btn"' in index_html
@@ -1532,9 +1636,9 @@ def test_browse_multi_faceted_filtering_contract():
 
     web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
     index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
-    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    all_app_js = _read_all_app_js(web_dir)
     worker_js = (web_dir / "static" / "db_worker.js").read_text(encoding="utf-8")
-    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
+    style_css = _read_all_style_css(web_dir)
 
     for dom_id in (
         'id="browse-title-input"',
@@ -1568,7 +1672,7 @@ def test_browse_multi_faceted_filtering_contract():
         assert css_sel in style_css, f"Missing {css_sel} in style.css"
 
     for js_sym in ("setupBrowseFilterListeners", "buildBrowseQueryOpts", "buildBrowseRouteHash", "highlightTitleText", "downloadBrowseFilteredArchive"):
-        assert js_sym in app_js, f"Missing {js_sym} in app.js"
+        assert js_sym in all_app_js, f"Missing {js_sym} in frontend modules"
 
     for worker_sym in ("matchesTitleQuery", "classifyEpisodeCategories", "resolveTeacherToSlug", "browse_teachers", "year_counts", "duration_counts", "category_counts"):
         assert worker_sym in worker_js, f"Missing {worker_sym} in db_worker.js"
@@ -1854,8 +1958,8 @@ def test_responsive_small_screen_layout_contract():
     from deeper_dhamma.config import PROJECT_ROOT
 
     web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
-    style_css = (web_dir / "static" / "style.css").read_text(encoding="utf-8")
-    app_js = (web_dir / "static" / "app.js").read_text(encoding="utf-8")
+    style_css = _read_all_style_css(web_dir)
+    app_js = _read_all_app_js(web_dir)
 
     # 1. Select group & date range wrapping
     select_group_css = style_css.split(".select-group {", 1)[1].split("}", 1)[0]

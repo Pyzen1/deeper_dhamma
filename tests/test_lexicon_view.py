@@ -403,7 +403,11 @@ def test_lexicon_and_documents_shareable_url_routing():
     from pathlib import Path
     from deeper_dhamma.config import PROJECT_ROOT
 
-    app_js = (PROJECT_ROOT / "deeper_dhamma" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    static_dir = PROJECT_ROOT / "deeper_dhamma" / "web" / "static"
+    app_js = "\n".join([
+        (static_dir / "app.js").read_text(encoding="utf-8"),
+        (static_dir / "lexicon_views.js").read_text(encoding="utf-8"),
+    ])
     assert "#lexicon?term=" in app_js
     assert "#documents?id=" in app_js
     assert "btn-lexicon-share" in app_js

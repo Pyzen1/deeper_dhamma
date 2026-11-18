@@ -23,6 +23,18 @@ const CORE_ASSETS = [
   './404.html',
   './manifest.json',
   './style.css',
+  './style_browse.css',
+  './style_lexicon.css',
+  './style_player.css',
+  './style_transcript.css',
+  './style_bookmarks_about.css',
+  './speaker_palette.js',
+  './bookmarks_view.js',
+  './browse_view.js',
+  './archive_export.js',
+  './search_view.js',
+  './lexicon_views.js',
+  './audio_player.js',
   './app.js',
   './card_physics.js',
   './word_sync.js',
@@ -44,7 +56,8 @@ const CORE_ASSETS = [
   './icons/fluent_speaker_high.svg',
   './icons/fluent_speaker_low.svg',
   './icons/fluent_speaker_mute.svg',
-  './icons/fluent_mic.svg'
+  './icons/fluent_mic.svg',
+  './fonts/material_symbols_outlined.woff2'
 ];
 
 // ============================================================================

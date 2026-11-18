@@ -37,9 +37,12 @@
     currentEpisode: null,
     dbClient: null,
     words: [], // Sorted array of exact physical words: [{ s, e, turnIdx, wordIdx, id }]
+    wordsEpisodeId: null,
     turnWordMap: {}, // Map of turnIdx -> [words]
+    turnWordMapEpisodeId: null,
     vbrData: null, // Parsed VBR1 seek table if episode is VBR
     vbrCache: {}, // Cache of episodeId -> { words, vbrData, bytesLoaded }
+    _loadingPromises: {}, // Deduplicated in-flight loadWordsBlob promises keyed by episodeId
     streamMode: 'cdn', // 'cdn' | 'patched_blob' | 'mse_vbr'
     seekOffset: 0.0, // Constant physical-minus-stream clock offset established at last seek
     _seekTargetWordTime: null, // Optional exact word start time targeted by the latest seek
@@ -135,6 +138,35 @@
 
     isSeekLocked: function () {
       return this._syncPhase === 'buffering' || this._awaitingInitialSeek || Boolean(this._boundAudio && this._boundAudio.seeking && this._syncPhase === 'seeking');
+    },
+
+    isPlayingCurrentTranscript: function () {
+      return !this.playingEpisodeId || this.currentEpisodeId === this.playingEpisodeId;
+    },
+
+    isEpisodeWordsLoaded: function (episodeId) {
+      if (!episodeId) return false;
+      if (this.wordsEpisodeId === episodeId && Array.isArray(this.words) && this.words.length > 0) {
+        return true;
+      }
+      const cached = this.vbrCache && this.vbrCache[episodeId];
+      return Boolean(cached && Array.isArray(cached.words) && cached.words.length > 0);
+    },
+
+    getPlayingVbrData: function () {
+      if (this.playingEpisodeId) {
+        if (this.vbrCache && this.vbrCache[this.playingEpisodeId]) {
+          return this.vbrCache[this.playingEpisodeId].vbrData || null;
+        }
+        if (
+          this.wordsEpisodeId === this.playingEpisodeId ||
+          (!this.wordsEpisodeId && this.currentEpisodeId === this.playingEpisodeId)
+        ) {
+          return this.vbrData || null;
+        }
+        return null;
+      }
+      return this.vbrData || null;
     },
 
     /**
@@ -338,24 +370,27 @@
             this._pendingProgrammaticSeek = false;
             this._syncPhase = audio.paused ? 'idle' : 'playing';
           }
-        } else if (this.vbrData) {
-          // External/native seek not initiated via prepareSeek: infer physical offset
-          this._syncPhase = audio.paused ? 'idle' : 'playing';
-          const rawT = audio.currentTime;
-          if (this.streamMode === 'mse_vbr' || rawT <= 0.05) {
-            this.seekOffset = 0.0;
-          } else if (this.streamMode === 'patched_blob') {
-            const physT = this._interp(rawT, this.vbrData.linearSeekTimes, this.vbrData.pcmTimes);
-            this.seekOffset = physT - rawT;
-          } else if (this.isFirefox) {
-            const k = Math.max(0, Math.min(99, Math.floor((rawT / this.vbrData.totalDurSec) * 100)));
-            this.seekOffset = this.vbrData.ffBucketDeltas[k] || 0.0;
-          } else {
-            const physT = this._interp(rawT, this.vbrData.xingSeekTimes, this.vbrData.pcmTimes);
-            this.seekOffset = physT - rawT;
+        } else {
+          const vbr = this.getPlayingVbrData();
+          if (vbr) {
+            // External/native seek not initiated via prepareSeek: infer physical offset
+            this._syncPhase = audio.paused ? 'idle' : 'playing';
+            const rawT = audio.currentTime;
+            if (this.streamMode === 'mse_vbr' || rawT <= 0.05) {
+              this.seekOffset = 0.0;
+            } else if (this.streamMode === 'patched_blob') {
+              const physT = this._interp(rawT, vbr.linearSeekTimes, vbr.pcmTimes);
+              this.seekOffset = physT - rawT;
+            } else if (this.isFirefox) {
+              const k = Math.max(0, Math.min(99, Math.floor((rawT / vbr.totalDurSec) * 100)));
+              this.seekOffset = vbr.ffBucketDeltas[k] || 0.0;
+            } else {
+              const physT = this._interp(rawT, vbr.xingSeekTimes, vbr.pcmTimes);
+              this.seekOffset = physT - rawT;
+            }
           }
         }
-        if (!this.playingEpisodeId || this.currentEpisodeId === this.playingEpisodeId) {
+        if (this.isPlayingCurrentTranscript()) {
           this.update(audio.currentTime);
         }
       };
@@ -381,7 +416,7 @@
           if (this.streamMode === 'mse_vbr') {
             this.maybePrefetchMseNextChunk(this._boundAudio);
           }
-          if (!this.playingEpisodeId || this.currentEpisodeId === this.playingEpisodeId) {
+          if (this.isPlayingCurrentTranscript()) {
             this.update(this._boundAudio.currentTime);
           }
           this._rafId = requestAnimationFrame(step);
@@ -496,6 +531,8 @@
       const epId = episode.id || episode.episode_id;
       const alreadyPrepared =
         this.currentEpisodeId === epId &&
+        this.wordsEpisodeId === epId &&
+        this.turnWordMapEpisodeId === epId &&
         this.words.length > 0 &&
         Object.keys(this.turnWordMap || {}).length > 0;
       if (alreadyPrepared) {
@@ -507,8 +544,10 @@
       this.currentEpisodeId = epId;
       this.currentEpisode = episode;
       this.words = [];
+      this.wordsEpisodeId = null;
       this.vbrData = null;
       this.turnWordMap = {};
+      this.turnWordMapEpisodeId = null;
       this._teleprompterLine = null;
       this._userInteractedAt = 0;
       if (!isSameEpisode && (!this.playingEpisodeId || this.playingEpisodeId === epId)) {
@@ -525,8 +564,20 @@
 
       if (episode.words_blob) {
         const parsed = this.parseWordsBuffer(episode.words_blob, epId);
-        if (parsed && episode.segments && this.words.length > 0) {
-          this.indexWordsByTurn(episode.segments);
+        if (parsed && episode.segments && this.wordsEpisodeId === epId && this.words.length > 0) {
+          this.indexWordsByTurn(episode.segments, epId);
+          this.metrics.wordCount = this.words.length;
+          return true;
+        }
+      } else if (this.vbrCache && this.vbrCache[epId]) {
+        const cached = this.vbrCache[epId];
+        this.words = cached.words || [];
+        this.vbrData = cached.vbrData || null;
+        this.wordsEpisodeId = epId;
+        this.metrics.bytesLoaded = cached.bytesLoaded || 0;
+        this.metrics.format = 'option_c_bin';
+        if (episode.segments && this.words.length > 0) {
+          this.indexWordsByTurn(episode.segments, epId);
           this.metrics.wordCount = this.words.length;
           return true;
         }
@@ -538,26 +589,33 @@
      * Prepares exact word timestamps and VBR seek calibration for an episode.
      */
     prepareEpisode: async function (episode) {
+      if (!episode) return;
       const epId = episode.id || episode.episode_id;
       const t0 = performance.now();
       const readySync = this.prepareEpisodeSync(episode);
 
       if (!readySync) {
-        if (this.currentEpisodeId !== epId || this.words.length === 0) {
+        if (this.wordsEpisodeId !== epId || this.words.length === 0) {
           await this.loadWordsBlob(epId);
         }
+        if (this.currentEpisodeId !== epId) {
+          return;
+        }
         // Group words by segment turn if turns exist
-        if (episode.segments && this.words.length > 0) {
-          this.indexWordsByTurn(episode.segments);
+        if (episode.segments && this.wordsEpisodeId === epId && this.words.length > 0) {
+          this.indexWordsByTurn(episode.segments, epId);
         }
       }
 
+      if (this.currentEpisodeId !== epId) {
+        return;
+      }
       this.metrics.loadMs = Math.round(performance.now() - t0);
       this.metrics.wordCount = this.words.length;
 
       // Proactively start progressive VBR stream buffering ONLY when MSE audio/mpeg is unsupported or unavailable
       if (this.vbrData && episode.media_url && (!this.isMseVbrSupported() || this._mseFailed[episode.media_url])) {
-        this.ensurePatchedStream(episode.media_url);
+        this.ensurePatchedStream(episode.media_url, this.vbrData);
       }
 
       this.updateUI();
@@ -569,11 +627,34 @@
      */
     ensureEpisodeLoaded: async function (episodeId) {
       if (!episodeId) return;
-      if (this.currentEpisodeId === episodeId && this.words.length > 0) {
+      if (this.currentEpisodeId === episodeId && this.wordsEpisodeId === episodeId && this.words.length > 0) {
+        if (
+          this.turnWordMapEpisodeId !== episodeId &&
+          this.currentEpisode &&
+          (this.currentEpisode.id || this.currentEpisode.episode_id) === episodeId &&
+          this.currentEpisode.segments
+        ) {
+          this.indexWordsByTurn(this.currentEpisode.segments, episodeId);
+        }
         return;
       }
-      this.currentEpisodeId = episodeId;
+      if (!this.currentEpisodeId || this.currentEpisodeId !== episodeId) {
+        this.currentEpisodeId = episodeId;
+        this.turnWordMap = {};
+        this.turnWordMapEpisodeId = null;
+      }
       await this.loadWordsBlob(episodeId);
+      if (
+        this.currentEpisodeId === episodeId &&
+        this.wordsEpisodeId === episodeId &&
+        this.words.length > 0 &&
+        this.turnWordMapEpisodeId !== episodeId &&
+        this.currentEpisode &&
+        (this.currentEpisode.id || this.currentEpisode.episode_id) === episodeId &&
+        this.currentEpisode.segments
+      ) {
+        this.indexWordsByTurn(this.currentEpisode.segments, episodeId);
+      }
     },
 
     /**
@@ -601,7 +682,6 @@
       }
 
       const byteLength = buf.byteLength;
-      this.metrics.bytesLoaded = byteLength;
       if (byteLength < 4) return false;
 
       const wordCount = view.getUint32(0, true);
@@ -633,8 +713,6 @@
         }
       }
 
-      this.words = words;
-      this.vbrData = vbrData;
       if (episodeId) {
         this.vbrCache[episodeId] = {
           words: words,
@@ -642,7 +720,13 @@
           bytesLoaded: byteLength,
         };
       }
-      this.metrics.format = 'option_c_bin';
+      if (!episodeId || !this.currentEpisodeId || this.currentEpisodeId === episodeId) {
+        this.words = words;
+        this.vbrData = vbrData;
+        this.wordsEpisodeId = episodeId || this.currentEpisodeId || null;
+        this.metrics.bytesLoaded = byteLength;
+        this.metrics.format = 'option_c_bin';
+      }
       return true;
     },
 
@@ -652,47 +736,79 @@
      * Falls back to network candidate URLs if running in standalone test harnesses.
      */
     loadWordsBlob: async function (episodeId) {
+      if (!episodeId) return;
       if (this.vbrCache[episodeId]) {
         const cached = this.vbrCache[episodeId];
-        this.words = cached.words;
-        this.vbrData = cached.vbrData;
-        this.metrics.bytesLoaded = cached.bytesLoaded;
-        this.metrics.format = 'option_c_bin';
+        if (!this.currentEpisodeId || this.currentEpisodeId === episodeId) {
+          this.words = cached.words;
+          this.vbrData = cached.vbrData;
+          this.wordsEpisodeId = episodeId;
+          this.metrics.bytesLoaded = cached.bytesLoaded;
+          this.metrics.format = 'option_c_bin';
+        }
         return;
       }
 
-      // 1. Direct from in-browser SQLite WASM database (100% self-referential / offline)
-      const db = this.dbClient || window.dbClient || (window.__deeperDhammaDbClient || null);
-      if (db && typeof db.getEpisodeWords === 'function') {
-        try {
-          const blob = await db.getEpisodeWords(episodeId);
-          if (blob && (blob.byteLength || (blob.length && blob.buffer))) {
-            const parsed = this.parseWordsBuffer(blob, episodeId);
-            if (parsed) return;
+      if (this._loadingPromises && this._loadingPromises[episodeId]) {
+        await this._loadingPromises[episodeId];
+        if (this.vbrCache[episodeId] && (!this.currentEpisodeId || this.currentEpisodeId === episodeId)) {
+          const cached = this.vbrCache[episodeId];
+          this.words = cached.words;
+          this.vbrData = cached.vbrData;
+          this.wordsEpisodeId = episodeId;
+          this.metrics.bytesLoaded = cached.bytesLoaded;
+          this.metrics.format = 'option_c_bin';
+        }
+        return;
+      }
+
+      const loadPromise = (async () => {
+        // 1. Direct from in-browser SQLite WASM database (100% self-referential / offline)
+        const db = this.dbClient || window.dbClient || (window.__deeperDhammaDbClient || null);
+        if (db && typeof db.getEpisodeWords === 'function') {
+          try {
+            const blob = await db.getEpisodeWords(episodeId);
+            if (blob && (blob.byteLength || (blob.length && blob.buffer))) {
+              const parsed = this.parseWordsBuffer(blob, episodeId);
+              if (parsed) return true;
+            }
+          } catch (dbErr) {
+            console.warn('[WordSync] Database query notice for words:', dbErr);
           }
-        } catch (dbErr) {
-          console.warn('[WordSync] Database query notice for words:', dbErr);
+        }
+
+        // 2. Fallback to API endpoint if dynamic backend or running external test harness
+        const candidateUrls = [
+          `/api/episodes/${encodeURIComponent(episodeId)}/words`,
+          `./api/episodes/${encodeURIComponent(episodeId)}/words`,
+        ];
+
+        for (const url of candidateUrls) {
+          try {
+            const res = await fetch(url);
+            if (res.ok) {
+              const buf = await res.arrayBuffer();
+              if (this.parseWordsBuffer(buf, episodeId)) return true;
+            }
+          } catch (_) {}
+        }
+        return false;
+      })();
+
+      this._loadingPromises[episodeId] = loadPromise;
+      try {
+        const ok = await loadPromise;
+        if (!ok && (!this.currentEpisodeId || this.currentEpisodeId === episodeId)) {
+          this.words = [];
+          this.vbrData = null;
+          this.wordsEpisodeId = null;
+          this.metrics.bytesLoaded = 0;
+        }
+      } finally {
+        if (this._loadingPromises && this._loadingPromises[episodeId] === loadPromise) {
+          delete this._loadingPromises[episodeId];
         }
       }
-
-      // 2. Fallback to API endpoint if dynamic backend or running external test harness
-      const candidateUrls = [
-        `/api/episodes/${encodeURIComponent(episodeId)}/words`,
-        `./api/episodes/${encodeURIComponent(episodeId)}/words`,
-      ];
-
-      for (const url of candidateUrls) {
-        try {
-          const res = await fetch(url);
-          if (res.ok) {
-            const buf = await res.arrayBuffer();
-            if (this.parseWordsBuffer(buf, episodeId)) return;
-          }
-        } catch (_) {}
-      }
-      this.words = [];
-      this.vbrData = null;
-      this.metrics.bytesLoaded = 0;
     },
 
     /**
@@ -786,8 +902,9 @@
      * (`flags = 3`) in client-side RAM so all browsers (Chromium, Firefox, Safari) seek cleanly
      * via deterministic linear byte offsets without coarse `Xing TOC` quantization drift.
      */
-    ensurePatchedStream: function (mediaUrl) {
-      if (!mediaUrl || !this.vbrData) return null;
+    ensurePatchedStream: function (mediaUrl, vbrOverride = null) {
+      const vbr = vbrOverride || this.getPlayingVbrData() || this.vbrData;
+      if (!mediaUrl || !vbr) return null;
       if (this._ffStreams[mediaUrl]) {
         return this._ffStreams[mediaUrl];
       }
@@ -811,7 +928,7 @@
         }
       }
 
-      const id3Len = this.vbrData.id3Len || 0;
+      const id3Len = vbr.id3Len || 0;
       const minHeaderBytes = id3Len + 1024;
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       const state = {
@@ -913,16 +1030,17 @@
      * Computes the byte offset in the MP3 file required to seek and play at `targetPhysicalSec`.
      */
     getRequiredBytesForTime: function (targetPhysicalSec) {
-      if (!this.vbrData) return 0;
+      const vbr = this.getPlayingVbrData();
+      if (!vbr) return 0;
       const audioByteOff = this._interp(
         Math.max(0, targetPhysicalSec),
-        this.vbrData.pcmTimes,
-        this.vbrData.byteOffsets
+        vbr.pcmTimes,
+        vbr.byteOffsets
       );
       // Include ID3 header + target audio byte offset + 512 KB read-ahead (~45s of audio)
       return Math.min(
-        this.vbrData.id3Len + this.vbrData.bytesLen,
-        Math.ceil(this.vbrData.id3Len + audioByteOff + 524288)
+        vbr.id3Len + vbr.bytesLen,
+        Math.ceil(vbr.id3Len + audioByteOff + 524288)
       );
     },
 
@@ -931,8 +1049,9 @@
      * or `null` if still buffering.
      */
     getReadyPatchedBlobUrl: function (mediaUrl, targetPhysicalSec) {
-      if (!this.vbrData || !mediaUrl) return null;
-      const state = this.ensurePatchedStream(mediaUrl);
+      const vbr = this.getPlayingVbrData();
+      if (!vbr || !mediaUrl) return null;
+      const state = this.ensurePatchedStream(mediaUrl, vbr);
       if (!state || state.failed || !state.patched) return null;
 
       const reqBytes = this.getRequiredBytesForTime(targetPhysicalSec);
@@ -968,11 +1087,12 @@
      * `targetPhysicalSec` and returns the patched `blob:` URL (or `null` on failure).
      */
     waitForPatchedBlobUrl: async function (mediaUrl, targetPhysicalSec) {
-      if (!this.vbrData || !mediaUrl) return null;
+      const vbr = this.getPlayingVbrData();
+      if (!vbr || !mediaUrl) return null;
       const readyUrl = this.getReadyPatchedBlobUrl(mediaUrl, targetPhysicalSec);
       if (readyUrl) return readyUrl;
 
-      const state = this.ensurePatchedStream(mediaUrl);
+      const state = this.ensurePatchedStream(mediaUrl, vbr);
       if (!state || state.failed) return null;
 
       const reqBytes = this.getRequiredBytesForTime(targetPhysicalSec);
@@ -1027,9 +1147,10 @@
     },
 
     _findVbrSampleIndexBefore: function (targetSec) {
-      if (!this.vbrData || !this.vbrData.pcmTimes.length) return 0;
+      const vbr = this.getPlayingVbrData();
+      if (!vbr || !vbr.pcmTimes.length) return 0;
       const goal = Math.max(0, targetSec - 0.10);
-      const times = this.vbrData.pcmTimes;
+      const times = vbr.pcmTimes;
       let low = 0;
       let high = times.length - 1;
       let best = 0;
@@ -1069,11 +1190,11 @@
      * Fetches only a ~40s MPEG frame-aligned window around `targetPhysicalSec` with `seekOffset = 0.0`.
      */
     mseSeekAndLoad: async function (audio, mediaUrl, targetPhysicalSec, seekSeq, shouldPlay) {
-      if (!audio || !mediaUrl || !this.vbrData || !this.isMseVbrSupported() || this._mseFailed[mediaUrl]) {
+      const vbr = this.getPlayingVbrData();
+      if (!audio || !mediaUrl || !vbr || !this.isMseVbrSupported() || this._mseFailed[mediaUrl]) {
         return { ok: false, reason: 'unsupported' };
       }
 
-      const vbr = this.vbrData;
       const totalSamples = vbr.pcmTimes.length;
       if (totalSamples === 0) return { ok: false, reason: 'no_samples' };
 
@@ -1258,8 +1379,8 @@
      */
     maybePrefetchMseNextChunk: function (audio) {
       const s = this._mse;
-      if (!audio || !s || s.failed || s.fetchingNext || audio.src !== s.objectUrl || !this.vbrData) return;
-      const vbr = this.vbrData;
+      const vbr = this.getPlayingVbrData();
+      if (!audio || !s || s.failed || s.fetchingNext || audio.src !== s.objectUrl || !vbr) return;
       const totalSamples = vbr.pcmTimes.length;
       if (s.nextSampleIdx >= totalSamples || !s.sourceBuffer) return;
 
@@ -1356,28 +1477,29 @@
       this._lastSpokenWordId = null;
       this._teleprompterLine = null;
 
-      if (this.streamMode === 'mse_vbr' || clampedPhys <= 0.01 || !this.vbrData) {
+      const vbr = this.getPlayingVbrData();
+      if (this.streamMode === 'mse_vbr' || clampedPhys <= 0.01 || !vbr) {
         this.seekOffset = 0.0;
         return clampedPhys;
       }
 
       if (this.streamMode === 'patched_blob') {
         // Client-side Info-patched Blob uses exact linear byte-offset seeking
-        const seekTime = this._interp(clampedPhys, this.vbrData.pcmTimes, this.vbrData.linearSeekTimes);
+        const seekTime = this._interp(clampedPhys, vbr.pcmTimes, vbr.linearSeekTimes);
         this.seekOffset = clampedPhys - seekTime;
         return Math.max(0, seekTime);
       }
 
       // Direct Podbean CDN streaming with raw Xing header
       if (this.isFirefox) {
-        const dur = this.vbrData.totalDurSec;
+        const dur = vbr.totalDurSec;
         const bucketWidth = dur / 100.0;
         let bestS = clampedPhys;
         let bestErr = Infinity;
         let bestDelta = 0.0;
 
         for (let k = 0; k < 100; k++) {
-          const delta = this.vbrData.ffBucketDeltas[k];
+          const delta = vbr.ffBucketDeltas[k];
           const sMin = k * bucketWidth;
           const sMax = (k + 1) * bucketWidth - 0.02;
           const candidateS = Math.max(sMin, Math.min(sMax, clampedPhys - delta));
@@ -1396,7 +1518,7 @@
       }
 
       // Chromium / Safari on direct Podbean CDN: interpolate Xing TOC seek curve
-      const seekTime = this._interp(clampedPhys, this.vbrData.pcmTimes, this.vbrData.xingSeekTimes);
+      const seekTime = this._interp(clampedPhys, vbr.pcmTimes, vbr.xingSeekTimes);
       this.seekOffset = clampedPhys - seekTime;
       return Math.max(0, seekTime);
     },
@@ -1406,7 +1528,7 @@
      */
     getPhysicalTime: function (rawCurrentTime) {
       if (typeof rawCurrentTime !== 'number' || isNaN(rawCurrentTime)) return 0;
-      if (!this.vbrData) return rawCurrentTime;
+      if (!this.getPlayingVbrData()) return rawCurrentTime;
       return Math.max(0, rawCurrentTime + (this.seekOffset || 0.0));
     },
 
@@ -1415,8 +1537,11 @@
      * Enforces monotonic cursor progression and per-turn token counts so adjacent turns
      * separated by < 0.60s never duplicate or steal boundary words.
      */
-    indexWordsByTurn: function (segments) {
+    indexWordsByTurn: function (segments, episodeId = null) {
       this.turnWordMap = {};
+      for (let i = 0; i < this.words.length; i++) {
+        this.words[i].domId = this.words[i].id;
+      }
       let wordCursor = 0;
 
       segments.forEach((seg, idx) => {
@@ -1454,6 +1579,7 @@
         wordCursor = tempIdx;
         this.turnWordMap[turnIdx] = turnWords;
       });
+      this.turnWordMapEpisodeId = episodeId || this.wordsEpisodeId || this.currentEpisodeId || null;
     },
 
     /**
@@ -1710,8 +1836,12 @@
       const currentLineCenterY = currentDocY + wordHeight / 2;
 
       // 1. Scan backward for start of current line
+      const curTurnIdx = this.words[targetIdx] ? this.words[targetIdx].turnIdx : undefined;
       let lineStartIdx = targetIdx;
       for (let i = targetIdx - 1; i >= Math.max(0, targetIdx - 25); i--) {
+        if (curTurnIdx !== undefined && this.words[i].turnIdx !== undefined && this.words[i].turnIdx !== curTurnIdx) {
+          break;
+        }
         const prevSpan = document.getElementById(this.words[i].domId || this.words[i].id);
         if (!prevSpan) break;
         const prevDocY = prevSpan.getBoundingClientRect().top + scrollTop;
@@ -1729,6 +1859,9 @@
       let nextLineStartTime = lineStartTime + 4.0;
 
       for (let i = targetIdx + 1; i < Math.min(this.words.length, targetIdx + 30); i++) {
+        if (curTurnIdx !== undefined && this.words[i].turnIdx !== undefined && this.words[i].turnIdx !== curTurnIdx) {
+          break;
+        }
         const nextSpan = document.getElementById(this.words[i].domId || this.words[i].id);
         if (!nextSpan) continue;
         const nextDocY = nextSpan.getBoundingClientRect().top + scrollTop;
@@ -1907,7 +2040,7 @@
      */
     update: function (rawCurrentTime) {
       if (!this.enabled || !this.words || this.words.length === 0) return;
-      if (this.playingEpisodeId && this.currentEpisodeId !== this.playingEpisodeId) {
+      if (!this.isPlayingCurrentTranscript()) {
         return;
       }
       if (typeof rawCurrentTime !== 'number' || isNaN(rawCurrentTime)) return;
@@ -1991,7 +2124,8 @@
      */
     findWordIndex: function (time) {
       // Hold the sought target word only over its true lead-in window (wider 10s allowance reserved for raw Firefox VBR CDN fallback)
-      const leadWindowSec = (this.streamMode === 'cdn' && this.vbrData && this.isFirefox) ? 10.0 : 0.90;
+      const vbr = this.getPlayingVbrData();
+      const leadWindowSec = (this.streamMode === 'cdn' && vbr && this.isFirefox) ? 10.0 : 0.90;
       if (
         this._seekTargetWordTime !== null &&
         time >= this._seekTargetWordTime - leadWindowSec &&

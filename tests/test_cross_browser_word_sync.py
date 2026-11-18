@@ -1230,7 +1230,14 @@ def _match_pcm_timestamp_sec(full_pcm, clip_b64: str, center_sec: float, pcm_off
     return pcm_offset_sec + (win_start + int(np.argmax(cc))) / 16000.0 - (nz[0] / 16000.0)
 
 
-def _run_headless_chrome_dist_media_test(ep_id: str, mp3_path: Path, run_body_js: str, allow_range: bool = True, timeout_sec: float = 40.0) -> dict:
+def _run_headless_chrome_dist_media_test(
+    ep_id: str,
+    mp3_path: Path,
+    run_body_js: str,
+    allow_range: bool = True,
+    timeout_sec: float = 40.0,
+    window_size: str = "1280,900",
+) -> dict:
     """Serves built dist/ alongside a local archive MP3 and executes `run_body_js` in headless Chrome."""
     import mimetypes
     from deeper_dhamma.export_web import _is_dist_stale, export_static_site
@@ -1426,7 +1433,7 @@ def _run_headless_chrome_dist_media_test(ep_id: str, mp3_path: Path, run_body_js
                     "--headless=new",
                     "--autoplay-policy=no-user-gesture-required",
                     f"--user-data-dir={c_dir}",
-                    "--window-size=1280,900",
+                    f"--window-size={window_size}",
                     f"http://127.0.0.1:{port}/#talk/{ep_id}",
                 ],
                 stdout=subprocess.DEVNULL,
@@ -1876,5 +1883,315 @@ def test_headless_chrome_pb28585203_cbr_clock_and_word_sync_parity():
         assert abs(actual - c["seekedPhys"]) <= 0.65, (
             f"pb28585203 {c['label']} desync: expected ~{c['seekedPhys']:.2f}s, decoded ~{actual:.2f}s"
         )
+
+
+def test_pb28140290_word_sync_turn0_click_and_cross_episode_state_machine():
+    """
+    Regression test for `pb28140290` ("2026 May | 9 Day Sutta Retreat (5/26)| Ajahn Brahmali")
+    at `351x676` mobile viewport verifying:
+    1. Scenario A (Cross-episode `turnWordMap` invalidation): Navigating from another talk
+       and triggering `ensureEpisodeLoaded('pb28140290')` before `openTranscriptDrawer('pb28140290')`
+       never reuses stale `turnWordMap` mappings or collapses companion terms into Turn 0.
+       Clicking `#turn-0 .turn-time-btn` (`▶ 1:03`) in `track` mode and playing through `1:17`
+       (`77s`) keeps `#time-current` and active word highlighting inside `#turn-0` without
+       highlighting or scrolling down to `#turn-3` (`8:39`, "Ah, okay.").
+    2. Scenario B (Early click during shard loading): Clicking `#turn-0 .turn-time-btn` while
+       `words` is still empty for `currentEpisodeId === 'pb28140290'` awaits
+       `ensureEpisodeLoaded('pb28140290')`, loads `VBR1`, locks `tw-0`, and plays calibrated audio.
+    3. Scenario C (Decoupled playing VBR talk vs. viewed CBR transcript): Opening another talk's
+       transcript while `pb28140290` is playing preserves `getPlayingVbrData()`, `getPhysicalTime()`,
+       and `#time-total` (`1:10:55`), and returning to `pb28140290` restores Turn 0 word sync.
+    """
+    mp3_path = PROJECT_ROOT / "archive/2026/2026_may_9_day_sutta_retreat/2026-05-29_2026_may_9_day_sutta_retreat_05_26_ajahn_brahmali.mp3"
+
+    run_body_js = r"""
+    const dd = window.DeeperDhamma;
+    const ws = window.WordSync;
+    const a = document.getElementById('native-audio');
+
+    const initReady = await waitUntil(() => (
+      document.getElementById('tw-0') &&
+      document.getElementById('tw-1128') &&
+      ws &&
+      ws.currentEpisodeId === 'pb28140290' &&
+      ws.wordsEpisodeId === 'pb28140290' &&
+      ws.turnWordMapEpisodeId === 'pb28140290' &&
+      dd &&
+      dd.state &&
+      dd.state.lexCompanion &&
+      Array.isArray(dd.state.lexCompanion.allTerms) &&
+      dd.state.lexCompanion.allTerms.length > 0
+    ), 20000, 100);
+    if (!initReady) throw new Error('Timed out waiting for pb28140290 initial load');
+
+    // -----------------------------------------------------------------------
+    // Scenario A: Stale turnWordMap after prior talk + ensureEpisodeLoaded()
+    // -----------------------------------------------------------------------
+    await dd.openTranscriptDrawer('pb28585203', null, { skipHistory: true });
+    const otherReady = await waitUntil(() => (
+      ws.currentEpisodeId === 'pb28585203' &&
+      ws.wordsEpisodeId === 'pb28585203' &&
+      ws.turnWordMapEpisodeId === 'pb28585203' &&
+      document.querySelectorAll('#turn-0 .transcript-word').length > 0
+    ), 10000, 50);
+    if (!otherReady) throw new Error('Timed out waiting for pb28585203 load');
+
+    await ws.ensureEpisodeLoaded('pb28140290');
+    const afterEnsurePreOpen = {
+      currentEpisodeId: ws.currentEpisodeId,
+      wordsEpisodeId: ws.wordsEpisodeId,
+      turnWordMapEpisodeId: ws.turnWordMapEpisodeId,
+      turnWordMapKeys: Object.keys(ws.turnWordMap || {}).length,
+    };
+
+    await dd.openTranscriptDrawer('pb28140290', null, { skipHistory: true });
+    const reopenReady = await waitUntil(() => (
+      ws.currentEpisodeId === 'pb28140290' &&
+      ws.wordsEpisodeId === 'pb28140290' &&
+      ws.turnWordMapEpisodeId === 'pb28140290' &&
+      document.querySelectorAll('#turn-0 .transcript-word').length === 505 &&
+      dd.state.lexCompanion.allTerms &&
+      dd.state.lexCompanion.allTerms.length > 0
+    ), 10000, 50);
+    if (!reopenReady) throw new Error('Timed out waiting for pb28140290 reopen readiness');
+
+    const turn0WordCount = document.querySelectorAll('#turn-0 .transcript-word').length;
+    const turn3Words = Array.from(document.querySelectorAll('#turn-3 .transcript-word')).map(el => ({
+      id: el.id,
+      text: el.textContent.trim(),
+      start: parseFloat(el.dataset.start),
+    }));
+    const companionCount = dd.state.lexCompanion.allTerms.length;
+    const companionFirst10Starts = dd.state.lexCompanion.allTerms.slice(0, 10).map(t => Number(t.startSec.toFixed(2)));
+    const companionTerm8 = dd.state.lexCompanion.allTerms[7]
+      ? { pali: dd.state.lexCompanion.allTerms[7].pali_plain, startSec: dd.state.lexCompanion.allTerms[7].startSec }
+      : null;
+
+    ws.setMode('track');
+    const mainEl = document.getElementById('main-content');
+    mainEl.scrollTop = 0;
+
+    document.querySelector('#turn-0 .turn-time-btn').click();
+    const turn0Settled = await waitUntil(() => (
+      !ws.isSeekLocked() && a.readyState >= 3 && !a.seeking && !a.paused && ws.activeWordEl
+    ), 10000, 30);
+    if (!turn0Settled) throw new Error('Timed out waiting for Turn 0 playback settle');
+
+    const atStartSnapshot = {
+      physSec: Number(ws.getPhysicalTime(a.currentTime).toFixed(3)),
+      activeId: ws.activeWordEl ? ws.activeWordEl.id : null,
+      activeTurn: ws.activeWordEl ? Number(ws.activeWordEl.dataset.turnIdx) : -1,
+      streamMode: ws.streamMode,
+    };
+
+    // Advance cleanly from 1:03 (~63.88s) to 1:17 (~77.0-77.8s)
+    a.playbackRate = 6.0;
+    const near117 = await waitUntil(() => ws.getPhysicalTime(a.currentTime) >= 76.95, 10000, 25);
+    if (!near117) throw new Error('Timed out advancing to 1:17');
+    a.playbackRate = 1.0;
+
+    let snapshotAt117 = null;
+    for (let i = 0; i < 60; i++) {
+      await sleep(25);
+      const phys = ws.getPhysicalTime(a.currentTime);
+      const uiClock = document.getElementById('time-current').textContent;
+      if (uiClock === '1:17' && ws.activeWordEl) {
+        const turn3El = document.getElementById('turn-3');
+        const turn0El = document.getElementById('turn-0');
+        const mainRect = mainEl.getBoundingClientRect();
+        const t3Rect = turn3El.getBoundingClientRect();
+        const actRect = ws.activeWordEl.getBoundingClientRect();
+        snapshotAt117 = {
+          uiClock,
+          physSec: Number(phys.toFixed(3)),
+          activeId: ws.activeWordEl.id,
+          activeText: ws.activeWordEl.textContent.trim(),
+          activeStart: parseFloat(ws.activeWordEl.dataset.start),
+          activeTurn: Number(ws.activeWordEl.dataset.turnIdx),
+          turn3HasActive: Boolean(turn3El.querySelector('.active-word')),
+          turn3BelowViewport: t3Rect.top > mainRect.bottom,
+          activeInMainViewport: actRect.bottom >= mainRect.top && actRect.top <= mainRect.bottom,
+          turn0ScrollTop: Math.round(mainEl.scrollTop),
+        };
+        break;
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Scenario B: Early Turn 0 click while words are still loading async
+    // -----------------------------------------------------------------------
+    a.pause();
+    await sleep(40);
+    ws.playingEpisodeId = null;
+    ws.words = [];
+    ws.wordsEpisodeId = null;
+    ws.vbrData = null;
+    ws.turnWordMap = {};
+    ws.turnWordMapEpisodeId = null;
+    delete ws.vbrCache['pb28140290'];
+    ws._lockedWordIdx = -1;
+
+    const origGetWords = ws.dbClient.getEpisodeWords.bind(ws.dbClient);
+    let delayedLoadInvoked = false;
+    let lockedDuringLeadIn = -1;
+    ws.dbClient.getEpisodeWords = async (epId) => {
+      if (epId === 'pb28140290') {
+        delayedLoadInvoked = true;
+        await sleep(160);
+      }
+      return origGetWords(epId);
+    };
+
+    try {
+      document.querySelector('#turn-0 .turn-time-btn').click();
+      // Poll briefly right after click & after ensureEpisodeLoaded finishes to capture lock
+      const sawLockOrWords = await waitUntil(() => {
+        if (ws._lockedWordIdx >= 0 && lockedDuringLeadIn < 0) {
+          lockedDuringLeadIn = ws._lockedWordIdx;
+        }
+        return ws.wordsEpisodeId === 'pb28140290' && ws.words.length === 9371 && !ws.isSeekLocked() && !a.seeking && !a.paused;
+      }, 10000, 20);
+      if (!sawLockOrWords) throw new Error('Timed out waiting for Scenario B async Turn 0 load');
+    } finally {
+      ws.dbClient.getEpisodeWords = origGetWords;
+    }
+
+    // Restore turnWordMap for Scenario C transition and jump playback to ~77.3s
+    ws.indexWordsByTurn(dd.state.currentEpisode.segments, 'pb28140290');
+    const scenarioBSnapshot = {
+      delayedLoadInvoked,
+      wordsCount: ws.words.length,
+      wordsEpisodeId: ws.wordsEpisodeId,
+      hasVbr: Boolean(ws.getPlayingVbrData()),
+      streamMode: ws.streamMode,
+      seekOffset: ws.seekOffset,
+      lockedDuringLeadIn,
+      settledPhysSec: Number(ws.getPhysicalTime(a.currentTime).toFixed(3)),
+    };
+
+    // -----------------------------------------------------------------------
+    // Scenario C: Decoupled playing VBR talk (pb28140290) vs viewed CBR talk
+    // -----------------------------------------------------------------------
+    await ws.mseSeekAndLoad(a, dd.state.currentMediaUrl, 77.3, ++ws._seekSeq, true);
+    const seeked77 = await waitUntil(() => !a.seeking && !a.paused && ws.getPhysicalTime(a.currentTime) >= 77.0, 6000, 25);
+    if (!seeked77) throw new Error('Timed out seeking pb28140290 to 77.3s for Scenario C');
+
+    await dd.openTranscriptDrawer('pb28585203', null, { skipHistory: true });
+    const viewingOtherReady = await waitUntil(() => (
+      ws.currentEpisodeId === 'pb28585203' &&
+      ws.wordsEpisodeId === 'pb28585203' &&
+      ws.turnWordMapEpisodeId === 'pb28585203'
+    ), 10000, 50);
+    if (!viewingOtherReady) throw new Error('Timed out opening pb28585203 while pb28140290 plays');
+
+    const origOffset = ws.seekOffset;
+    ws.seekOffset = 5.0;
+    const physWithOffsetCheck = ws.getPhysicalTime(77.5);
+    ws.seekOffset = origOffset;
+
+    a.dispatchEvent(new Event('timeupdate'));
+    await sleep(30);
+
+    const decoupledSnapshot = {
+      viewedEpisodeId: ws.currentEpisodeId,
+      playingEpisodeId: ws.playingEpisodeId,
+      viewedVbrDataIsNull: ws.vbrData === null,
+      playingVbrDurSec: ws.getPlayingVbrData() ? Number(ws.getPlayingVbrData().totalDurSec.toFixed(3)) : 0,
+      physWithOffsetCheck,
+      totalClockWhileViewingOther: document.getElementById('time-total').textContent,
+    };
+
+    // Return to pb28140290 and confirm Turn 0 sync resumes cleanly
+    await dd.openTranscriptDrawer('pb28140290', null, { skipHistory: true });
+    const returnedReady = await waitUntil(() => (
+      ws.currentEpisodeId === 'pb28140290' &&
+      ws.wordsEpisodeId === 'pb28140290' &&
+      ws.turnWordMapEpisodeId === 'pb28140290' &&
+      document.querySelectorAll('#turn-0 .transcript-word').length === 505 &&
+      ws.activeWordEl &&
+      Number(ws.activeWordEl.dataset.turnIdx) === 0
+    ), 10000, 40);
+
+    const returnedSnapshot = {
+      returnedReady,
+      activeId: ws.activeWordEl ? ws.activeWordEl.id : null,
+      activeTurn: ws.activeWordEl ? Number(ws.activeWordEl.dataset.turnIdx) : -1,
+    };
+    a.pause();
+
+    await reportResult({
+      afterEnsurePreOpen,
+      turn0WordCount,
+      turn3Words,
+      companionCount,
+      companionFirst10Starts,
+      companionTerm8,
+      atStartSnapshot,
+      snapshotAt117,
+      scenarioBSnapshot,
+      decoupledSnapshot,
+      returnedSnapshot,
+    });
+    """
+
+    data = _run_headless_chrome_dist_media_test(
+        "pb28140290",
+        mp3_path,
+        run_body_js,
+        allow_range=True,
+        timeout_sec=45.0,
+        window_size="351,676",
+    )
+
+    # Verify ensureEpisodeLoaded cleared previous turnWordMap before openTranscriptDrawer
+    pre = data["afterEnsurePreOpen"]
+    assert pre["currentEpisodeId"] == "pb28140290"
+    assert pre["wordsEpisodeId"] == "pb28140290"
+    assert pre["turnWordMapEpisodeId"] is None
+    assert pre["turnWordMapKeys"] == 0
+
+    # Verify pb28140290 DOM indexing and companion term ordering (never collapsed to 64 w/ budhha@63.88)
+    assert data["turn0WordCount"] == 505
+    assert [w["id"] for w in data["turn3Words"]] == ["tw-1127", "tw-1128"]
+    assert abs(data["turn3Words"][0]["start"] - 519.34) < 0.05
+    assert data["companionCount"] >= 90
+    assert data["companionTerm8"] is not None
+    assert data["companionTerm8"]["startSec"] > 100.0
+
+    # Verify Turn 0 click playback start and continuous playback through 1:17
+    assert data["atStartSnapshot"]["activeTurn"] == 0
+    s117 = data["snapshotAt117"]
+    assert s117 is not None, "Did not capture active snapshot while clock displayed 1:17"
+    assert s117["uiClock"] == "1:17"
+    assert s117["activeTurn"] == 0
+    assert s117["activeId"] in {"tw-26", "tw-27", "tw-28", "tw-29", "tw-30", "tw-31"}
+    assert abs(s117["activeStart"] - s117["physSec"]) <= 0.85
+    assert s117["turn3HasActive"] is False
+    assert s117["turn3BelowViewport"] is True
+    assert s117["activeInMainViewport"] is True
+
+    # Verify Scenario B early click awaited shard load & engaged VBR calibration
+    sb = data["scenarioBSnapshot"]
+    assert sb["delayedLoadInvoked"] is True
+    assert sb["wordsCount"] == 9371
+    assert sb["wordsEpisodeId"] == "pb28140290"
+    assert sb["hasVbr"] is True
+    assert sb["streamMode"] == "mse_vbr"
+    assert abs(sb["seekOffset"]) < 0.001
+    assert 62.5 <= sb["settledPhysSec"] <= 66.0
+
+    # Verify Scenario C decoupled playing VBR talk while viewing CBR talk
+    dec = data["decoupledSnapshot"]
+    assert dec["viewedEpisodeId"] == "pb28585203"
+    assert dec["playingEpisodeId"] == "pb28140290"
+    assert dec["viewedVbrDataIsNull"] is True
+    assert abs(dec["playingVbrDurSec"] - 4255.687) < 0.5
+    assert abs(dec["physWithOffsetCheck"] - 82.5) < 0.01
+    assert dec["totalClockWhileViewingOther"] == "1:10:55"
+
+    # Verify return to pb28140290 restores Turn 0 tracking
+    ret = data["returnedSnapshot"]
+    assert ret["returnedReady"] is True
+    assert ret["activeTurn"] == 0
 
 

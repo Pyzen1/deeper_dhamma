@@ -20,7 +20,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css?v={{db_version}}">
+  <link rel="stylesheet" href="/static/style_browse.css?v={{db_version}}">
+  <link rel="stylesheet" href="/static/style_lexicon.css?v={{db_version}}">
+  <link rel="stylesheet" href="/static/style_player.css?v={{db_version}}">
+  <link rel="stylesheet" href="/static/style_transcript.css?v={{db_version}}">
+  <link rel="stylesheet" href="/static/style_bookmarks_about.css?v={{db_version}}">
   <script>window.__DEEPER_DHAMMA_VERSION__ = "{{db_version}}";</script>
 </head>
 <body class="dark-theme">
@@ -1675,38 +1681,23 @@
 
           <div class="control-buttons">
             <button type="button" class="btn-ctl btn-ctl-track" id="btn-prev-track" title="Previous Talk" aria-label="Previous Talk">
-              <svg class="fluent-icon fluent-skip-back" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path class="fluent-symbol" d="M17 9.68977V15.0378L23.3066 8.9692C23.9419 8.35788 25 8.80811 25 9.68977V22.3102C25 23.1919 23.9419 23.6421 23.3066 23.0308L17 16.9622V22.3102C17 23.1919 15.9419 23.6421 15.3066 23.0308L9 16.9623V22.5C9 22.7761 8.77614 23 8.5 23H7.5C7.22386 23 7 22.7761 7 22.5V9.5C7 9.22386 7.22386 9 7.5 9H8.5C8.77614 9 9 9.22386 9 9.5V15.0378L15.3066 8.9692C15.9419 8.35788 17 8.80811 17 9.68977Z" fill="currentColor"/>
-                <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
-              </svg>
+              <span class="material-symbols-outlined" aria-hidden="true">skip_previous</span>
             </button>
 
             <button type="button" class="btn-ctl btn-ctl-seek" id="btn-skip-back" title="Rewind 15 seconds" aria-label="Rewind 15 seconds">
-              <svg class="fluent-icon fluent-rewind" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path class="fluent-symbol" d="M15 15.0378V9.68977C15 8.80811 13.9419 8.35788 13.3066 8.9692L6.74885 15.2794C6.34001 15.6728 6.34001 16.3272 6.74885 16.7206L13.3066 23.0308C13.9419 23.6421 15 23.1919 15 22.3102V16.9622L21.3066 23.0308C21.9419 23.6421 23 23.1919 23 22.3102V9.68977C23 8.80811 21.9419 8.35788 21.3066 8.9692L15 15.0378Z" fill="currentColor"/>
-                <path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/>
-              </svg>
+              <span class="material-symbols-outlined" aria-hidden="true">fast_rewind</span>
             </button>
 
             <button type="button" class="btn-ctl-main" id="btn-play-pause" title="Play or Pause (Space)" aria-label="Play or Pause">
-              <svg class="fluent-icon fluent-play" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path class="fluent-symbol" d="M23.5 16.866C24.1667 16.4811 24.1667 15.5189 23.5 15.134L11.5 8.20577C10.8333 7.82087 10 8.302 10 9.0718L10 22.9282C10 23.698 10.8333 24.1791 11.5 23.7942L23.5 16.866Z" fill="currentColor"/>
-                <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
-              </svg>
+              <span class="material-symbols-outlined" aria-hidden="true">play_arrow</span>
             </button>
 
             <button type="button" class="btn-ctl btn-ctl-seek" id="btn-skip-fwd" title="Skip forward 15 seconds" aria-label="Skip forward 15 seconds">
-              <svg class="fluent-icon fluent-fast-forward" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path class="fluent-symbol" d="M17 15.0377L10.6934 8.9692C10.0581 8.35788 9 8.80811 9 9.68977L9 22.3102C9 23.1919 10.0581 23.6421 10.6934 23.0308L17 16.9622V22.3102C17 23.1919 18.0581 23.6421 18.6934 23.0308L25.2512 16.7206C25.66 16.3272 25.66 15.6728 25.2512 15.2794L18.6934 8.9692C18.0581 8.35788 17 8.80811 17 9.68977V15.0377Z" fill="currentColor"/>
-                <path class="fluent-frame" d="M1 6C1 3.23858 3.23858 1 6 1H26C28.7614 1 31 3.23858 31 6V26C31 28.7614 28.7614 31 26 31H6C3.23858 31 1 28.7614 1 26V6ZM6 3C4.34315 3 3 4.34315 3 6V26C3 27.6569 4.34315 29 6 29H26C27.6569 29 29 27.6569 29 26V6C29 4.34315 27.6569 3 26 3H6Z" fill="currentColor"/>
-              </svg>
+              <span class="material-symbols-outlined" aria-hidden="true">fast_forward</span>
             </button>
 
             <button type="button" class="btn-ctl btn-ctl-track" id="btn-next-track" title="Next Talk" aria-label="Next Talk">
-              <svg class="fluent-icon fluent-skip-fwd" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path class="fluent-symbol" d="M9.69338 8.9692L16 15.0378V9.68977C16 8.80811 17.0581 8.35788 17.6934 8.9692L24 15.0377V9.5C24 9.22386 24.2239 9 24.5 9H25.5C25.7761 9 26 9.22386 26 9.5V22.5C26 22.7761 25.7761 23 25.5 23H24.5C24.2239 23 24 22.7761 24 22.5V16.9622L17.6934 23.0308C17.0581 23.6421 16 23.1919 16 22.3102V16.9622L9.69338 23.0308C9.05807 23.6421 8 23.1919 8 22.3102L8 9.68977C8 8.80811 9.05807 8.35788 9.69338 8.9692Z" fill="currentColor"/>
-                <path class="fluent-frame" d="M6 1C3.23858 1 1 3.23858 1 6V26C1 28.7614 3.23858 31 6 31H26C28.7614 31 31 28.7614 31 26V6C31 3.23858 28.7614 1 26 1H6ZM3 6C3 4.34315 4.34315 3 6 3H26C27.6569 3 29 4.34315 29 6V26C29 27.6569 27.6569 29 26 29H6C4.34315 29 3 27.6569 3 26V6Z" fill="currentColor"/>
-              </svg>
+              <span class="material-symbols-outlined" aria-hidden="true">skip_next</span>
             </button>
           </div>
 
@@ -1798,6 +1789,13 @@
   <script src="/static/db_client.js?v={{db_version}}"></script>
   <script src="/static/word_sync.js?v={{db_version}}"></script>
   <script src="/static/card_physics.js?v={{db_version}}"></script>
+  <script src="/static/speaker_palette.js?v={{db_version}}"></script>
+  <script src="/static/bookmarks_view.js?v={{db_version}}"></script>
+  <script src="/static/browse_view.js?v={{db_version}}"></script>
+  <script src="/static/archive_export.js?v={{db_version}}"></script>
+  <script src="/static/search_view.js?v={{db_version}}"></script>
+  <script src="/static/lexicon_views.js?v={{db_version}}"></script>
+  <script src="/static/audio_player.js?v={{db_version}}"></script>
   <script src="/static/app.js?v={{db_version}}"></script>
 </body>
 </html>
