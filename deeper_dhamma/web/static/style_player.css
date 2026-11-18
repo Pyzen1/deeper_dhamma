@@ -159,6 +159,7 @@
 
 .toolbar-actions-arrow {
   display: block;
+  font-size: 18px;
   transition: transform 0.2s ease;
 }
 
@@ -439,7 +440,7 @@
 }
 
 .btn-player-transcript-icon {
-  font-size: 0.95rem;
+  font-size: 18px;
   line-height: 1;
 }
 
@@ -506,18 +507,6 @@
   gap: 0.85rem;
 }
 
-/* Fluent Media Control SVG Icons (Volume Icon) */
-.fluent-icon {
-  width: 32px;
-  height: 32px;
-  display: block;
-  flex-shrink: 0;
-  fill: currentColor;
-  shape-rendering: geometricPrecision;
-  image-rendering: -webkit-optimize-contrast;
-  transform: none;
-}
-
 /* Playback control buttons: Play/pause is ~5% bigger, other buttons are ~5% smaller */
 .btn-ctl,
 .btn-ctl-main {
@@ -582,33 +571,6 @@
   background: transparent !important;
   background-color: transparent !important;
   transform: none !important;
-}
-
-/* Self-hosted fallback for Material Symbols Outlined (offline / PWA resilience) */
-@font-face {
-  font-family: 'Material Symbols Outlined Fallback';
-  font-style: normal;
-  font-weight: 100 700;
-  font-display: block;
-  src: url('./fonts/material_symbols_outlined.woff2') format('woff2');
-}
-
-.material-symbols-outlined {
-  font-family: 'Material Symbols Outlined', 'Material Symbols Outlined Fallback';
-  font-weight: normal;
-  font-style: normal;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  display: inline-block;
-  white-space: nowrap;
-  word-wrap: normal;
-  direction: ltr;
-  font-feature-settings: 'liga';
-  -webkit-font-feature-settings: 'liga';
-  -webkit-font-smoothing: antialiased;
-  user-select: none;
 }
 
 .btn-ctl .material-symbols-outlined {
@@ -700,6 +662,7 @@
 
 .player-settings-gear-icon {
   display: block;
+  font-size: 20px;
 }
 
 /* Player Settings View Modal */
@@ -870,9 +833,9 @@
   height: 20px;
 }
 
-.vol-icon .fluent-icon {
-  width: 18px;
-  height: 18px;
+.vol-icon .material-symbols-outlined {
+  font-size: 20px;
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
 }
 
 #volume-slider {

@@ -56,11 +56,11 @@
       `;
     }
     if (item.source_document_id) {
-      sourceHtml += ` <button type="button" class="btn-lexicon-view-doc" data-doc-id="${escapeHtml(String(item.source_document_id))}" data-term="${escapeHtml(item.pali_plain)}" title="Open offline reference document filtered to '${escapeHtml(item.pali_plain)}'">📜 View in Offline Source (“${escapeHtml(item.pali_plain)}”)</button>`;
+      sourceHtml += ` <button type="button" class="btn-lexicon-view-doc" data-doc-id="${escapeHtml(String(item.source_document_id))}" data-term="${escapeHtml(item.pali_plain)}" title="Open offline reference document filtered to '${escapeHtml(item.pali_plain)}'"><span class="material-symbols-outlined ms-sm" aria-hidden="true">article</span> View in Offline Source (“${escapeHtml(item.pali_plain)}”)</button>`;
     }
     if (item.source_mirror_url) {
       const mirrorExt = (item.source_mirror_url.split('.').pop() || 'file').toUpperCase();
-      sourceHtml += ` <a href="${escapeHtml(item.source_mirror_url)}" target="_blank" rel="noopener noreferrer" class="lexicon-source-link" title="Inspect raw upstream archive file (${escapeHtml(item.source_mirror_url)}) used to compile the database">📦 Raw Archive File (.${escapeHtml(mirrorExt)}) ↗</a>`;
+      sourceHtml += ` <a href="${escapeHtml(item.source_mirror_url)}" target="_blank" rel="noopener noreferrer" class="lexicon-source-link" title="Inspect raw upstream archive file (${escapeHtml(item.source_mirror_url)}) used to compile the database"><span class="material-symbols-outlined ms-sm" aria-hidden="true">inventory_2</span> Raw Archive File (.${escapeHtml(mirrorExt)}) <span class="material-symbols-outlined ms-sm" aria-hidden="true">open_in_new</span></a>`;
     }
 
     return `
@@ -69,7 +69,7 @@
           <span class="pali-term" title="Click to focus &amp; update URL for ${escapeHtml(item.pali_plain)}" style="cursor: pointer;">${escapeHtml(item.pali_plain)}</span>
           <span class="lexicon-diacritic">${diacritic}</span>
           ${item.category ? `<span class="category-badge">${escapeHtml(item.category.replace(/_/g, ' '))}</span>` : ''}
-          ${isCore ? `<span class="core-badge">⭐ CORE</span>` : ''}
+          ${isCore ? `<span class="core-badge"><span class="material-symbols-outlined ms-sm is-filled" aria-hidden="true">star</span> CORE</span>` : ''}
         </div>
         ${teacherGloss.length > 0 ? `
           <div class="lexicon-teacher-glosses">
@@ -80,10 +80,10 @@
         <div class="lexicon-meta"><strong>Authority Source:</strong> ${sourceHtml}</div>
         <div class="lexicon-actions" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
           <button type="button" class="btn-lexicon-talks" data-term="${escapeHtml(item.pali_plain)}" title="Search transcripts for this Pali term">
-            🔍 Find Talks Mentioning "${escapeHtml(item.pali_plain)}"
+            <span class="material-symbols-outlined ms-sm" aria-hidden="true">search</span> Find Talks Mentioning "${escapeHtml(item.pali_plain)}"
           </button>
           <button type="button" class="btn-secondary btn-lexicon-share" data-term="${escapeHtml(item.pali_plain)}" title="Copy shareable link to this lexicon term">
-            🔗 Share Term Link
+            <span class="material-symbols-outlined ms-sm" aria-hidden="true">link</span> Share Term Link
           </button>
         </div>
       </div>
@@ -259,20 +259,20 @@
         if (doc.mirror_url) {
           const mirrorExt = (doc.mirror_url.split('.').pop() || 'file').toUpperCase();
           els.docActiveMirrorLink.href = doc.mirror_url;
-          els.docActiveMirrorLink.textContent = `📦 Raw Archive File (.${mirrorExt}) ↗`;
+          els.docActiveMirrorLink.innerHTML = `<span class="material-symbols-outlined ms-sm" aria-hidden="true">inventory_2</span> Raw Archive File (.${escapeHtml(mirrorExt)}) <span class="material-symbols-outlined ms-sm" aria-hidden="true">open_in_new</span>`;
           els.docActiveMirrorLink.style.display = 'inline-flex';
         } else {
           els.docActiveMirrorLink.style.display = 'none';
         }
       }
-      if (els.docChipRetrieved) els.docChipRetrieved.textContent = `📅 Retrieved: ${doc.retrieved_date || 'N/A'}`;
-      if (els.docChipFormat) els.docChipFormat.textContent = `📄 Format: ${doc.content_format || 'text/markdown'}`;
+      if (els.docChipRetrieved) els.docChipRetrieved.innerHTML = `<span class="material-symbols-outlined ms-sm" aria-hidden="true">calendar_today</span> Retrieved: ${escapeHtml(doc.retrieved_date || 'N/A')}`;
+      if (els.docChipFormat) els.docChipFormat.innerHTML = `<span class="material-symbols-outlined ms-sm" aria-hidden="true">description</span> Format: ${escapeHtml(doc.content_format || 'text/markdown')}`;
       if (els.docChipSize) {
         const kb = doc.uncompressed_bytes ? (doc.uncompressed_bytes / 1024).toFixed(1) + ' KB' : 'N/A';
-        els.docChipSize.textContent = `💾 Size: ${kb}`;
+        els.docChipSize.innerHTML = `<span class="material-symbols-outlined ms-sm" aria-hidden="true">database</span> Size: ${escapeHtml(kb)}`;
       }
       if (els.docChipSha) {
-        els.docChipSha.textContent = `🔒 SHA-256: ${(doc.sha256 || '').slice(0, 20)}...`;
+        els.docChipSha.innerHTML = `<span class="material-symbols-outlined ms-sm" aria-hidden="true">verified_user</span> SHA-256: ${escapeHtml((doc.sha256 || '').slice(0, 20))}...`;
         els.docChipSha.title = `Full SHA-256 Checksum: ${doc.sha256}`;
       }
 

@@ -90,6 +90,51 @@ body::before {
 }
 
 /* ==========================================================================
+   Google Material Symbols Outlined (Self-Hosted Offline Fallback)
+   ========================================================================== */
+
+@font-face {
+  font-family: 'Material Symbols Outlined Fallback';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url('./fonts/material_symbols_outlined.woff2') format('woff2');
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined', 'Material Symbols Outlined Fallback';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.material-symbols-outlined.is-filled {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.material-symbols-outlined.ms-inline {
+  font-size: 1.15em;
+  vertical-align: -0.2em;
+}
+
+.material-symbols-outlined.ms-sm {
+  font-size: 16px;
+  vertical-align: -0.18em;
+}
+
+/* ==========================================================================
    Left Navigation Sidebar
    ========================================================================== */
 

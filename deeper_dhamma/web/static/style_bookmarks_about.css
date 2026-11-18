@@ -40,6 +40,13 @@
 .bookmark-ribbon-icon {
   display: block;
   flex-shrink: 0;
+  font-size: 20px;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+}
+
+.bookmark-ribbon-icon.is-bookmarked,
+.btn-bookmark-action.is-bookmarked .bookmark-ribbon-icon {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
 }
 
 /* Card Pinned Top-Right Bookmark Button */
@@ -466,8 +473,8 @@
 }
 
 .btn-remove-bookmark .bookmark-ribbon-icon {
-  width: 13px;
-  height: 13px;
+  font-size: 16px;
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
   color: #f59e0b;
   transition: color var(--transition-fast), transform var(--transition-fast);
 }

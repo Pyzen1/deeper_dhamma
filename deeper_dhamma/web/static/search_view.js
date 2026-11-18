@@ -202,7 +202,7 @@
     if (episodes.length === 0) {
       els.searchResultsList.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">🔍</div>
+          <div class="empty-icon material-symbols-outlined" aria-hidden="true">search</div>
           <h2>No talks match the selected filters</h2>
           <p>Try clearing or expanding your date range or selecting "All Monastics".</p>
         </div>
@@ -219,26 +219,26 @@
             <div class="result-meta-line" style="margin-bottom: 0.5rem;">
               ${renderTeacherBadgesHtml(ep)}
               ${formatEpisodeDateHtml(ep)}
-              <span>• ⏱️ ${durMin} mins</span>
+              <span>• <span class="material-symbols-outlined ms-sm" aria-hidden="true">schedule</span> ${durMin} mins</span>
             </div>
             <h3 class="episode-title">${escapeHtml(ep.title)}</h3>
           </div>
 
           <div class="episode-footer">
             <button type="button" class="btn-primary" data-action="play-ep-start" data-ep-id="${escapeHtml(ep.id)}">
-              ▶ Play Talk
+              <span class="material-symbols-outlined ms-inline" aria-hidden="true">play_arrow</span> Play Talk
             </button>
             <button type="button" class="btn-secondary" data-action="view-transcript" data-ep-id="${escapeHtml(ep.id)}">
-              📜 Transcript
+              <span class="material-symbols-outlined ms-inline" aria-hidden="true">article</span> Transcript
             </button>
             <div class="download-dropdown-wrapper">
               <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
-                📥 Download ▾
+                <span class="material-symbols-outlined ms-inline" aria-hidden="true">download</span> Download <span class="material-symbols-outlined ms-inline" aria-hidden="true">arrow_drop_down</span>
               </button>
               <div class="download-dropdown-menu">
                 <div class="dropdown-menu-header">Export Transcript</div>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="md">
-                  <span class="download-opt-icon">📝</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">edit_note</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Markdown</span>
                     <span class="download-opt-desc">Formatted notes (.md)</span>
@@ -246,7 +246,7 @@
                   <span class="download-opt-badge">.md</span>
                 </button>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="txt">
-                  <span class="download-opt-icon">📄</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">description</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Plain Text</span>
                     <span class="download-opt-desc">Clean transcript text (.txt)</span>
@@ -254,7 +254,7 @@
                   <span class="download-opt-badge">.txt</span>
                 </button>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="srt">
-                  <span class="download-opt-icon">🎬</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">subtitles</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">SubRip Subtitles</span>
                     <span class="download-opt-desc">For VLC / media players (.srt)</span>
@@ -262,7 +262,7 @@
                   <span class="download-opt-badge">.srt</span>
                 </button>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="vtt">
-                  <span class="download-opt-icon">🌐</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">closed_caption</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">WebVTT Captions</span>
                     <span class="download-opt-desc">Web caption track (.vtt)</span>
@@ -270,7 +270,7 @@
                   <span class="download-opt-badge">.vtt</span>
                 </button>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(ep.id)}" data-format="json">
-                  <span class="download-opt-icon">📊</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">data_object</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">JSON Data</span>
                     <span class="download-opt-desc">Structured turn array (.json)</span>
@@ -676,7 +676,7 @@
     if (episodeGroups.length === 0) {
       els.searchResultsList.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">🔍</div>
+          <div class="empty-icon material-symbols-outlined" aria-hidden="true">search</div>
           <h2>No matching segments found</h2>
           <p>Try broadening your query, unchecking "Exact Phrase Only", or searching for key doctrinal words like <i>hindrances</i>, <i>breath</i>, or <i>samadhi</i>.</p>
         </div>
@@ -708,7 +708,7 @@
             data-word-offset="${m.word_offset_in_turn}"
             title="Open transcript at this sentence and stream from this word (${timeStr})"
           >
-            <span class="sentence-time-pill" data-est-time="${m.est_word_sec}">▶ ${timeStr}</span>
+            <span class="sentence-time-pill" data-est-time="${m.est_word_sec}"><span class="material-symbols-outlined ms-sm" aria-hidden="true">play_arrow</span> ${timeStr}</span>
             <span class="sentence-context-text">${m.sentence_html}</span>
           </div>
         `;
@@ -722,7 +722,7 @@
               <div class="result-meta-line">
                 ${renderTeacherBadgesHtml(group)}
                 ${formatEpisodeDateHtml(group)}
-                ${durMin > 0 ? `<span>• ⏱️ ${durMin} mins</span>` : ''}
+                ${durMin > 0 ? `<span>• <span class="material-symbols-outlined ms-sm" aria-hidden="true">schedule</span> ${durMin} mins</span>` : ''}
               </div>
             </div>
 
@@ -755,19 +755,19 @@
 
           <div class="result-actions">
             <button type="button" class="link-btn" data-action="view-transcript" data-episode-id="${escapeHtml(group.id)}">
-              📜 View Full Transcript
+              <span class="material-symbols-outlined ms-sm" aria-hidden="true">article</span> View Full Transcript
             </button>
             <button type="button" class="link-btn" data-action="play-ep-start" data-ep-id="${escapeHtml(group.id)}" title="Play talk from the beginning">
-              ▶ Play Talk from Start
+              <span class="material-symbols-outlined ms-sm" aria-hidden="true">play_arrow</span> Play Talk from Start
             </button>
             <div class="download-dropdown-wrapper">
               <button type="button" class="btn-secondary download-dropdown-btn" data-action="toggle-card-download" title="Download transcript">
-                📥 Download ▾
+                <span class="material-symbols-outlined ms-sm" aria-hidden="true">download</span> Download <span class="material-symbols-outlined ms-sm" aria-hidden="true">arrow_drop_down</span>
               </button>
               <div class="download-dropdown-menu">
                 <div class="dropdown-menu-header">Export Transcript</div>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="md">
-                  <span class="download-opt-icon">📝</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">edit_note</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Markdown</span>
                     <span class="download-opt-desc">Formatted notes (.md)</span>
@@ -775,7 +775,7 @@
                   <span class="download-opt-badge">.md</span>
                 </button>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="txt">
-                  <span class="download-opt-icon">📄</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">description</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Plain Text</span>
                     <span class="download-opt-desc">Clean transcript text (.txt)</span>
@@ -783,7 +783,7 @@
                   <span class="download-opt-badge">.txt</span>
                 </button>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="srt">
-                  <span class="download-opt-icon">🎬</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">subtitles</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">SubRip Subtitles</span>
                     <span class="download-opt-desc">For VLC / media players (.srt)</span>
@@ -791,7 +791,7 @@
                   <span class="download-opt-badge">.srt</span>
                 </button>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="vtt">
-                  <span class="download-opt-icon">🌐</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">closed_caption</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">WebVTT Captions</span>
                     <span class="download-opt-desc">Web caption track (.vtt)</span>
@@ -799,7 +799,7 @@
                   <span class="download-opt-badge">.vtt</span>
                 </button>
                 <button type="button" class="download-option" data-action="download-card-format" data-ep-id="${escapeHtml(group.id)}" data-format="json">
-                  <span class="download-opt-icon">📊</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">data_object</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">JSON Data</span>
                     <span class="download-opt-desc">Structured turn array (.json)</span>

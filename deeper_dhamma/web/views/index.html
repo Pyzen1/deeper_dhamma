@@ -44,39 +44,39 @@
       <!-- Navigation Menu -->
       <nav class="sidebar-nav" id="main-nav-tabs" aria-label="View navigation">
         <button type="button" class="tab-btn sidebar-nav-item active" id="tab-search-btn" data-tab="search-view">
-          <span class="nav-icon">✨</span>
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">search</span>
           <span class="nav-label">Search</span>
           <span class="badge" id="search-count-badge">0</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-browse-btn" data-tab="browse-view">
-          <span class="nav-icon">📚</span>
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">library_music</span>
           <span class="nav-label">Browse Talks</span>
           <span class="badge" id="browse-count-badge">0</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-bookmarks-btn" data-tab="bookmarks-view">
-          <span class="nav-icon">🔖</span>
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">bookmark</span>
           <span class="nav-label">Bookmarks</span>
           <span class="badge" id="bookmarks-count-badge">0</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-lexicon-btn" data-tab="lexicon-view">
-          <span class="nav-icon">📖</span>
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">menu_book</span>
           <span class="nav-label">Pali Lexicon</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-documents-btn" data-tab="documents-view">
-          <span class="nav-icon">📜</span>
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">article</span>
           <span class="nav-label">Documents</span>
           <span class="badge" id="docs-count-badge">4</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-about-btn" data-tab="about-view">
-          <span class="nav-icon">ℹ️</span>
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">info</span>
           <span class="nav-label">About</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-notes-btn" data-tab="notes-view">
-          <span class="nav-icon">📋</span>
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">assignment</span>
           <span class="nav-label">Archive Notes</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-transcript-btn" data-tab="transcript-view" style="display: none;">
-          <span class="nav-icon">📜</span>
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">subtitles</span>
           <span class="nav-label">Transcript</span>
         </button>
       </nav>
@@ -104,7 +104,7 @@
       <div class="view-panel active" id="search-view">
         <div class="search-box-wrapper">
           <div class="search-bar" id="search-bar-container">
-            <span class="search-icon" aria-hidden="true">🔍</span>
+            <span class="search-icon material-symbols-outlined" aria-hidden="true">search</span>
             <input 
               type="search" 
               id="search-input" 
@@ -114,7 +114,7 @@
               aria-label="Search transcripts"
               autofocus
             >
-            <button type="button" id="clear-search-btn" class="btn-icon" title="Clear search" aria-label="Clear search" style="display: none;">✕</button>
+            <button type="button" id="clear-search-btn" class="btn-icon" title="Clear search" aria-label="Clear search" style="display: none;"><span class="material-symbols-outlined ms-sm" aria-hidden="true">close</span></button>
             <div class="search-shortcut" id="search-shortcut-hint">
               <kbd>/</kbd>
             </div>
@@ -160,7 +160,7 @@
                 <option value="duration_desc">Longest Duration</option>
               </select>
 
-              <button type="button" id="reset-filters-btn" class="btn-secondary btn-reset-filters" title="Reset all filters">✕ Reset</button>
+              <button type="button" id="reset-filters-btn" class="btn-secondary btn-reset-filters" title="Reset all filters"><span class="material-symbols-outlined ms-sm" aria-hidden="true">close</span> Reset</button>
             </div>
           </div>
         </div>
@@ -174,12 +174,12 @@
             <!-- Filtered Archive Download Dropdown -->
             <div class="download-dropdown-wrapper" id="filtered-archive-dropdown-wrapper" style="display: none;">
               <button type="button" class="btn-secondary download-dropdown-btn" id="btn-download-filtered-archive" title="Download all matching transcripts into a ZIP archive">
-                📥 Download Filtered Archive (<span id="filtered-archive-count">0</span>) ▾
+                <span class="material-symbols-outlined ms-inline" aria-hidden="true">download</span> Download Filtered Archive (<span id="filtered-archive-count">0</span>) <span class="material-symbols-outlined ms-inline" aria-hidden="true">arrow_drop_down</span>
               </button>
               <div class="download-dropdown-menu" id="filtered-archive-menu">
                 <div class="dropdown-menu-header">Export Filtered Results (.zip)</div>
                 <button type="button" class="download-option" data-format="md">
-                  <span class="download-opt-icon">📝</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">edit_note</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Markdown Archive</span>
                     <span class="download-opt-desc">Formatted notes with frontmatter & timestamps</span>
@@ -187,7 +187,7 @@
                   <span class="download-opt-badge">.md</span>
                 </button>
                 <button type="button" class="download-option" data-format="txt">
-                  <span class="download-opt-icon">📄</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">description</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Plain Text Archive</span>
                     <span class="download-opt-desc">Clean transcript text with turn timings</span>
@@ -195,7 +195,7 @@
                   <span class="download-opt-badge">.txt</span>
                 </button>
                 <button type="button" class="download-option" data-format="srt">
-                  <span class="download-opt-icon">🎬</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">subtitles</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">SubRip Subtitles Archive</span>
                     <span class="download-opt-desc">Standard subtitle cues for VLC & media players</span>
@@ -203,7 +203,7 @@
                   <span class="download-opt-badge">.srt</span>
                 </button>
                 <button type="button" class="download-option" data-format="vtt">
-                  <span class="download-opt-icon">🌐</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">closed_caption</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">WebVTT Captions Archive</span>
                     <span class="download-opt-desc">Standard web caption track with speaker cues</span>
@@ -211,7 +211,7 @@
                   <span class="download-opt-badge">.vtt</span>
                 </button>
                 <button type="button" class="download-option" data-format="json">
-                  <span class="download-opt-icon">📊</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">data_object</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">JSON Data Archive</span>
                     <span class="download-opt-desc">Structured transcript objects & turns</span>
@@ -224,12 +224,12 @@
             <!-- Download All Transcripts Archive Dropdown -->
             <div class="download-dropdown-wrapper" id="all-archive-dropdown-wrapper">
               <button type="button" class="btn-primary download-dropdown-btn" id="btn-download-all-archive" title="Download all transcribed talks in the library into a ZIP archive">
-                📦 Download All Transcripts ▾
+                <span class="material-symbols-outlined ms-inline" aria-hidden="true">inventory_2</span> Download All Transcripts <span class="material-symbols-outlined ms-inline" aria-hidden="true">arrow_drop_down</span>
               </button>
               <div class="download-dropdown-menu" id="all-archive-menu">
                 <div class="dropdown-menu-header">Export Complete Library (.zip)</div>
                 <button type="button" class="download-option" data-format="md">
-                  <span class="download-opt-icon">📝</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">edit_note</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Markdown Archive</span>
                     <span class="download-opt-desc">All transcribed talks in Markdown</span>
@@ -237,7 +237,7 @@
                   <span class="download-opt-badge">.md</span>
                 </button>
                 <button type="button" class="download-option" data-format="txt">
-                  <span class="download-opt-icon">📄</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">description</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Plain Text Archive</span>
                     <span class="download-opt-desc">All transcribed talks in plain text</span>
@@ -245,7 +245,7 @@
                   <span class="download-opt-badge">.txt</span>
                 </button>
                 <button type="button" class="download-option" data-format="srt">
-                  <span class="download-opt-icon">🎬</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">subtitles</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">SubRip Subtitles Archive</span>
                     <span class="download-opt-desc">All talks formatted for media players</span>
@@ -253,7 +253,7 @@
                   <span class="download-opt-badge">.srt</span>
                 </button>
                 <button type="button" class="download-option" data-format="vtt">
-                  <span class="download-opt-icon">🌐</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">closed_caption</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">WebVTT Captions Archive</span>
                     <span class="download-opt-desc">All talks in WebVTT web captions</span>
@@ -261,7 +261,7 @@
                   <span class="download-opt-badge">.vtt</span>
                 </button>
                 <button type="button" class="download-option" data-format="json">
-                  <span class="download-opt-icon">📊</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">data_object</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">JSON Data Archive</span>
                     <span class="download-opt-desc">Full archive as structured JSON files</span>
@@ -275,7 +275,7 @@
 
         <!-- Initial Placeholder State -->
         <div class="empty-state" id="search-empty-state">
-          <div class="empty-icon">🪷</div>
+          <div class="empty-icon material-symbols-outlined" aria-hidden="true">spa</div>
           <h2 id="search-empty-heading">Search 2,971 English Theravada Teachings</h2>
           <p>Instant zero-copy search across high-accuracy Whisper transcripts. Click any speech segment to stream directly from Podbean at that precise second.</p>
           <div class="example-chips" id="example-queries">
@@ -313,12 +313,12 @@
           <div class="browse-header-actions">
             <div class="download-dropdown-wrapper" id="browse-filtered-archive-dropdown-wrapper">
               <button type="button" class="btn-secondary download-dropdown-btn" id="btn-browse-download-filtered" title="Download all matching talks in a ZIP archive">
-                📥 Export Matching (<span id="browse-filtered-archive-count">0</span>) ▾
+                <span class="material-symbols-outlined ms-inline" aria-hidden="true">download</span> Export Matching (<span id="browse-filtered-archive-count">0</span>) <span class="material-symbols-outlined ms-inline" aria-hidden="true">arrow_drop_down</span>
               </button>
               <div class="download-dropdown-menu" id="browse-filtered-archive-menu">
                 <div class="dropdown-menu-header">Export Filtered Talks (.zip)</div>
                 <button type="button" class="download-option" data-format="md">
-                  <span class="download-opt-icon">📝</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">edit_note</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Markdown Archive</span>
                     <span class="download-opt-desc">Formatted notes with frontmatter &amp; timestamps</span>
@@ -326,7 +326,7 @@
                   <span class="download-opt-badge">.md</span>
                 </button>
                 <button type="button" class="download-option" data-format="txt">
-                  <span class="download-opt-icon">📄</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">description</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Plain Text Archive</span>
                     <span class="download-opt-desc">Clean transcript text with turn timings</span>
@@ -334,7 +334,7 @@
                   <span class="download-opt-badge">.txt</span>
                 </button>
                 <button type="button" class="download-option" data-format="srt">
-                  <span class="download-opt-icon">🎬</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">subtitles</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">SubRip Subtitles Archive</span>
                     <span class="download-opt-desc">Standard subtitle cues for VLC &amp; media players</span>
@@ -342,7 +342,7 @@
                   <span class="download-opt-badge">.srt</span>
                 </button>
                 <button type="button" class="download-option" data-format="vtt">
-                  <span class="download-opt-icon">🌐</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">closed_caption</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">WebVTT Captions Archive</span>
                     <span class="download-opt-desc">Standard web caption track with speaker cues</span>
@@ -350,7 +350,7 @@
                   <span class="download-opt-badge">.vtt</span>
                 </button>
                 <button type="button" class="download-option" data-format="json">
-                  <span class="download-opt-icon">📊</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">data_object</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">JSON Data Archive</span>
                     <span class="download-opt-desc">Structured transcript objects &amp; turns</span>
@@ -366,7 +366,7 @@
         <div class="browse-filter-panel" id="browse-filter-panel">
           <div class="browse-title-filter-row">
             <div class="browse-title-input-wrap">
-              <span class="browse-title-icon" aria-hidden="true">🔍</span>
+              <span class="browse-title-icon material-symbols-outlined" aria-hidden="true">search</span>
               <input
                 type="search"
                 id="browse-title-input"
@@ -375,7 +375,7 @@
                 spellcheck="false"
                 aria-label="Filter talks by title"
               >
-              <button type="button" id="browse-clear-title-btn" class="btn-icon" title="Clear title filter" aria-label="Clear title filter" style="display: none;">✕</button>
+              <button type="button" id="browse-clear-title-btn" class="btn-icon" title="Clear title filter" aria-label="Clear title filter" style="display: none;"><span class="material-symbols-outlined ms-sm" aria-hidden="true">close</span></button>
               <label class="toggle-pill browse-word-pill" title="Match whole words or sutta codes (e.g. 'AN' matches AN7.74 without matching 'Ajahn' or 'Jhana')">
                 <input type="checkbox" id="browse-title-word-checkbox">
                 <span class="toggle-track"></span>
@@ -388,9 +388,9 @@
             <!-- 1. Multi-Select Monastics -->
             <div class="browse-popover-wrapper" id="browse-teachers-dropdown">
               <button type="button" class="browse-filter-btn" id="browse-teachers-btn" aria-expanded="false" aria-haspopup="true">
-                <span class="filter-btn-icon" aria-hidden="true">👤</span>
+                <span class="filter-btn-icon material-symbols-outlined ms-sm" aria-hidden="true">person</span>
                 <span class="filter-btn-label" id="browse-teachers-label">Monastics: All</span>
-                <span class="filter-btn-caret" aria-hidden="true">▾</span>
+                <span class="filter-btn-caret material-symbols-outlined ms-sm" aria-hidden="true">expand_more</span>
               </button>
               <div class="browse-popover-panel" id="browse-teachers-panel">
                 <div class="popover-section-header">
@@ -415,9 +415,9 @@
             <!-- 2. Groupable / Multi-Select Years -->
             <div class="browse-popover-wrapper" id="browse-years-dropdown">
               <button type="button" class="browse-filter-btn" id="browse-years-btn" aria-expanded="false" aria-haspopup="true">
-                <span class="filter-btn-icon" aria-hidden="true">📅</span>
+                <span class="filter-btn-icon material-symbols-outlined ms-sm" aria-hidden="true">calendar_today</span>
                 <span class="filter-btn-label" id="browse-years-label">Years: All</span>
-                <span class="filter-btn-caret" aria-hidden="true">▾</span>
+                <span class="filter-btn-caret material-symbols-outlined ms-sm" aria-hidden="true">expand_more</span>
               </button>
               <div class="browse-popover-panel browse-years-panel" id="browse-years-panel">
                 <div class="popover-section-header">
@@ -448,9 +448,9 @@
             <!-- 3. Talk Length / Duration -->
             <div class="browse-popover-wrapper" id="browse-duration-dropdown">
               <button type="button" class="browse-filter-btn" id="browse-duration-btn" aria-expanded="false" aria-haspopup="true">
-                <span class="filter-btn-icon" aria-hidden="true">⏱️</span>
+                <span class="filter-btn-icon material-symbols-outlined ms-sm" aria-hidden="true">schedule</span>
                 <span class="filter-btn-label" id="browse-duration-label">Length: Any</span>
-                <span class="filter-btn-caret" aria-hidden="true">▾</span>
+                <span class="filter-btn-caret material-symbols-outlined ms-sm" aria-hidden="true">expand_more</span>
               </button>
               <div class="browse-popover-panel browse-duration-panel" id="browse-duration-panel">
                 <div class="popover-section-header">
@@ -499,9 +499,9 @@
             <!-- 4. Sutta Collection & Talk Type -->
             <div class="browse-popover-wrapper" id="browse-category-dropdown">
               <button type="button" class="browse-filter-btn" id="browse-category-btn" aria-expanded="false" aria-haspopup="true">
-                <span class="filter-btn-icon" aria-hidden="true">📂</span>
+                <span class="filter-btn-icon material-symbols-outlined ms-sm" aria-hidden="true">folder_open</span>
                 <span class="filter-btn-label" id="browse-category-label">Collection &amp; Type: All</span>
-                <span class="filter-btn-caret" aria-hidden="true">▾</span>
+                <span class="filter-btn-caret material-symbols-outlined ms-sm" aria-hidden="true">expand_more</span>
               </button>
               <div class="browse-popover-panel browse-category-panel" id="browse-category-panel">
                 <div class="popover-section-header">
@@ -542,7 +542,7 @@
                     </label>
                     <label class="popover-check-item">
                       <input type="checkbox" id="browse-bookmarked-checkbox">
-                      <span class="check-item-label">🔖 Bookmarked Only</span>
+                      <span class="check-item-label"><span class="material-symbols-outlined ms-sm" aria-hidden="true">bookmark</span> Bookmarked Only</span>
                       <span class="check-item-count" id="cat-cnt-bookmarked">0</span>
                     </label>
                   </div>
@@ -561,7 +561,7 @@
                 <option value="duration_asc">Shortest Talks First</option>
                 <option value="title_asc">Title (A → Z)</option>
               </select>
-              <button type="button" id="browse-reset-filters-btn" class="btn-secondary btn-reset-filters" title="Reset all browse filters" disabled>✕ Reset</button>
+              <button type="button" id="browse-reset-filters-btn" class="btn-secondary btn-reset-filters" title="Reset all browse filters" disabled><span class="material-symbols-outlined ms-sm" aria-hidden="true">close</span> Reset</button>
             </div>
           </div>
         </div>
@@ -593,21 +593,21 @@
           </div>
           <div class="bookmarks-actions-bar">
             <button type="button" class="btn-secondary" id="btn-clear-bookmarks" style="display: none;" title="Remove all saved bookmarks">
-              ✕ Clear All
+              <span class="material-symbols-outlined ms-sm" aria-hidden="true">close</span> Clear All
             </button>
           </div>
         </div>
 
         <div class="bookmarks-status-bar" id="bookmarks-status-bar" style="display: none;">
           <span id="bookmarks-status-count">0 saved talks</span>
-          <span class="bookmarks-reorder-hint">Tip: Drag items or use ▲ / ▼ to reorder your bookmarks.</span>
+          <span class="bookmarks-reorder-hint">Tip: Drag items or use <span class="material-symbols-outlined ms-sm" aria-hidden="true">arrow_upward</span> / <span class="material-symbols-outlined ms-sm" aria-hidden="true">arrow_downward</span> to reorder your bookmarks.</span>
         </div>
 
         <div class="bookmarks-list" id="bookmarks-list">
           <div class="empty-state">
-            <div class="empty-icon">🔖</div>
+            <div class="empty-icon material-symbols-outlined" aria-hidden="true">bookmark</div>
             <h2>No Bookmarked Talks Yet</h2>
-            <p>Click the bookmark ribbon icon (🔖) on any talk in Search or Browse to store it locally for fast recall.</p>
+            <p>Click the bookmark ribbon icon (<span class="material-symbols-outlined ms-sm" aria-hidden="true">bookmark</span>) on any talk in Search or Browse to store it locally for fast recall.</p>
           </div>
         </div>
       </div>
@@ -624,13 +624,13 @@
           <!-- Mode Switcher & Sort Controls -->
           <div class="lexicon-controls-bar">
             <div class="lexicon-mode-toggle" id="lexicon-mode-toggle">
-              <button type="button" class="lexicon-mode-btn active" id="btn-lexicon-core" data-mode="core" title="Curated core meditation and doctrinal vocabulary">⭐ Standard Core Terms</button>
-              <button type="button" class="lexicon-mode-btn" id="btn-lexicon-all" data-mode="all" title="Browse all canonical Pali terms">📖 Browse All Terms</button>
+              <button type="button" class="lexicon-mode-btn active" id="btn-lexicon-core" data-mode="core" title="Curated core meditation and doctrinal vocabulary"><span class="material-symbols-outlined ms-inline" aria-hidden="true">star</span> Standard Core Terms</button>
+              <button type="button" class="lexicon-mode-btn" id="btn-lexicon-all" data-mode="all" title="Browse all canonical Pali terms"><span class="material-symbols-outlined ms-inline" aria-hidden="true">menu_book</span> Browse All Terms</button>
             </div>
 
             <div class="lexicon-controls-right">
               <button type="button" class="btn-lexicon-sources" id="btn-lex-sources" title="View canonical offline reference documents and integrity hashes">
-                📜 Authority Documents
+                <span class="material-symbols-outlined ms-inline" aria-hidden="true">article</span> Authority Documents
               </button>
               <div class="lexicon-sort-wrapper">
                 <select id="lexicon-sort-select" aria-label="Sort terms">
@@ -718,28 +718,28 @@
           <!-- Document Selection Tabs Bar -->
           <div class="doc-tabs-bar" id="doc-tabs-bar">
             <button type="button" class="doc-tab-btn active" data-doc-id="1" id="doc-tab-btn-1">
-              <span class="doc-tab-icon">📘</span>
+              <span class="doc-tab-icon material-symbols-outlined" aria-hidden="true">menu_book</span>
               <span class="doc-tab-text">
                 <span class="doc-tab-name">Bodhi &amp; Sujato Glossary</span>
                 <span class="doc-tab-sub">1,063 Terms Comparative Table</span>
               </span>
             </button>
             <button type="button" class="doc-tab-btn" data-doc-id="2" id="doc-tab-btn-2">
-              <span class="doc-tab-icon">📙</span>
+              <span class="doc-tab-icon material-symbols-outlined" aria-hidden="true">gavel</span>
               <span class="doc-tab-text">
                 <span class="doc-tab-name">Brahmali Vinaya Piṭaka</span>
                 <span class="doc-tab-sub">1,309 Terms Monastic Law Table</span>
               </span>
             </button>
             <button type="button" class="doc-tab-btn" data-doc-id="3" id="doc-tab-btn-3">
-              <span class="doc-tab-icon">🪷</span>
+              <span class="doc-tab-icon material-symbols-outlined" aria-hidden="true">spa</span>
               <span class="doc-tab-text">
                 <span class="doc-tab-name">The Word of the Buddha</span>
                 <span class="doc-tab-sub">55 Terms Ajahn Brahm 2024 PDF</span>
               </span>
             </button>
             <button type="button" class="doc-tab-btn" data-doc-id="4" id="doc-tab-btn-4">
-              <span class="doc-tab-icon">🏛️</span>
+              <span class="doc-tab-icon material-symbols-outlined" aria-hidden="true">account_balance</span>
               <span class="doc-tab-text">
                 <span class="doc-tab-name">SuttaCentral Tipiṭaka Canon</span>
                 <span class="doc-tab-sub">219 Nikāya &amp; Sutta Titles</span>
@@ -757,26 +757,26 @@
             </div>
             <div class="doc-meta-actions" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
               <a href="#" target="_blank" rel="noopener noreferrer" class="btn-secondary" id="doc-active-mirror-link" title="Download or inspect the raw upstream archive file (JSON/HTML/PDF) used to compile this database">
-                📦 Raw Archive File ↗
+                <span class="material-symbols-outlined ms-sm" aria-hidden="true">inventory_2</span> Raw Archive File <span class="material-symbols-outlined ms-sm" aria-hidden="true">open_in_new</span>
               </a>
               <a href="#" target="_blank" rel="noopener noreferrer" class="btn-primary" id="doc-active-remote-link">
-                Open Canonical Source ↗
+                Open Canonical Source <span class="material-symbols-outlined ms-sm" aria-hidden="true">open_in_new</span>
               </a>
             </div>
           </div>
 
           <div class="doc-meta-chips" id="doc-meta-chips">
-            <span class="meta-chip" id="doc-chip-retrieved">📅 Retrieved: -</span>
-            <span class="meta-chip" id="doc-chip-format">📄 Format: -</span>
-            <span class="meta-chip" id="doc-chip-size">💾 Size: -</span>
-            <span class="meta-chip meta-chip-sha" id="doc-chip-sha" title="Full SHA-256 Checksum">🔒 SHA-256: -</span>
+            <span class="meta-chip" id="doc-chip-retrieved"><span class="material-symbols-outlined ms-sm" aria-hidden="true">calendar_today</span> Retrieved: -</span>
+            <span class="meta-chip" id="doc-chip-format"><span class="material-symbols-outlined ms-sm" aria-hidden="true">description</span> Format: -</span>
+            <span class="meta-chip" id="doc-chip-size"><span class="material-symbols-outlined ms-sm" aria-hidden="true">database</span> Size: -</span>
+            <span class="meta-chip meta-chip-sha" id="doc-chip-sha" title="Full SHA-256 Checksum"><span class="material-symbols-outlined ms-sm" aria-hidden="true">verified_user</span> SHA-256: -</span>
           </div>
 
           <!-- In-Document Search / Filter Input -->
           <div class="doc-search-wrapper" id="doc-search-wrapper">
-            <span class="doc-search-icon">🔍</span>
+            <span class="doc-search-icon material-symbols-outlined" aria-hidden="true">search</span>
             <input type="search" id="doc-filter-input" placeholder="Search / filter entries in this document (e.g. 'samadhi', 'craving', 'patimokkha')..." autocomplete="off">
-            <button type="button" id="clear-doc-filter-btn" class="btn-icon" style="display: none;" title="Clear filter">✕</button>
+            <button type="button" id="clear-doc-filter-btn" class="btn-icon" style="display: none;" title="Clear filter"><span class="material-symbols-outlined ms-sm" aria-hidden="true">close</span></button>
             <span class="doc-filter-count" id="doc-filter-count"></span>
           </div>
 
@@ -1513,11 +1513,11 @@
           <h2 class="transcript-title" id="drawer-episode-title">Episode Title</h2>
           <div class="transcript-actions-row">
             <button type="button" class="btn-primary" id="transcript-play-btn" title="Play talk from beginning">
-              ▶ Play Talk
+              <span class="material-symbols-outlined ms-inline" aria-hidden="true">play_arrow</span> Play Talk
             </button>
             <button type="button" class="btn-secondary btn-bookmark-action" id="transcript-bookmark-btn" title="Bookmark talk">
               <span class="bookmark-icon-wrap" id="transcript-bookmark-icon">
-                <svg class="bookmark-ribbon-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+                <span class="material-symbols-outlined bookmark-ribbon-icon" aria-hidden="true">bookmark</span>
               </span>
               <span class="bookmark-label" id="transcript-bookmark-label">Bookmark</span>
             </button>
@@ -1536,21 +1536,19 @@
               </div>
             </div>
             <button type="button" class="btn-toggle-toolbar-actions" id="btn-toggle-toolbar-actions" aria-expanded="false" aria-controls="toolbar-actions-group" title="Show transcript actions" aria-label="Show transcript actions">
-              <svg class="toolbar-actions-arrow" viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true">
-                <path d="M2.25 4.25L6 8.25L9.75 4.25H2.25Z"></path>
-              </svg>
+              <span class="material-symbols-outlined toolbar-actions-arrow" aria-hidden="true">keyboard_arrow_down</span>
             </button>
           </div>
 
           <div class="toolbar-actions-group" id="toolbar-actions-group">
             <div class="download-dropdown-wrapper" id="single-talk-dropdown-wrapper">
               <button type="button" class="btn-secondary download-dropdown-btn" id="drawer-download-btn" title="Download transcript in selected format">
-                📥 Download Transcript ▾
+                <span class="material-symbols-outlined ms-inline" aria-hidden="true">download</span> Download Transcript <span class="material-symbols-outlined ms-inline" aria-hidden="true">arrow_drop_down</span>
               </button>
               <div class="download-dropdown-menu" id="drawer-download-menu">
                 <div class="dropdown-menu-header">Export Talk Transcript</div>
                 <button type="button" class="download-option" data-format="md">
-                  <span class="download-opt-icon">📝</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">edit_note</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Markdown</span>
                     <span class="download-opt-desc">Notes with frontmatter & timestamps</span>
@@ -1558,7 +1556,7 @@
                   <span class="download-opt-badge">.md</span>
                 </button>
                 <button type="button" class="download-option" data-format="txt">
-                  <span class="download-opt-icon">📄</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">description</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">Plain Text</span>
                     <span class="download-opt-desc">Clean transcript text with turn timings</span>
@@ -1566,7 +1564,7 @@
                   <span class="download-opt-badge">.txt</span>
                 </button>
                 <button type="button" class="download-option" data-format="srt">
-                  <span class="download-opt-icon">🎬</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">subtitles</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">SubRip Subtitles</span>
                     <span class="download-opt-desc">For VLC, MPV & media players</span>
@@ -1574,7 +1572,7 @@
                   <span class="download-opt-badge">.srt</span>
                 </button>
                 <button type="button" class="download-option" data-format="vtt">
-                  <span class="download-opt-icon">🌐</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">closed_caption</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">WebVTT Captions</span>
                     <span class="download-opt-desc">Standard web caption cues</span>
@@ -1582,7 +1580,7 @@
                   <span class="download-opt-badge">.vtt</span>
                 </button>
                 <button type="button" class="download-option" data-format="json">
-                  <span class="download-opt-icon">📊</span>
+                  <span class="download-opt-icon material-symbols-outlined" aria-hidden="true">data_object</span>
                   <div class="download-opt-text">
                     <span class="download-opt-title">JSON Data</span>
                     <span class="download-opt-desc">Raw structured episode & turn array</span>
@@ -1592,10 +1590,10 @@
               </div>
             </div>
             <a href="#" target="_blank" rel="noopener noreferrer" class="btn-secondary" id="drawer-podbean-link" title="Open episode on Deeper Dhamma Podbean">
-              ↗ Podbean Page
+              <span class="material-symbols-outlined ms-sm" aria-hidden="true">open_in_new</span> Podbean Page
             </a>
             <button type="button" class="btn-secondary" id="drawer-share-btn" title="Copy shareable link to this talk">
-              🔗 Share Talk
+              <span class="material-symbols-outlined ms-sm" aria-hidden="true">link</span> Share Talk
             </button>
           </div>
         </aside>
@@ -1610,7 +1608,7 @@
             <!-- Mobile Mini Ticker Bar (Docked directly above player bar) -->
             <div class="lex-mobile-ticker" id="lex-mobile-ticker">
               <div class="lex-ticker-info" id="lex-ticker-trigger" role="button" tabindex="0" title="Click to expand terms window">
-                <span class="lex-ticker-icon" aria-hidden="true">📖</span>
+                <span class="lex-ticker-icon material-symbols-outlined" aria-hidden="true">menu_book</span>
                 <div class="lex-ticker-text-group">
                   <div class="lex-ticker-headline">
                     <span class="lex-ticker-tag">Current Term:</span>
@@ -1621,27 +1619,27 @@
               </div>
               <button type="button" class="btn-toggle-lex-sheet" id="btn-toggle-lex-sheet" aria-expanded="false" title="Expand terms window">
                 <span class="sheet-count-pill" id="mobile-sheet-count">0</span>
-                <span class="sheet-arrow-icon" id="sheet-arrow-icon">▲</span>
+                <span class="sheet-arrow-icon material-symbols-outlined ms-sm" id="sheet-arrow-icon" aria-hidden="true">keyboard_arrow_up</span>
               </button>
             </div>
 
             <!-- Companion Header -->
             <div class="lex-companion-header" id="lex-companion-header">
               <div class="lex-companion-title-group">
-                <span class="lex-companion-icon" aria-hidden="true">📖</span>
+                <span class="lex-companion-icon material-symbols-outlined" aria-hidden="true">menu_book</span>
                 <h3 class="lex-companion-title">Pali Lexicon</h3>
                 <span class="lex-stack-badge" id="lex-stack-badge">0 terms</span>
               </div>
               <div class="lex-companion-header-actions">
                 <button type="button" class="btn-clear-lex-stack" id="btn-clear-lex-stack" title="Jump to current active term">Active</button>
-                <button type="button" class="btn-close-lex-sheet" id="btn-close-lex-sheet" title="Collapse panel" aria-label="Collapse panel">▼</button>
+                <button type="button" class="btn-close-lex-sheet" id="btn-close-lex-sheet" title="Collapse panel" aria-label="Collapse panel"><span class="material-symbols-outlined ms-sm" aria-hidden="true">keyboard_arrow_down</span></button>
               </div>
             </div>
 
             <!-- Scrollable List of Definitions (Chronological Rolling 5-Term Window) -->
             <div class="lexicon-stack-container" id="transcript-lexicon-stack">
               <div class="lex-stack-empty" id="lex-stack-empty">
-                <div class="empty-icon">🪷</div>
+                <div class="empty-icon material-symbols-outlined" aria-hidden="true">spa</div>
                 <h4>Lexicon Companion</h4>
                 <p>Pali and Buddhist doctrinal terms spoken in this talk appear chronologically here.</p>
                 <p class="empty-hint">Click any term in this list to seek audio to that word, or tap highlighted terms in the transcript.</p>
@@ -1665,7 +1663,7 @@
           </div>
         </div>
         <button type="button" class="btn-bookmark-icon btn-player-bookmark" id="btn-player-bookmark" title="Bookmark current talk" aria-label="Bookmark current talk" style="display: none;">
-          <svg class="bookmark-ribbon-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+          <span class="material-symbols-outlined bookmark-ribbon-icon" aria-hidden="true">bookmark</span>
         </button>
       </div>
 
@@ -1673,10 +1671,7 @@
       <div class="player-controls">
         <div class="player-controls-top-row">
           <button type="button" class="btn-player-settings" id="btn-player-settings" title="Player settings" aria-label="Open player settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="player-settings-view">
-            <svg class="player-settings-gear-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
+            <span class="material-symbols-outlined player-settings-gear-icon" aria-hidden="true">settings</span>
           </button>
 
           <div class="control-buttons">
@@ -1702,7 +1697,7 @@
           </div>
 
           <button type="button" class="btn-player-transcript" id="btn-player-transcript" title="View transcript for actively playing talk" aria-label="View transcript for actively playing talk" style="display: none;">
-            <span class="btn-player-transcript-icon" aria-hidden="true">📜</span>
+            <span class="material-symbols-outlined btn-player-transcript-icon" aria-hidden="true">article</span>
           </button>
         </div>
 
@@ -1723,7 +1718,7 @@
     <div class="player-settings-card" id="player-settings-card">
       <div class="player-settings-header">
         <h3 class="player-settings-title" id="player-settings-title">Player Settings</h3>
-        <button type="button" class="btn-close-player-settings" id="btn-close-player-settings" title="Close player settings" aria-label="Close player settings">✕</button>
+        <button type="button" class="btn-close-player-settings" id="btn-close-player-settings" title="Close player settings" aria-label="Close player settings"><span class="material-symbols-outlined ms-sm" aria-hidden="true">close</span></button>
       </div>
 
       <div class="player-settings-section">
@@ -1747,11 +1742,7 @@
         <div class="volume-control">
           <button type="button" class="vol-btn" id="vol-toggle-btn" title="Mute audio" aria-label="Mute or unmute">
             <span class="vol-icon" id="vol-icon">
-              <svg class="fluent-icon fluent-speaker-high" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M7.99756 23.001L16.6106 26.8308C17.7343 27.3704 19.0356 26.551 19.0356 25.3044V19.0768C20.6809 19.0289 21.9999 17.6801 21.9999 16.0232C21.9999 14.3663 20.6809 13.0175 19.0356 12.9696V6.49639C19.0356 5.25508 17.1704 4.70337 16.0474 5.23141L8.01223 9.0124V9H3.80282C2.80707 9 2 9.84705 2 10.8921V21.1079C2 22.153 2.80707 23 3.80282 23L7.99756 23.001ZM17.0356 7.03194V24.831L9.99756 21.7015L9.99758 10.2885L16.8909 7.04485L16.8926 7.04443C16.9011 7.04219 16.9385 7.03229 17.0069 7.03165C17.0165 7.03156 17.0261 7.03166 17.0356 7.03194Z" fill="currentColor"/>
-                <path d="M24.11 11.0695C23.9694 10.9151 23.8237 10.7676 23.6725 10.6276C23.035 10.0376 22 10.4914 22 11.3601V11.3876C22 11.6595 22.1181 11.9164 22.3175 12.1007C23.3031 13.0139 23.9212 14.3189 23.9212 15.7682C23.9212 17.2176 23.3037 18.5226 22.3175 19.4357C22.1119 19.6257 22 19.8964 22 20.1764C22 21.047 23.0369 21.4976 23.6756 20.9057C23.7419 20.8445 23.8069 20.782 23.8706 20.7176C25.2437 19.3445 25.9762 17.5014 25.9175 15.5514C25.8681 13.8932 25.2256 12.2976 24.11 11.0695Z" fill="currentColor"/>
-                <path d="M23.5063 7.97456C23.195 7.79455 23 7.46518 23 7.1058C23 6.3333 23.8369 5.85705 24.5056 6.24455C27.79 8.14705 30 11.6989 30 15.7683C30 19.8371 27.7906 23.3896 24.505 25.2921C23.8363 25.6796 22.9994 25.2027 22.9994 24.4302C22.9994 24.0714 23.1931 23.7427 23.5038 23.5627C24.1756 23.1739 24.8006 22.6952 25.3638 22.1321C27.0863 20.4096 28.0244 18.1121 27.9994 15.6721C27.9763 13.4202 27.1031 11.2471 25.56 9.60643C24.9475 8.95518 24.2556 8.40893 23.5063 7.97456Z" fill="currentColor"/>
-              </svg>
+              <span class="material-symbols-outlined" aria-hidden="true">volume_up</span>
             </span>
           </button>
           <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1" aria-label="Volume slider">
@@ -1764,7 +1755,7 @@
   <div class="archive-modal-backdrop" id="archive-progress-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="archive-modal-title">
     <div class="archive-modal-card">
       <div class="archive-modal-header">
-        <div class="archive-modal-icon">📦</div>
+        <div class="archive-modal-icon material-symbols-outlined" aria-hidden="true">inventory_2</div>
         <div class="archive-modal-headings">
           <h3 class="archive-modal-title" id="archive-modal-title">Compiling Transcript Archive</h3>
           <p class="archive-modal-subtitle" id="archive-modal-subtitle">Packaging transcripts into ZIP...</p>

@@ -656,11 +656,11 @@
       if (els.browseGrid) {
         els.browseGrid.innerHTML = `
           <div class="empty-state" style="grid-column: 1 / -1;">
-            <div class="empty-icon">⚠️</div>
+            <div class="empty-icon material-symbols-outlined" aria-hidden="true">warning</div>
             <h3>Failed to load audio archive index</h3>
             <p style="color: var(--text-muted);">${escapeHtml(err.message || String(err))}</p>
             <button type="button" class="btn-primary" style="margin-top: 1rem;" onclick="window.resetDeeperDhammaCache()">
-              🔄 Reset Cache & Reload
+              <span class="material-symbols-outlined ms-inline" aria-hidden="true">refresh</span> Reset Cache & Reload
             </button>
           </div>
         `;
@@ -692,16 +692,16 @@
         els.searchEmptyHeading.textContent = `Search ${transcribedFormatted} English Theravada Teachings`;
       }
       if (els.aboutTalksChip && transcribedCount > 0) {
-        els.aboutTalksChip.innerHTML = `<span class="chip-icon">🪷</span> ${transcribedFormatted} English Monastic Talks`;
+        els.aboutTalksChip.innerHTML = `<span class="chip-icon material-symbols-outlined ms-sm" aria-hidden="true">spa</span> ${transcribedFormatted} English Monastic Talks`;
       }
       if (els.notesChipTranscribed && transcribedCount > 0) {
-        els.notesChipTranscribed.innerHTML = `<span class="chip-icon">✓</span> ${transcribedFormatted} Unique Transcribed Talks`;
+        els.notesChipTranscribed.innerHTML = `<span class="chip-icon material-symbols-outlined ms-sm" aria-hidden="true">check</span> ${transcribedFormatted} Unique Transcribed Talks`;
       }
       if (els.notesChipHours && data.transcribed_hours) {
-        els.notesChipHours.innerHTML = `<span class="chip-icon">⏱️</span> ${transcribedHoursFormatted} Audio Hours`;
+        els.notesChipHours.innerHTML = `<span class="chip-icon material-symbols-outlined ms-sm" aria-hidden="true">schedule</span> ${transcribedHoursFormatted} Audio Hours`;
       }
       if (els.notesChipSegments && data.total_segments) {
-        els.notesChipSegments.innerHTML = `<span class="chip-icon">💬</span> ${totalSegmentsFormatted} Spoken Turns`;
+        els.notesChipSegments.innerHTML = `<span class="chip-icon material-symbols-outlined ms-sm" aria-hidden="true">forum</span> ${totalSegmentsFormatted} Spoken Turns`;
       }
       if (els.notesTblTranscribed && transcribedCount > 0) {
         els.notesTblTranscribed.textContent = transcribedFormatted;
@@ -735,7 +735,7 @@
       populateBrowseFilterFacets(data);
 
       if (els.btnDownloadAllArchive && data.transcribed_episodes) {
-        els.btnDownloadAllArchive.innerHTML = `📦 Download All Transcripts (${data.transcribed_episodes}) ▾`;
+        els.btnDownloadAllArchive.innerHTML = `<span class="material-symbols-outlined ms-inline" aria-hidden="true">inventory_2</span> Download All Transcripts (${data.transcribed_episodes}) <span class="material-symbols-outlined ms-inline" aria-hidden="true">arrow_drop_down</span>`;
       }
     } catch (err) {
       console.error('Failed to load archive stats:', err);
@@ -1615,10 +1615,10 @@
       !els.nativeAudio.paused;
 
     if (isPlayingThis) {
-      els.transcriptPlayBtn.innerHTML = '⏸ Pause Talk';
+      els.transcriptPlayBtn.innerHTML = '<span class="material-symbols-outlined ms-inline" aria-hidden="true">pause</span> Pause Talk';
       els.transcriptPlayBtn.title = 'Pause playback';
     } else {
-      els.transcriptPlayBtn.innerHTML = '▶ Play Talk';
+      els.transcriptPlayBtn.innerHTML = '<span class="material-symbols-outlined ms-inline" aria-hidden="true">play_arrow</span> Play Talk';
       els.transcriptPlayBtn.title = 'Play talk from beginning';
     }
   }
@@ -1724,10 +1724,10 @@
                 </span>
                 <div class="turn-actions">
                   <button type="button" class="turn-time-btn" data-start="${seg.start_sec}" title="Seek audio to this turn">
-                    ▶ ${startStr}
+                    <span class="material-symbols-outlined ms-sm" aria-hidden="true">play_arrow</span> ${startStr}
                   </button>
                   <button type="button" class="turn-share-btn" data-turn-idx="${tIdx}" data-start="${seg.start_sec}" title="Copy shareable link to this moment">
-                    🔗
+                    <span class="material-symbols-outlined ms-sm" aria-hidden="true">link</span>
                   </button>
                 </div>
               </div>
@@ -1906,11 +1906,11 @@
       if (els.drawerTurns) {
         els.drawerTurns.innerHTML = `
           <div class="empty-state">
-            <div class="empty-icon">⚠️</div>
+            <div class="empty-icon material-symbols-outlined" aria-hidden="true">warning</div>
             <p>Failed to load transcript.</p>
             <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">${escapeHtml(err.message || String(err))}</p>
             <button type="button" class="btn-primary" style="margin-top: 1rem;" onclick="window.resetDeeperDhammaCache()">
-              🔄 Reset Cache & Reload
+              <span class="material-symbols-outlined ms-inline" aria-hidden="true">refresh</span> Reset Cache & Reload
             </button>
           </div>
         `;

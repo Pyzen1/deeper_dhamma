@@ -45,18 +45,6 @@ const CORE_ASSETS = [
   './icons/icon_192.png',
   './icons/icon_512.png',
   './icons/apple_touch_icon.png',
-  './icons/fluent_play.svg',
-  './icons/fluent_pause.svg',
-  './icons/fluent_play_pause.svg',
-  './icons/fluent_stop.svg',
-  './icons/fluent_rewind.svg',
-  './icons/fluent_fast_forward.svg',
-  './icons/fluent_skip_back.svg',
-  './icons/fluent_skip_fwd.svg',
-  './icons/fluent_speaker_high.svg',
-  './icons/fluent_speaker_low.svg',
-  './icons/fluent_speaker_mute.svg',
-  './icons/fluent_mic.svg',
   './fonts/material_symbols_outlined.woff2'
 ];
 

@@ -11,7 +11,6 @@
     els,
     dbService,
     BookmarkStore,
-    FLUENT_ICONS,
     clampFloatingPanelToViewport,
     escapeHtml,
     formatSeconds,
@@ -340,15 +339,21 @@
     // Volume handling
     function updateVolumeIcon(vol) {
       if (els.volIcon) {
+        let iconName = 'volume_up';
         if (vol === 0) {
-          els.volIcon.innerHTML = FLUENT_ICONS.speakerMute;
+          iconName = 'volume_off';
           if (els.volToggleBtn) els.volToggleBtn.title = 'Unmute audio';
         } else if (vol < 0.5) {
-          els.volIcon.innerHTML = FLUENT_ICONS.speakerLow;
+          iconName = 'volume_down';
           if (els.volToggleBtn) els.volToggleBtn.title = 'Mute audio';
         } else {
-          els.volIcon.innerHTML = FLUENT_ICONS.speakerHigh;
           if (els.volToggleBtn) els.volToggleBtn.title = 'Mute audio';
+        }
+        const iconSpan = els.volIcon.querySelector('.material-symbols-outlined');
+        if (iconSpan) {
+          iconSpan.textContent = iconName;
+        } else {
+          els.volIcon.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true">${iconName}</span>`;
         }
       }
       syncPlayerSettingsIndicators();

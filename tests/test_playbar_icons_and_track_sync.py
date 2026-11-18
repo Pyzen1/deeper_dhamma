@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = PROJECT_ROOT / "deeper_dhamma" / "web"
 STATIC_DIR = WEB_DIR / "static"
 INDEX_HTML = WEB_DIR / "views" / "index.html"
+STYLE_CSS = STATIC_DIR / "style.css"
 STYLE_PLAYER_CSS = STATIC_DIR / "style_player.css"
 AUDIO_PLAYER_JS = STATIC_DIR / "audio_player.js"
 SPEAKER_PALETTE_JS = STATIC_DIR / "speaker_palette.js"
@@ -44,27 +45,42 @@ def test_self_hosted_font_fallback_exists_and_is_precached():
     assert FONT_WOFF2.exists(), "Self-hosted material_symbols_outlined.woff2 must exist"
     assert FONT_WOFF2.stat().st_size > 100_000
 
+    style_css = STYLE_CSS.read_text(encoding="utf-8")
+    assert "font-family: 'Material Symbols Outlined Fallback'" in style_css
+    assert "url('./fonts/material_symbols_outlined.woff2')" in style_css
+    assert "font-family: 'Material Symbols Outlined', 'Material Symbols Outlined Fallback'" in style_css
+
     css = STYLE_PLAYER_CSS.read_text(encoding="utf-8")
-    assert "font-family: 'Material Symbols Outlined Fallback'" in css
-    assert "url('./fonts/material_symbols_outlined.woff2')" in css
-    assert "font-family: 'Material Symbols Outlined', 'Material Symbols Outlined Fallback'" in css
     assert ".btn-ctl .material-symbols-outlined" in css
     assert ".btn-ctl-main .material-symbols-outlined" in css
+    assert ".vol-icon .material-symbols-outlined" in css
 
     sw = SVC_WORKER_JS.read_text(encoding="utf-8")
     assert "'./fonts/material_symbols_outlined.woff2'" in sw
 
 
-def test_legacy_playbar_fluent_icons_removed_from_js_and_css():
+def test_all_fluent_icons_removed_from_web_code_and_assets():
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert "fluent-" not in html
+    assert 'id="vol-icon"' in html
+    assert ">volume_up</span>" in html
+    assert ">settings</span>" in html
+    assert ">keyboard_arrow_down</span>" in html
+
     palette_js = SPEAKER_PALETTE_JS.read_text(encoding="utf-8")
-    for removed_key in ("play:", "pause:", "rewind:", "fastForward:", "skipBack:", "skipFwd:"):
-        assert removed_key not in palette_js
-    for kept_key in ("speakerHigh:", "speakerLow:", "speakerMute:"):
-        assert kept_key in palette_js
+    assert "FLUENT_ICONS" not in palette_js
+    assert "fluent-" not in palette_js
 
     css = STYLE_PLAYER_CSS.read_text(encoding="utf-8")
     assert ".fluent-frame" not in css
     assert ".fluent-symbol" not in css
+    assert ".fluent-icon" not in css
+
+    sw = SVC_WORKER_JS.read_text(encoding="utf-8")
+    assert "fluent_" not in sw
+
+    fluent_svgs = list((STATIC_DIR / "icons").glob("fluent_*.svg"))
+    assert fluent_svgs == [], f"Legacy fluent SVGs should be removed: {fluent_svgs}"
 
 
 def test_audio_player_toggles_material_symbol_and_syncs_transcript_on_track_change():
@@ -72,8 +88,10 @@ def test_audio_player_toggles_material_symbol_and_syncs_transcript_on_track_chan
 
     assert "iconSpan.textContent = 'pause'" in js
     assert "iconSpan.textContent = 'play_arrow'" in js
-    assert "FLUENT_ICONS.play" not in js
-    assert "FLUENT_ICONS.pause" not in js
+    assert "FLUENT_ICONS" not in js
+    assert "'volume_off'" in js
+    assert "'volume_down'" in js
+    assert "'volume_up'" in js
 
     assert "function switchToCatalogEpisode(ep)" in js
     assert "state.activeTab === 'transcript-view'" in js
