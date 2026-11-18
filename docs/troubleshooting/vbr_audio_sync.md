@@ -70,11 +70,17 @@ Previously, `StreamSeekCalibrator` pre-warped segment and word timestamps using 
 - Because pre-warped timestamps compressed `5.18s` of real speech (`216.30s .. 221.48s`) into `3.78s` of `Xing` seek time (`203.14s .. 206.92s`), word highlighting drifted out of sync with the speaker's voice during continuous playback even in Chromium.
 - Additionally, `ffprobe` previously used `-read_intervals %+3600`, truncating VBR calibration after 60 minutes on talks longer than 1 hour (`pb27802310` is 107 minutes).
 
+#### Cause C: Chromium `Xing` Cold/Warm Seek Divergence (`pb28769672`) & Click-Seek Race Contention
+Even on Chromium (`FFmpegDemuxer`), streaming raw `Xing` VBR MP3s via HTTP Range requests (`streamMode = 'cdn'`) proved unreliable on VBR talks like `pb28769672` (*2026 Rains Retreat (7/12) | Getting Out of a Rut | Ajahn Brahmali*):
+- Cold seeks diverged from interpolated `xingSeekTimes` by `-3.4s` to `+6.0s` (for example `-3.37s` / 12 words ahead at `tw-84`, `+3.88s` / 10 words behind at `tw-2500`, and `-4.61s` / 15 words ahead at `tw-3000`) due to coarse 1% `TOC` quantization and `FFmpeg` block alignment.
+- Once byte ranges around a position were cached locally in the element, subsequent warm seeks resolved through `FFmpeg`'s internal packet `AVIndex` (`~0s` error), while `WordSync.seekOffset` still applied the cold `Xing` delta (`+4.6s` / `-4.5s`).
+- In addition, rapid word/companion clicks could let an earlier async `waitForPatchedBlobUrl()` promise overwrite a newer click, `jumpToCompanionTerm()` called `WordSync.clearHighlights()` after `playAudioSegment()` and competed with 60fps `updateTeleprompter()` scrolling, and `updateActiveCompanionTerm()` re-evaluated companion highlights against the `-0.50s` seek lead-in window, flickering to the preceding term.
+
 ---
 
 ## 3. Architectural Solution (100% Serverless Static Web Application)
 
-Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` hosted on GitHub Pages, Cloudflare Pages, or S3) streaming audio directly from Podbean CDN (`https://mcdn.podbean.com/...`) with **zero Python backend**, the entire VBR synchronization engine operates purely in client-side JavaScript (`word_sync.js`) powered by the binary `VBR1` trailer stored in the `episode_words` SQLite table in the sharded `words_1..4.db.gz` SQLite WASM databases (originally consolidated in `dhamma_web.db`):
+Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` hosted on GitHub Pages, Cloudflare Pages, or S3) streaming audio directly from Podbean CDN (`https://mcdn.podbean.com/...`) with **zero Python backend**, the entire VBR synchronization engine operates purely in client-side JavaScript ([word_sync.js](file:///c:/dev/deeper_dhamma/deeper_dhamma/web/static/word_sync.js) and [app.js](file:///c:/dev/deeper_dhamma/deeper_dhamma/web/static/app.js)) powered by the binary `VBR1` trailer stored in the `episode_words` SQLite table in the sharded `words_1..4.db.gz` SQLite WASM databases (originally consolidated in `dhamma_web.db`):
 
 ```text
 +-----------------------------------------------------------------------------+
@@ -82,38 +88,39 @@ Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` h
 |    - Stores true physical 44.1 kHz PCM timestamps in `dhamma_transcripts.db`|
 |      (`speech_segments` and `episode_words` binary blob with `VBR1` trailer).|
 |    - Appends compact `VBR1` trailer (`pcm_ms`, `audio_byte_offset`, `toc`)  |
-|      for VBR episodes across 100% of talk duration (~25.8 KB).              |
+|      for all VBR episodes across 100% of talk duration (397 VBR1 talks).    |
 +-----------------------------------------------------------------------------+
                                        |
                                        v
 +-----------------------------------------------------------------------------+
 | 2. Client-Side Browser Engine (`WordSync` in `word_sync.js`)                |
 |    - Queries `episode_words` from SQLite WASM and parses `VBR1` in < 5ms.   |
-|    - Chromium / Safari (`streamMode = 'cdn'`):                              |
-|      Streams `media_url` directly from Podbean CDN via HTTP Range requests  |
-|      and maps `targetPhys` -> `xingSeekTimes` (`215.80s -> 202.64s`).       |
-|    - Mozilla Firefox (`streamMode = 'patched_blob'`):                       |
-|      Progressively streams `media_url` from Podbean CDN via CORS `fetch()`, |
-|      patches the 8-byte `Xing` header at `id3_len + 36` to                  |
-|      `Info\x00\x00\x00\x03` in client-side `Uint8Array` memory, and serves  |
-|      a zero-copy progressive `Blob` URL (`linearSeekTimes`, `183.40s`)      |
-|      with zero dead zones and zero backend server dependencies.             |
+|    - Universal VBR Stream Neutralization (`streamMode = 'patched_blob'`):    |
+|      Across Chromium, Firefox, and Safari, progressively fetches `media_url`|
+|      from Podbean CDN via CORS `fetch()`, patches the 8-byte `Xing` header  |
+|      to `Info\x00\x00\x00\x03` in client-side `Uint8Array` memory (3-talk   |
+|      LRU cache with 512 KB read-ahead), and serves a progressive `Blob` URL |
+|      using deterministic `linearSeekTimes` (`±0.25s` accuracy, cold/warm).  |
+|    - Falls back to `streamMode = 'cdn'` only if CORS fetch fails.           |
 +-----------------------------------------------------------------------------+
                                        |
                                        v
 +-----------------------------------------------------------------------------+
-| 3. Constant-Offset 1:1 Playback Clock (`WordSync` in `word_sync.js`)        |
-|    - On seek to physical time `targetPhys`:                                 |
-|      `streamSeek = WordSync.prepareSeek(targetPhys)`                        |
-|      `seekOffset = targetPhys - streamSeek`                                 |
-|    - During 60fps playback loop (`WordSync.update(audio.currentTime)`):     |
-|      `physTime = audio.currentTime + seekOffset`                            |
-|    - Advances at 1.000s per 1.000s of decoded PCM audio with zero drift.    |
+| 3. Constant-Offset 1:1 Playback Clock & Click-Race Guards (`word_sync.js`)  |
+|    - `state._audioSeekSeq` discards stale async seek/fetch completions.       |
+|    - `WordSync.setActiveWordElement()` updates highlight + index atomically.|
+|    - `_programmaticScrollUntil` yields 60fps `updateTeleprompter()` while   |
+|      `scrollElementIntoReadingZone(..., 'smooth')` settles companion jumps. |
+|    - `syncProgress()` ignores `audio.seeking` / `_awaitingInitialSeek`, and |
+|      `updateActiveCompanionTerm()` honors `_seekTargetWordTime` lead-in.    |
+|    - On seek to `targetPhys`: `streamSeek = WordSync.prepareSeek(targetPhys)`|
+|      establishes `seekOffset = targetPhys - streamSeek`, keeping `physTime` |
+|      = `audio.currentTime + seekOffset` locked 1:1 to 44.1 kHz PCM audio.   |
 +-----------------------------------------------------------------------------+
 ```
 
 ### 3.1 Binary `VBR1` Trailer Specification (`episode_words.words_blob`)
-For CBR episodes, the binary blob contains only the header and word array (`4 + 6 * N` bytes). For VBR episodes (`pb27802310`, `pb27940021`, `pb28867656`), a `VBR1` trailer is appended immediately at byte offset `4 + 6 * N`:
+For CBR episodes, the binary blob contains only the header and word array (`4 + 6 * N` bytes). For VBR episodes (`397` talks including `pb27802310`, `pb27940021`, `pb28867656`, `pb28769672`), a `VBR1` trailer is appended immediately at byte offset `4 + 6 * N`:
 
 | Offset (rel) | Type | Field | Description |
 | :--- | :--- | :--- | :--- |

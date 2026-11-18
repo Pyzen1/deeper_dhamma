@@ -6,14 +6,11 @@
  *   - Section 1: 6 bytes/word `[uint32 start_ms, uint16 duration_ms]` in true 44.1 kHz PCM time.
  *   - Section 2: Optional `VBR1` seek calibration trailer containing `(pcm_ms, audio_byte_offset)`
  *     samples and the 100-byte `Xing` TOC across the full duration of the talk.
- * - Cross-Browser Direct Podbean CDN Streaming:
- *   - Chromium (Chrome / Edge / Brave / Safari): Streams directly from Podbean CDN via HTTP Range
- *     requests, translating physical timestamps via `xingSeekTimes` from the `.bin` `VBR1` trailer.
- *   - Mozilla Firefox (Gecko `MP3TrackDemuxer`): Gecko's raw `Xing` TOC demuxer uses an un-interpolated
- *     step function with 14-second dead zones at low-bitrate bucket boundaries. For VBR episodes in
- *     Firefox, `WordSync` progressively streams the Podbean CDN MP3 via CORS `fetch()`, patches the
- *     8-byte `Xing` header to `Info` (`flags = 3`) in client-side `Uint8Array` memory, and serves a
- *     zero-copy progressive `Blob` URL (`linearSeekTimes`) with zero backend dependencies.
+ * - Cross-Browser Direct Podbean CDN & VBR Neutralized Streaming:
+ *   - For VBR episodes (`VBR1` trailer), `WordSync` progressively fetches the Podbean CDN MP3 via
+ *     CORS `fetch()`, patches the 8-byte `Xing` header to `Info` (`flags = 3`) in client-side
+ *     `Uint8Array` memory, and serves a zero-copy progressive `Blob` URL (`streamMode = 'patched_blob'`,
+ *     `linearSeekTimes`) across Chromium, Firefox, and Safari with zero backend dependencies.
  *   - Playback Clock Lock: Once any seek lands at physical time `P`, the browser's 44.1 kHz PCM decoder
  *     advances `audio.currentTime` at `1.000s` per `1.000s` of physical speech. Tracking
  *     `physTime = audio.currentTime + seekOffset` eliminates intra-turn VBR bitrate drift.
@@ -65,6 +62,7 @@
     _rafId: null,
     _boundAudio: null,
     _userInteractedAt: 0,
+    _programmaticScrollUntil: 0,
     _teleprompterLine: null,
 
     /**
@@ -87,6 +85,7 @@
       if (evt && evt.target && evt.target.closest && evt.target.closest('#transcript-lexicon-companion')) {
         return;
       }
+      this._programmaticScrollUntil = 0;
       this._userInteractedAt = performance.now();
     },
 
@@ -283,7 +282,9 @@
       const onSeeked = () => {
         this._lastSpokenWordId = null;
         if (this._pendingProgrammaticSeek) {
-          this._pendingProgrammaticSeek = false;
+          if (!audio.seeking) {
+            this._pendingProgrammaticSeek = false;
+          }
         } else if (this.vbrData) {
           // External/native seek not initiated via prepareSeek: infer physical offset
           const rawT = audio.currentTime;
@@ -373,14 +374,35 @@
     },
 
     /**
+     * Moves active word highlight cleanly to `el` (or clears when `el` is null)
+     * while keeping `activeWordIdx` and `_lastSpokenWordId` synchronized.
+     */
+    setActiveWordElement: function (el, wordIdx) {
+      if (this.activeWordEl && this.activeWordEl !== el) {
+        this.activeWordEl.classList.remove('active-word');
+      }
+      if (el) {
+        el.classList.add('active-word');
+        this.activeWordEl = el;
+        let resolvedIdx = typeof wordIdx === 'number' && !isNaN(wordIdx) ? wordIdx : -1;
+        if (resolvedIdx < 0 && el.id && el.id.startsWith('tw-')) {
+          const parsed = parseInt(el.id.slice(3), 10);
+          if (!isNaN(parsed)) resolvedIdx = parsed;
+        }
+        this.activeWordIdx = resolvedIdx;
+        this._lastSpokenWordId = el.id || null;
+      } else {
+        this.activeWordEl = null;
+        this.activeWordIdx = -1;
+        this._lastSpokenWordId = null;
+      }
+    },
+
+    /**
      * Clears active highlights.
      */
     clearHighlights: function () {
-      if (this.activeWordEl) {
-        this.activeWordEl.classList.remove('active-word');
-        this.activeWordEl = null;
-      }
-      this.activeWordIdx = -1;
+      this.setActiveWordElement(null);
     },
 
     /**
@@ -466,9 +488,9 @@
       this.metrics.loadMs = Math.round(performance.now() - t0);
       this.metrics.wordCount = this.words.length;
 
-      // In Firefox, proactively start progressive VBR stream buffering & in-memory Xing->Info patching
-      if (this.isFirefox && this.vbrData && episode.media_url) {
-        this.ensureFirefoxPatchedStream(episode.media_url);
+      // Proactively start progressive VBR stream buffering & in-memory Xing->Info patching
+      if (this.vbrData && episode.media_url) {
+        this.ensurePatchedStream(episode.media_url);
       }
 
       this.updateUI();
@@ -692,16 +714,42 @@
      * progressive zero-copy `Blob` URLs so Firefox seeks linearly with zero dead zones
      * on any static web host without any backend server.
      */
-    ensureFirefoxPatchedStream: function (mediaUrl) {
+    /**
+     * Progressively fetches `mediaUrl` via CORS and patches its `Xing` header to `Info`
+     * (`flags = 3`) in client-side RAM so all browsers (Chromium, Firefox, Safari) seek cleanly
+     * via deterministic linear byte offsets without coarse `Xing TOC` quantization drift.
+     */
+    ensurePatchedStream: function (mediaUrl) {
       if (!mediaUrl || !this.vbrData) return null;
       if (this._ffStreams[mediaUrl]) {
         return this._ffStreams[mediaUrl];
       }
 
+      // Evict oldest stream entries if more than 3 VBR talks are cached in memory
+      const existingKeys = Object.keys(this._ffStreams);
+      if (existingKeys.length >= 3) {
+        const oldestKey = existingKeys[0];
+        const evicted = this._ffStreams[oldestKey];
+        delete this._ffStreams[oldestKey];
+        if (evicted) {
+          if (evicted.controller) {
+            try { evicted.controller.abort(); } catch (_) {}
+          }
+          if (evicted.blobUrl) {
+            const staleUrl = evicted.blobUrl;
+            setTimeout(() => {
+              try { URL.revokeObjectURL(staleUrl); } catch (_) {}
+            }, 5000);
+          }
+        }
+      }
+
       const id3Len = this.vbrData.id3Len || 0;
       const minHeaderBytes = id3Len + 1024;
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       const state = {
         mediaUrl,
+        controller,
         chunks: [],
         headerBufs: [],
         fetchedBytes: 0,
@@ -726,7 +774,7 @@
 
       (async () => {
         try {
-          const res = await fetch(mediaUrl);
+          const res = await fetch(mediaUrl, controller ? { signal: controller.signal } : undefined);
           if (!res.ok || !res.body) {
             state.failed = true;
             notifyWaiters();
@@ -778,13 +826,20 @@
             }
           }
         } catch (err) {
-          console.warn('[WordSync] Firefox progressive stream fetch fallback:', err);
+          if (!err || err.name !== 'AbortError') {
+            console.warn('[WordSync] Progressive patched stream fetch fallback:', err);
+          }
           state.failed = true;
           notifyWaiters();
         }
       })();
 
       return state;
+    },
+
+    /** Backward-compatible alias for Firefox stream helper callers. */
+    ensureFirefoxPatchedStream: function (mediaUrl) {
+      return this.ensurePatchedStream(mediaUrl);
     },
 
     /**
@@ -797,10 +852,10 @@
         this.vbrData.pcmTimes,
         this.vbrData.byteOffsets
       );
-      // Include ID3 header + target audio byte offset + 128 KB read-ahead (~10s of audio)
+      // Include ID3 header + target audio byte offset + 512 KB read-ahead (~45s of audio)
       return Math.min(
         this.vbrData.id3Len + this.vbrData.bytesLen,
-        Math.ceil(this.vbrData.id3Len + audioByteOff + 131072)
+        Math.ceil(this.vbrData.id3Len + audioByteOff + 524288)
       );
     },
 
@@ -808,9 +863,9 @@
      * Synchronously returns a patched `blob:` URL if sufficient bytes are already buffered in RAM,
      * or `null` if still buffering.
      */
-    getReadyFirefoxBlobUrl: function (mediaUrl, targetPhysicalSec) {
-      if (!this.isFirefox || !this.vbrData || !mediaUrl) return null;
-      const state = this.ensureFirefoxPatchedStream(mediaUrl);
+    getReadyPatchedBlobUrl: function (mediaUrl, targetPhysicalSec) {
+      if (!this.vbrData || !mediaUrl) return null;
+      const state = this.ensurePatchedStream(mediaUrl);
       if (!state || state.failed || !state.patched) return null;
 
       const reqBytes = this.getRequiredBytesForTime(targetPhysicalSec);
@@ -836,16 +891,21 @@
       return state.blobUrl;
     },
 
+    /** Backward-compatible alias for Firefox Blob getter callers. */
+    getReadyFirefoxBlobUrl: function (mediaUrl, targetPhysicalSec) {
+      return this.getReadyPatchedBlobUrl(mediaUrl, targetPhysicalSec);
+    },
+
     /**
-     * Waits until the progressive Firefox stream has buffered enough bytes to cover
+     * Waits until the progressive patched stream has buffered enough bytes to cover
      * `targetPhysicalSec` and returns the patched `blob:` URL (or `null` on failure).
      */
-    waitForFirefoxBlobUrl: async function (mediaUrl, targetPhysicalSec) {
-      if (!this.isFirefox || !this.vbrData || !mediaUrl) return null;
-      const readyUrl = this.getReadyFirefoxBlobUrl(mediaUrl, targetPhysicalSec);
+    waitForPatchedBlobUrl: async function (mediaUrl, targetPhysicalSec) {
+      if (!this.vbrData || !mediaUrl) return null;
+      const readyUrl = this.getReadyPatchedBlobUrl(mediaUrl, targetPhysicalSec);
       if (readyUrl) return readyUrl;
 
-      const state = this.ensureFirefoxPatchedStream(mediaUrl);
+      const state = this.ensurePatchedStream(mediaUrl);
       if (!state || state.failed) return null;
 
       const reqBytes = this.getRequiredBytesForTime(targetPhysicalSec);
@@ -857,7 +917,12 @@
         }
       });
 
-      return this.getReadyFirefoxBlobUrl(mediaUrl, targetPhysicalSec);
+      return this.getReadyPatchedBlobUrl(mediaUrl, targetPhysicalSec);
+    },
+
+    /** Backward-compatible alias for Firefox Blob waiter callers. */
+    waitForFirefoxBlobUrl: async function (mediaUrl, targetPhysicalSec) {
+      return this.waitForPatchedBlobUrl(mediaUrl, targetPhysicalSec);
     },
 
     /**
@@ -903,6 +968,7 @@
       this._seekTargetWordTime = typeof targetWordStartSec === 'number' ? targetWordStartSec : null;
       this._pendingProgrammaticSeek = true;
       this._lastSpokenWordId = null;
+      this._teleprompterLine = null;
 
       if (clampedPhys <= 0.01 || !this.vbrData) {
         this.seekOffset = 0.0;
@@ -1311,8 +1377,9 @@
       const view = document.getElementById('transcript-view');
       if (view && !view.classList.contains('active')) return;
 
-      // If user recently scrolled manually (wheel or touch), pause teleprompter for 2.5s
-      if (performance.now() - this._userInteractedAt < 2500) return;
+      // Pause teleprompter briefly during an explicit jump scroll or for 2.5s after manual user scroll
+      const now = performance.now();
+      if (now < this._programmaticScrollUntil || now - this._userInteractedAt < 2500) return;
 
       const sc = this.getScrollContainer();
       const isShell = Boolean(sc && sc !== window);
@@ -1339,9 +1406,17 @@
         const compStyle = typeof window !== 'undefined' && window.getComputedStyle
           ? window.getComputedStyle(companionBar)
           : null;
+        const tickerEl = document.getElementById('lex-mobile-ticker');
+        const tickerStyle = tickerEl && typeof window !== 'undefined' && window.getComputedStyle
+          ? window.getComputedStyle(tickerEl)
+          : null;
         const isBottomSheet = !compStyle || (
           compStyle.display !== 'none' &&
-          (compStyle.position === 'fixed' || (isShell && viewportWidth <= 1024))
+          (
+            (tickerStyle && tickerStyle.display !== 'none') ||
+            compStyle.position === 'fixed' ||
+            (isShell && viewportWidth <= 1100)
+          )
         );
         if (isBottomSheet) {
           const compRect = companionBar.getBoundingClientRect();

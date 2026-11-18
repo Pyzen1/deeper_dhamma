@@ -77,6 +77,7 @@
       isExpandedMobile: false,
       loadedOnce: false,
     },
+    _audioSeekSeq: 0,
     documents: {
       activeDocId: 1,
       cachedDocs: {},
@@ -2405,6 +2406,7 @@
             title: ep.title,
             teacher: ep.primary_display,
             start_sec: start,
+            word_id: wSpan.id,
           });
           if (wSpan.classList.contains('pali-term') && wSpan.dataset.pali) {
             handleSpokenPaliTerm(wSpan.dataset.pali, null, { userClicked: true, startSec: start, wordId: wSpan.id });
@@ -5910,6 +5912,15 @@
     }
   }
 
+  function isCompanionBottomSheet() {
+    if (!els.lexCompanion) return false;
+    if (els.lexMobileTicker && window.getComputedStyle(els.lexMobileTicker).display !== 'none') {
+      return true;
+    }
+    const viewportW = document.documentElement.clientWidth || window.innerWidth;
+    return viewportW <= 1100;
+  }
+
   function scrollElementIntoReadingZone(el, behavior = 'auto') {
     if (!el) return;
     const sc = getScrollContainer();
@@ -5927,12 +5938,17 @@
     const companionBar = document.getElementById('transcript-lexicon-companion');
     if (companionBar) {
       const compStyle = window.getComputedStyle(companionBar);
-      const viewportW = document.documentElement.clientWidth || window.innerWidth;
-      const isBottomSheet = compStyle.position === 'fixed' || (sc !== window && viewportW <= 1024);
-      if (compStyle.display !== 'none' && isBottomSheet) {
-        const compRect = companionBar.getBoundingClientRect();
-        if (compRect.height > 0) {
-          bottomLimit = Math.min(bottomLimit, compRect.top);
+      if (compStyle.display !== 'none' && isCompanionBottomSheet()) {
+        if (!companionBar.classList.contains('is-expanded') && els.lexMobileTicker) {
+          const tickerRect = els.lexMobileTicker.getBoundingClientRect();
+          const barH = tickerRect.height > 0 ? tickerRect.height + 12 : 52;
+          const pTop = playerBar ? playerBar.getBoundingClientRect().top : bottomLimit;
+          bottomLimit = Math.min(bottomLimit, Math.max(toolbarBottom + 80, pTop - barH));
+        } else {
+          const compRect = companionBar.getBoundingClientRect();
+          if (compRect.height > 0) {
+            bottomLimit = Math.min(bottomLimit, compRect.top);
+          }
         }
       }
     }
@@ -5948,8 +5964,30 @@
     const terms = state.lexCompanion.allTerms;
     if (!terms || !terms[idx]) return;
     const term = terms[idx];
+    const isSmallScreen = isCompanionBottomSheet();
 
-    // 1. Seek audio to term's start time
+    // 1. Highlight this card in companion and minimize bottom sheet on small/medium screens
+    //    before computing the unobstructed reading zone and scrolling to the term.
+    setActiveCompanionTerm(idx, { scrollCompanion: !isSmallScreen });
+    if (isSmallScreen) {
+      toggleMobileLexSheet(false);
+    }
+
+    // 2. Resolve target word/turn and temporarily yield teleprompter to smooth jump scroll
+    let scrollTarget = term.wordId ? document.getElementById(term.wordId) : null;
+    if (!scrollTarget) {
+      scrollTarget = document.getElementById(`turn-${term.turnIdx}`);
+    }
+    if (window.WordSync) {
+      window.WordSync._userInteractedAt = 0;
+      window.WordSync._teleprompterLine = null;
+      window.WordSync._programmaticScrollUntil = scrollTarget ? (performance.now() + 500) : 0;
+      if (scrollTarget && term.wordId && scrollTarget.classList.contains('transcript-word')) {
+        window.WordSync.setActiveWordElement(scrollTarget);
+      }
+    }
+
+    // 3. Seek audio to term's start time
     if (state.currentEpisode) {
       playAudioSegment({
         episode_id: state.currentEpisode.id,
@@ -5957,38 +5995,18 @@
         title: state.currentEpisode.title,
         teacher: state.currentEpisode.primary_display,
         start_sec: term.startSec,
+        word_id: term.wordId || null,
       });
     }
 
-    // 2. Scroll transcript cleanly to spoken word or turn
-    let scrollTarget = null;
-    if (term.wordId) {
-      scrollTarget = document.getElementById(term.wordId);
-    }
-    if (!scrollTarget) {
-      scrollTarget = document.getElementById(`turn-${term.turnIdx}`);
-    }
-
+    // 4. Scroll transcript cleanly to spoken word or turn without teleprompter contention
     if (scrollTarget) {
-      if (window.WordSync) {
-        window.WordSync._userInteractedAt = 0;
-        window.WordSync._teleprompterLine = null;
-      }
       scrollElementIntoReadingZone(scrollTarget, 'smooth');
-      if (term.wordId && scrollTarget.classList.contains('transcript-word')) {
-        if (window.WordSync) {
-          window.WordSync.clearHighlights();
-          scrollTarget.classList.add('active-word');
-          window.WordSync.activeWordEl = scrollTarget;
-        }
-      } else {
+      if (!(term.wordId && scrollTarget.classList.contains('transcript-word'))) {
         scrollTarget.classList.add('target-turn-flash');
         setTimeout(() => scrollTarget.classList.remove('target-turn-flash'), 2500);
       }
     }
-
-    // 3. Highlight this card in companion (scrolling only the companion stack)
-    setActiveCompanionTerm(idx, { scrollCompanion: true });
   }
 
   function setActiveCompanionTerm(idx, options = {}) {
@@ -6030,15 +6048,25 @@
     const terms = state.lexCompanion.allTerms;
     if (!terms || terms.length === 0) return;
 
+    let evalTime = currentTime;
+    if (
+      window.WordSync &&
+      typeof window.WordSync._seekTargetWordTime === 'number' &&
+      window.WordSync._seekTargetWordTime > currentTime &&
+      window.WordSync._seekTargetWordTime - currentTime <= 1.25
+    ) {
+      evalTime = window.WordSync._seekTargetWordTime;
+    }
+
     let targetIdx = -1;
     for (let i = terms.length - 1; i >= 0; i--) {
-      if (terms[i].startSec <= currentTime + 0.35) {
+      if (terms[i].startSec <= evalTime + 0.35) {
         targetIdx = i;
         break;
       }
     }
 
-    if (targetIdx === -1 && currentTime >= 0) {
+    if (targetIdx === -1 && evalTime >= 0) {
       targetIdx = 0;
     }
 
@@ -6068,7 +6096,7 @@
       setActiveCompanionTerm(matchedIdx, { scrollCompanion: true });
     }
 
-    if (options.userClicked && window.innerWidth <= 1024) {
+    if (options.userClicked && isCompanionBottomSheet()) {
       toggleMobileLexSheet(true);
     }
   }
@@ -6404,6 +6432,9 @@
     updateLayoutChromeVars();
     window.addEventListener('resize', () => {
       updateLayoutChromeVars();
+      if (!isCompanionBottomSheet() && els.lexCompanion && els.lexCompanion.classList.contains('is-expanded')) {
+        toggleMobileLexSheet(false);
+      }
       document.querySelectorAll('.download-dropdown-wrapper.open').forEach((w) => {
         clampFloatingPanelToViewport(w, w.querySelector('.download-dropdown-menu'));
       });
@@ -6426,11 +6457,15 @@
     }
 
     function safeSeek(targetPhysicalTime) {
+      const seekSeq = ++state._audioSeekSeq;
       const totalDur = getTotalDuration();
       const dur = totalDur > 0 ? totalDur : Infinity;
       const clampedPhys = Math.max(0, Math.min(dur, targetPhysicalTime));
       const doSeek = () => {
         try {
+          if (window.WordSync) {
+            window.WordSync._awaitingInitialSeek = false;
+          }
           const curDur = Number.isFinite(audio.duration) ? audio.duration : dur;
           const streamSeek = window.WordSync
             ? window.WordSync.prepareSeek(clampedPhys)
@@ -6441,20 +6476,21 @@
         }
       };
 
-      // In Firefox on VBR talks, ensure the client-side patched progressive Blob covers clampedPhys
+      // On VBR talks across all browsers, ensure the Xing->Info patched progressive Blob covers clampedPhys
       if (
         window.WordSync &&
-        window.WordSync.isFirefox &&
         window.WordSync.vbrData &&
         state.currentMediaUrl
       ) {
         const mediaUrl = state.currentMediaUrl;
         const wasPlaying = !audio.paused;
-        const readyBlobUrl = window.WordSync.getReadyFirefoxBlobUrl(mediaUrl, clampedPhys);
+        const readyBlobUrl = window.WordSync.getReadyPatchedBlobUrl(mediaUrl, clampedPhys);
         if (readyBlobUrl) {
           window.WordSync.streamMode = 'patched_blob';
           if (state.currentStreamUrl !== readyBlobUrl) {
             state.currentStreamUrl = readyBlobUrl;
+            window.WordSync._pendingProgrammaticSeek = true;
+            window.WordSync._awaitingInitialSeek = true;
             audio.src = readyBlobUrl;
             audio.playbackRate = state.playbackSpeed;
             audio.addEventListener('loadedmetadata', doSeek, { once: true });
@@ -6462,11 +6498,21 @@
             return;
           }
         } else {
-          window.WordSync.waitForFirefoxBlobUrl(mediaUrl, clampedPhys).then(blobUrl => {
-            if (!blobUrl || state.currentMediaUrl !== mediaUrl) return;
+          window.WordSync._pendingProgrammaticSeek = true;
+          window.WordSync._awaitingInitialSeek = true;
+          window.WordSync.waitForPatchedBlobUrl(mediaUrl, clampedPhys).then(blobUrl => {
+            if (seekSeq !== state._audioSeekSeq || state.currentMediaUrl !== mediaUrl) return;
+            if (!blobUrl) {
+              // CORS/fetch fallback: revert cleanly to direct stream
+              window.WordSync.streamMode = 'cdn';
+              doSeek();
+              return;
+            }
             window.WordSync.streamMode = 'patched_blob';
             if (state.currentStreamUrl !== blobUrl) {
               state.currentStreamUrl = blobUrl;
+              window.WordSync._pendingProgrammaticSeek = true;
+              window.WordSync._awaitingInitialSeek = true;
               audio.src = blobUrl;
               audio.playbackRate = state.playbackSpeed;
               audio.addEventListener('loadedmetadata', doSeek, { once: true });
@@ -6498,7 +6544,7 @@
 
     function syncProgress() {
       if (isScrubbing) return; // Do not overwrite slider while user is dragging
-      if (window.WordSync && window.WordSync._awaitingInitialSeek) {
+      if (audio.seeking || (window.WordSync && window.WordSync._awaitingInitialSeek)) {
         return;
       }
       const rawCur = audio.currentTime;
@@ -6550,7 +6596,7 @@
       els.btnPlayPause.setAttribute('aria-label', 'Play');
     });
 
-    // If a partial progressive Firefox Blob reaches the end of its initial slice before
+    // If a partial progressive Blob reaches the end of its initial slice before
     // the full talk duration, seamlessly upgrade to the newly buffered chunks at physCur.
     audio.addEventListener('ended', () => {
       if (
@@ -6563,13 +6609,19 @@
         const physCur = window.WordSync.getPhysicalTime(audio.currentTime);
         if (dur > 0 && physCur < dur - 5) {
           const mediaUrl = state.currentMediaUrl;
-          window.WordSync.waitForFirefoxBlobUrl(mediaUrl, physCur + 30).then(blobUrl => {
-            if (!blobUrl || state.currentMediaUrl !== mediaUrl) return;
+          const upgradeSeq = state._audioSeekSeq;
+          window.WordSync.waitForPatchedBlobUrl(mediaUrl, physCur + 30).then(blobUrl => {
+            if (!blobUrl || upgradeSeq !== state._audioSeekSeq || state.currentMediaUrl !== mediaUrl) return;
             state.currentStreamUrl = blobUrl;
+            window.WordSync._pendingProgrammaticSeek = true;
+            window.WordSync._awaitingInitialSeek = true;
             audio.src = blobUrl;
             audio.playbackRate = state.playbackSpeed;
             audio.addEventListener('loadedmetadata', () => {
-              audio.currentTime = window.WordSync.prepareSeek(physCur);
+              if (window.WordSync) {
+                window.WordSync._awaitingInitialSeek = false;
+                audio.currentTime = window.WordSync.prepareSeek(physCur);
+              }
               audio.play().catch(() => {});
             }, { once: true });
           });
@@ -6808,12 +6860,13 @@
     return null;
   }
 
-  function playAudioSegment({ episode_id, media_url, title, teacher, start_sec }) {
+  function playAudioSegment({ episode_id, media_url, title, teacher, start_sec, word_id = null }) {
     if (!media_url) {
       alert('Podbean CDN streaming URL is not available for this talk.');
       return;
     }
 
+    const playSeq = ++state._audioSeekSeq;
     const audio = els.nativeAudio;
     els.playerTitle.textContent = title || 'BSWA Dhamma Talk';
     const spkColor = getSpeakerColor('', teacher);
@@ -6829,6 +6882,12 @@
     };
     if (window.WordSync) {
       window.WordSync.playingEpisodeId = epId;
+      if (word_id && state.currentEpisode && state.currentEpisode.id === epId) {
+        const clickedEl = document.getElementById(word_id);
+        if (clickedEl && clickedEl.classList.contains('transcript-word')) {
+          window.WordSync.setActiveWordElement(clickedEl);
+        }
+      }
     }
     if (els.btnPlayerTranscript) {
       els.btnPlayerTranscript.style.display = 'inline-flex';
@@ -6936,18 +6995,24 @@
     }
 
     function startWithLoadedProfile() {
-      if (state.currentMediaUrl !== media_url) return;
+      if (playSeq !== state._audioSeekSeq || state.currentMediaUrl !== media_url) return;
 
-      // In Firefox on VBR episodes, use pure client-side progressive Fetch + Info-patched Blob
-      if (window.WordSync && window.WordSync.isFirefox && window.WordSync.vbrData) {
-        const readyBlobUrl = window.WordSync.getReadyFirefoxBlobUrl(media_url, targetTime);
+      // For VBR episodes across all browsers, use progressive Fetch + Xing->Info patched Blob
+      // so seeks resolve via exact linear byte offsets instead of coarse 1% Xing TOC quantization.
+      if (window.WordSync && window.WordSync.vbrData) {
+        const readyBlobUrl = window.WordSync.getReadyPatchedBlobUrl(media_url, targetTime);
         if (readyBlobUrl) {
           launchStreamAndSeek(readyBlobUrl, 'patched_blob');
           return;
         }
+        if (window.WordSync && targetTime > 0) {
+          window.WordSync._seekTargetWordTime = rawTarget;
+          window.WordSync._pendingProgrammaticSeek = true;
+          window.WordSync._awaitingInitialSeek = true;
+        }
         unlockAudioGestureSync();
-        window.WordSync.waitForFirefoxBlobUrl(media_url, targetTime).then(blobUrl => {
-          if (state.currentMediaUrl !== media_url) return;
+        window.WordSync.waitForPatchedBlobUrl(media_url, targetTime).then(blobUrl => {
+          if (playSeq !== state._audioSeekSeq || state.currentMediaUrl !== media_url) return;
           if (blobUrl) {
             launchStreamAndSeek(blobUrl, 'patched_blob');
           } else {
@@ -6957,7 +7022,7 @@
         return;
       }
 
-      // Chromium / Safari / CBR episodes: stream directly from Podbean CDN
+      // CBR / fallback episodes: stream directly from Podbean CDN
       launchStreamAndSeek(media_url, 'cdn');
     }
 

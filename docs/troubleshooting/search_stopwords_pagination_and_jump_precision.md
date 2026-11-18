@@ -64,7 +64,7 @@
 - **[word_sync.js](file:///c:/dev/deeper_dhamma/deeper_dhamma/web/static/word_sync.js)** & **[app.js](file:///c:/dev/deeper_dhamma/deeper_dhamma/web/static/app.js)**:
   - `WordSync.prepareEpisodeSync(episode)` resets stale `turnWordMap` on episode switches and parses attached `words_blob` synchronously before `renderDrawerTurns()`.
   - `WordSync._awaitingInitialSeek` prevents pre-seek `0:00` or stale-position frames from hijacking `WordSync.update()` / `syncProgress()` until `doSeek()` sets `audio.currentTime`, while preserving `WordSync._seekTargetWordTime` across same-episode enrichment.
-  - `applyTargetOpts()` uses `matchedW.domId || matchedW.id`, validates `sentEl.contains(targetWordEl)`, scrolls `#main-content` via `scrollElementIntoReadingZone()` inside the unobstructed reading band between the sticky transcript toolbar and docked bottom chrome (`#transcript-lexicon-companion` on `<= 1024px` or `#main-content` bottom edge), and re-seeks if async word enrichment moves `exactWordSec` by `> 0.15s`.
+  - `applyTargetOpts()` uses `matchedW.domId || matchedW.id`, validates `sentEl.contains(targetWordEl)`, scrolls `#main-content` via `scrollElementIntoReadingZone()` inside the unobstructed reading band between the sticky transcript toolbar and docked bottom chrome (`#transcript-lexicon-companion` on `<= 1100px` or `#main-content` bottom edge), and re-seeks if async word enrichment moves `exactWordSec` by `> 0.15s`.
 
 ---
 

@@ -1882,18 +1882,30 @@ def test_responsive_small_screen_layout_contract():
     assert "width: auto" in mobile_block
     assert '"sidebar"\n      "main"\n      "footer"' in mobile_block
 
-    comp_1024 = style_css.split("@media (max-width: 1024px)")[1]
-    assert "position: sticky;" in comp_1024
-    comp_expanded_1024 = comp_1024.split(".transcript-lexicon-companion.is-expanded {", 1)[1].split("}", 1)[0]
-    assert "var(--main-height" in comp_expanded_1024
-    assert "var(--toolbar-height" in comp_expanded_1024
-    comp_stack_1024 = style_css.split(".transcript-lexicon-companion.is-expanded .lexicon-stack-container {", 1)[1].split("}", 1)[0]
-    assert "min-height: 0" in comp_stack_1024
+    comp_1100 = style_css.split("@media (max-width: 1100px)")[1]
+    assert "position: sticky;" in comp_1100
+    comp_expanded_1100 = comp_1100.split(".transcript-lexicon-companion.is-expanded {", 1)[1].split("}", 1)[0]
+    assert "var(--main-height" in comp_expanded_1100
+    assert "var(--toolbar-height" in comp_expanded_1100
+    comp_stack_1100 = style_css.split(".transcript-lexicon-companion.is-expanded .lexicon-stack-container {", 1)[1].split("}", 1)[0]
+    assert "min-height: 0" in comp_stack_1100
+
+    # Reduced desktop lexicon companion width & always-stacked compact track-details & always-available toolbar toggle
+    layout_grid_css = style_css.split(".transcript-layout-container {", 1)[1].split("}", 1)[0]
+    assert "280px" in layout_grid_css
+    btn_toggle_css = style_css.split(".btn-toggle-toolbar-actions {", 1)[1].split("}", 1)[0]
+    assert "display: inline-flex" in btn_toggle_css
+    actions_group_css = style_css.split(".toolbar-actions-group {", 1)[1].split("}", 1)[0]
+    assert "display: none" in actions_group_css
+    player_container_css = style_css.split(".player-container {", 1)[1].split("}", 1)[0]
+    assert "flex-direction: column" in player_container_css
 
     # 3. Viewport clamping helper, <main> scroll helpers & layout chrome height observers in app.js
     assert "function clampFloatingPanelToViewport(" in app_js
     assert "function resetFloatingPanelPosition(" in app_js
     assert "function getScrollContainer(" in app_js
+    assert "function isCompanionBottomSheet(" in app_js
+    assert "toggleMobileLexSheet(false)" in app_js.split("function jumpToCompanionTerm(", 1)[1].split("function setActiveCompanionTerm(", 1)[0]
     assert "--main-height" in app_js
     assert "--toolbar-height" in app_js
 
@@ -1993,6 +2005,8 @@ def test_headless_chrome_small_screen_no_overflow():
                     { w: 371, h: 698 },
                     { w: 393, h: 851 },
                     { w: 768, h: 480 },
+                    { w: 1027, h: 720 },
+                    { w: 1120, h: 800 },
                     { w: 1280, h: 800 }
                   ];
                   const frame = document.getElementById('f');
@@ -2094,21 +2108,16 @@ def test_headless_chrome_small_screen_no_overflow():
                         const mainEl = doc.getElementById('main-content');
                         const mainRightEdge = mainEl ? Math.round(mainEl.getBoundingClientRect().left + mainEl.clientWidth) : docW;
                         extra.toolbarIsAsideTopDocked = Boolean(
-                          tb && tb.tagName.toLowerCase() === 'aside' && (
-                            vw <= 1024
-                              ? (
-                                  win.getComputedStyle(tb).position === 'sticky' &&
-                                  Math.abs(Math.round(tb.getBoundingClientRect().right) - mainRightEdge) <= 1 &&
-                                  (vw <= 600
-                                    ? (Math.round(tb.getBoundingClientRect().left) === 0 && sb && Math.abs(tb.getBoundingClientRect().top - sb.getBoundingClientRect().bottom) <= 1)
-                                    : (Math.round(tb.getBoundingClientRect().top) === 0 && Math.round(tb.getBoundingClientRect().left) === (vw <= 900 ? 76 : 260))
-                                  )
-                                )
-                              : win.getComputedStyle(tb).position === 'sticky'
+                          tb && tb.tagName.toLowerCase() === 'aside' &&
+                          win.getComputedStyle(tb).position === 'sticky' &&
+                          Math.abs(Math.round(tb.getBoundingClientRect().right) - mainRightEdge) <= 1 &&
+                          (vw <= 600
+                            ? (Math.round(tb.getBoundingClientRect().left) === 0 && sb && Math.abs(tb.getBoundingClientRect().top - sb.getBoundingClientRect().bottom) <= 1)
+                            : (Math.round(tb.getBoundingClientRect().top) === 0 && Math.round(tb.getBoundingClientRect().left) === (vw <= 900 ? 76 : 260))
                           )
                         );
                         const txHdr = doc.querySelector('#transcript-view .transcript-view-header');
-                        extra.toolbarClearedHeader = (vw <= 1024 && tb && txHdr)
+                        extra.toolbarClearedHeader = (tb && txHdr)
                           ? txHdr.getBoundingClientRect().top >= tb.getBoundingClientRect().bottom - 1
                           : true;
                         extra.toolbarClearedSidebar = (vw <= 600 && sb && tb)
@@ -2124,6 +2133,11 @@ def test_headless_chrome_small_screen_no_overflow():
                         extra.titleFullWidthMinusBookmark = Boolean(
                           tiRect && tdRect && bmkRect && bmkRect.width > 0 &&
                           (tiRect.width - tdRect.width - bmkRect.width) <= 16
+                        );
+                        const trackTitleEl = doc.getElementById('player-track-title');
+                        const trackTitleFontPx = trackTitleEl ? parseFloat(win.getComputedStyle(trackTitleEl).fontSize) : 99;
+                        extra.trackDetailsAboveButtons = Boolean(
+                          tdRect && ctlRect && tdRect.bottom <= ctlRect.top + 2 && trackTitleFontPx <= 13
                         );
                         extra.gearInlineLeftAboveElapsed = Boolean(
                           gearRect && ctlRect && curRect && gearRect.width > 0 &&
@@ -2141,30 +2155,35 @@ def test_headless_chrome_small_screen_no_overflow():
                           txRect.bottom <= totRect.top + 2 &&
                           !txBtn.textContent.toLowerCase().includes('transcript')
                         );
-                        if (vw <= 1024) {
-                          extra.toolbarActionsCollapsedInitially = Boolean(
-                            tbToggle && tbActions &&
-                            win.getComputedStyle(tbToggle).display !== 'none' &&
-                            win.getComputedStyle(tbActions).display === 'none'
-                          );
-                          if (tbToggle && tbActions) {
-                            tbToggle.click();
-                            const expandedDisp = win.getComputedStyle(tbActions).display;
-                            const expandedOverflow = doc.documentElement.scrollWidth > doc.documentElement.clientWidth;
-                            tbToggle.click();
-                            const recollapsedDisp = win.getComputedStyle(tbActions).display;
-                            extra.toolbarActionsToggleWorks = (expandedDisp !== 'none' && !expandedOverflow && recollapsedDisp === 'none');
-                          } else {
-                            extra.toolbarActionsToggleWorks = false;
-                          }
+                        extra.toolbarActionsCollapsedInitially = Boolean(
+                          tbToggle && tbActions &&
+                          win.getComputedStyle(tbToggle).display !== 'none' &&
+                          win.getComputedStyle(tbActions).display === 'none'
+                        );
+                        if (tbToggle && tbActions) {
+                          tbToggle.click();
+                          const expandedDisp = win.getComputedStyle(tbActions).display;
+                          const expandedOverflow = doc.documentElement.scrollWidth > doc.documentElement.clientWidth;
+                          tbToggle.click();
+                          const recollapsedDisp = win.getComputedStyle(tbActions).display;
+                          extra.toolbarActionsToggleWorks = (expandedDisp !== 'none' && !expandedOverflow && recollapsedDisp === 'none');
                         } else {
-                          extra.toolbarActionsCollapsedInitially = Boolean(
-                            tbToggle && tbActions &&
-                            win.getComputedStyle(tbToggle).display === 'none' &&
-                            win.getComputedStyle(tbActions).display !== 'none'
-                          );
-                          extra.toolbarActionsToggleWorks = true;
+                          extra.toolbarActionsToggleWorks = false;
                         }
+                        const tickerEl = doc.getElementById('lex-mobile-ticker');
+                        const turnTextEl = doc.querySelector('#drawer-turns-container .turn-text');
+                        const readerEl = doc.getElementById('drawer-turns-container');
+                        const compRect = comp ? comp.getBoundingClientRect() : null;
+                        const turnTextRect = turnTextEl ? turnTextEl.getBoundingClientRect() : null;
+                        const readerRect = readerEl ? readerEl.getBoundingClientRect() : null;
+                        extra.companionPlacementOk = vw <= 1100
+                          ? Boolean(tickerEl && win.getComputedStyle(tickerEl).display !== 'none')
+                          : Boolean(
+                              tickerEl && win.getComputedStyle(tickerEl).display === 'none' &&
+                              compRect && compRect.width <= 290 &&
+                              turnTextRect && turnTextRect.width > compRect.width &&
+                              readerRect && readerRect.width > compRect.width
+                            );
                         if (vw <= 600 && brandEl && brandTitle && navEl) {
                           const brandRect = brandEl.getBoundingClientRect();
                           const titleRect = brandTitle.getBoundingClientRect();
@@ -2286,7 +2305,7 @@ def test_headless_chrome_small_screen_no_overflow():
                       settingsState.extra.closedAfterClick = win.getComputedStyle(settingsView).display === 'none';
                       states.push(settingsState);
 
-                      if (vw <= 1024) {
+                      if (vw <= 1100) {
                         const comp = doc.getElementById('transcript-lexicon-companion');
                         const toggleBtn = doc.getElementById('btn-toggle-lex-sheet');
                         const sb = doc.getElementById('app-sidebar');
@@ -2382,10 +2401,12 @@ def test_headless_chrome_small_screen_no_overflow():
                     assert st["extra"]["noCdnBadge"] is True, f"Podbean CDN badge should be removed at {vw}px"
                     assert st["extra"]["bookmarkTopRight"] is True, f"Bookmark button not positioned top-right in play bar at {vw}px: {st['extra']}"
                     assert st["extra"]["titleFullWidthMinusBookmark"] is True, f"Talk title did not expand full width minus bookmark at {vw}px: {st['extra']}"
+                    assert st["extra"]["trackDetailsAboveButtons"] is True, f"Track details not stacked above buttons or font not reduced at {vw}px: {st['extra']}"
                     assert st["extra"]["gearInlineLeftAboveElapsed"] is True, f"Gear button not inline left above elapsed time at {vw}px: {st['extra']}"
                     assert st["extra"]["transcriptIconInlineRightAboveTotal"] is True, f"Transcript icon button not inline right above total time at {vw}px: {st['extra']}"
                     assert st["extra"]["toolbarActionsCollapsedInitially"] is True, f"Toolbar actions not collapsed initially at {vw}px: {st['extra']}"
                     assert st["extra"]["toolbarActionsToggleWorks"] is True, f"Toolbar actions toggle failed at {vw}px: {st['extra']}"
+                    assert st["extra"]["companionPlacementOk"] is True, f"Companion placement or width check failed at {vw}px: {st['extra']}"
                     assert st["extra"]["mobileBrandVisibleAboveNav"] is True, f"Mobile brand line or single-row nav icons failed at {vw}px: {st['extra']}"
                     if vw <= 600:
                         assert st["extra"]["compLeft"] == 0, f"Lexicon companion cut off on left at {vw}px: {st['extra']}"
@@ -2542,6 +2563,27 @@ def test_headless_chrome_pb9577355_lexicon_companion_track_sync():
                     frame.style.width = '393px';
                     frame.style.height = '851px';
                     await wait(180);
+
+                    // 5a. Clicking a lexicon companion card on small screen scrolls to term AND minimizes helper
+                    mainEl.scrollTop = 0;
+                    await wait(60);
+                    doc.getElementById('btn-toggle-lex-sheet').click();
+                    await wait(350);
+                    const wasExpandedBeforeClick = comp.classList.contains('is-expanded');
+                    doc.getElementById('lex-card-40').click();
+                    await wait(1000);
+                    const minimizedAfterClick = !comp.classList.contains('is-expanded');
+                    const mobJumpRect = wordTarget ? wordTarget.getBoundingClientRect() : null;
+                    const mobTbRect = doc.getElementById('transcript-sticky-toolbar').getBoundingClientRect();
+                    const mobCompRect = comp.getBoundingClientRect();
+                    out.mobileCardClickMinimizesAndScrolls = Boolean(
+                      wasExpandedBeforeClick &&
+                      minimizedAfterClick &&
+                      mobJumpRect &&
+                      mobJumpRect.top >= mobTbRect.bottom - 1 &&
+                      mobJumpRect.bottom <= mobCompRect.top + 1
+                    );
+
                     ws._awaitingInitialSeek = false;
                     ws.setMode('track');
                     const trackWord = doc.getElementById('tw-1383') || doc.getElementById('tw-1259');
@@ -2634,6 +2676,7 @@ def test_headless_chrome_pb9577355_lexicon_companion_track_sync():
         assert report["activeBtnStackScrolled"] is True
         assert report["wheelCompanionIgnored"] is True
         assert report["wheelTranscriptPauses"] is True
+        assert report["mobileCardClickMinimizesAndScrolls"] is True, f"Mobile companion click did not scroll & minimize: {report}"
         assert report["mobileTrackClearOfCompanion"] is True, f"Mobile track covered by companion: {report}"
         assert report["reattachedAfterDetachedSpan"] is True
     finally:

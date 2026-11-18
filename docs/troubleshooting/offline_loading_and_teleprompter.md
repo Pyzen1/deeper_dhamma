@@ -86,7 +86,7 @@ During synchronized audio playback, long Dhamma talks require the reader to navi
    - *Issue*: At line breaks, as the human eye scanned from right to left toward the beginning of the next line, the text jumped upward abruptly, producing a jerky and distracting effect.
 4. **Third Working Approach (Continuous Line-Interpolated Teleprompter Scroll)**:
    - Distributes the vertical line transition smoothly and continuously across the spoken duration of that line.
-   - The active reading viewport ($Y_{\text{center}}$) sits comfortably at 46% of the available space inside the `#main-content` scroll viewport between the sticky transcript toolbar and the bottom reading bound (the docked audio player bar on desktop, or the sticky Word Sync + Lexicon companion sheet on `<= 1024px`).
+   - The active reading viewport ($Y_{\text{center}}$) sits comfortably at 46% of the available space inside the `#main-content` scroll viewport between the sticky transcript toolbar and the bottom reading bound (the docked audio player bar on wide desktop, or the sticky Lexicon companion sheet on `<= 1100px`).
    - Calculates the continuous fractional progress $\rho(t) \in [0, 1]$ of the current line:
      $$\rho(t) = \frac{t - t_{\text{line\_start}}}{\Delta t_{\text{line}}}$$
    - The target document position glides upward continuously at a steady sub-pixel rate ($\approx 0.13\text{ px/frame}$ at 60fps), eliminating boundary jumps entirely.

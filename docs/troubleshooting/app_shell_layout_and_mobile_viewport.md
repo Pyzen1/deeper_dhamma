@@ -50,10 +50,12 @@ Desktop / Tablet (> 600px)                     Mobile (<= 600px)
 - `body` defines three non-overlapping CSS Grid areas: `"sidebar main" / "footer footer"` (`260px` desktop, `76px` at `<= 900px`), switching to three stacked rows `"sidebar" / "main" / "footer"` at `<= 600px`.
 - `<main class="app-main">` is the sole vertical scroll pane (`overflow-y: auto; overflow-x: clip; overscroll-behavior-y: contain;`), while `.views-wrapper` retains `max-width: 1200px` and `padding-top` so sticky toolbars dock flush at `top: 0`.
 
-### 3.2 `<= 1024px` Transcript Grid Overlay (`display: contents`)
-- At `<= 1024px`, `.app-main:has(#transcript-view.active)` drops outer padding (`padding: 0`) and `#transcript-view.active` becomes a 3-row CSS Grid (`auto auto minmax(0, 1fr)`).
-- `#transcript-sticky-toolbar` occupies `grid-row: 1` (`position: sticky; top: 0;`).
-- `.transcript-layout-container` uses `display: contents;` so `.transcript-view-header` (`grid-row: 2`), `.transcript-reader-container` (`grid-row: 3`), and `#transcript-lexicon-companion` (`grid-row: 2 / 4; align-self: end; position: sticky; bottom: 0;`) share the full `#transcript-view` height.
+### 3.2 `<= 1100px` Transcript Grid Overlay & Full-Width Word Sync Chrome ([style.css](file:///c:/dev/deeper_dhamma/deeper_dhamma/web/static/style.css))
+- On `#transcript-view.active`, `.app-main` drops horizontal/top padding across all viewports so `#transcript-sticky-toolbar` always spans 100% of `#main-content`'s width (`grid-row: 1; position: sticky; top: 0;`).
+- `#btn-toggle-toolbar-actions` is always shown (`display: inline-flex`) with `.toolbar-actions-group` collapsed by default for an uncluttered reading bar across mobile, tablet, and desktop.
+- `.player-container` always stacks `.track-info` (`.track-details` with reduced `0.78rem` title / `0.68rem` meta font size) cleanly above `.player-controls` across all screen sizes.
+- Desktop right-side Lexicon Companion width is reduced to `280px` (`grid-template-columns: minmax(0, 1fr) 280px` at `> 1100px`) and remains docked at the bottom through `<= 1100px` (`isCompanionBottomSheet()`) so the main transcript column stays wider than the companion panel before snapping side-by-side.
+- At `<= 1100px`, `.transcript-layout-container` uses `display: contents;` so `.transcript-view-header` (`grid-row: 2`), `.transcript-reader-container` (`grid-row: 3`), and `#transcript-lexicon-companion` (`grid-row: 2 / 4; align-self: end; position: sticky; bottom: 0;`) share the full `#transcript-view` height. Clicking a companion card in bottom-sheet mode (`jumpToCompanionTerm()`) minimizes the sheet and computes the unobstructed reading zone against the collapsed bar height before scrolling cleanly to the spoken word.
 - Expanded companion height is bounded by `min(60dvh, calc(var(--main-height, 520px) - var(--toolbar-height, 48px) - 4px))` so it grows upward cleanly over turns/header without overflowing below `<main>`.
 
 ### 3.3 Scroll-Container Routing ([app.js](file:///c:/dev/deeper_dhamma/deeper_dhamma/web/static/app.js), [word_sync.js](file:///c:/dev/deeper_dhamma/deeper_dhamma/web/static/word_sync.js))

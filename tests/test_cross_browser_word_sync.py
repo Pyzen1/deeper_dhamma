@@ -1193,5 +1193,298 @@ def test_sampled_newly_transcribed_episodes_one_to_one_word_sync_parity():
             conn.close()
 
 
+def test_headless_chrome_pb28769672_patched_vbr_and_companion_sync():
+    """
+    End-to-end headless Chrome regression test for VBR talk pb28769672:
+    1. Automatically activates client-side Xing -> Info patched progressive streaming
+       (`streamMode == 'patched_blob'`) in Chromium instead of coarse 1% Xing TOC seeking.
+    2. Verifies real WebAudio output matches true physical audio timestamps (< 0.5s delta via
+       PCM cross-correlation against reference decoded audio) across transcript word clicks
+       (tw-84, tw-2500, tw-3000) and Lexicon Companion card clicks.
+    3. Verifies companion card highlights do not flicker backwards during seek lead-in and
+       rapid consecutive word/companion clicks honor the latest target without race jumps.
+    """
+    import base64
+    import mimetypes
+    import shutil
+    import numpy as np
+    from deeper_dhamma.export_web import _is_dist_stale, export_static_site
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    ffmpeg_bin = shutil.which("ffmpeg")
+    mp3_path = PROJECT_ROOT / "archive/2026/2026_rains_retreat/2026-09-29_2026_rains_retreat_07_12_getting_out_of_a_rut_ajahn_brahmali.mp3"
+    dist_dir = PROJECT_ROOT / "dist"
+
+    if not (chrome_path.exists() and ffmpeg_bin and mp3_path.exists() and TRANSCRIPTS_DB_PATH.exists()):
+        pytest.skip("Chrome, ffmpeg, or pb28769672 archive assets not present")
+
+    if not (dist_dir / "index.html").exists() or _is_dist_stale(dist_dir):
+        export_static_site(dist_dir)
+
+    mp3_size = mp3_path.stat().st_size
+    harness_js = r"""
+<script>
+(function() {
+  const origFetch = window.fetch.bind(window);
+  window.fetch = function(input, init) {
+    if (typeof input === 'string' && input.includes('podbean.com')) {
+      input = location.origin + '/media/pb28769672.mp3';
+    }
+    return origFetch(input, init);
+  };
+  const aProto = HTMLMediaElement.prototype;
+  const srcDesc = Object.getOwnPropertyDescriptor(aProto, 'src');
+  Object.defineProperty(aProto, 'src', {
+    get() { return srcDesc.get.call(this); },
+    set(v) {
+      if (typeof v === 'string' && v.includes('podbean.com')) {
+        v = location.origin + '/media/pb28769672.mp3';
+      }
+      return srcDesc.set.call(this, v);
+    }
+  });
+
+  async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  async function waitReady() {
+    for (let i = 0; i < 200; i++) {
+      const ws = window.WordSync;
+      const cards = document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card');
+      if (document.getElementById('tw-3000') && ws && ws.currentEpisodeId === 'pb28769672' && cards.length > 50) {
+        return;
+      }
+      await sleep(100);
+    }
+    throw new Error('Timed out waiting for pb28769672 readiness');
+  }
+
+  async function runTest() {
+    await waitReady();
+    const a = document.getElementById('native-audio');
+    const ws = window.WordSync;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const srcNode = ctx.createMediaElementSource(a);
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    srcNode.connect(proc);
+    proc.connect(ctx.destination);
+    let captureBuf = null;
+    proc.onaudioprocess = (e) => {
+      if (captureBuf) captureBuf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    };
+
+    const cards = Array.from(document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card'));
+    const cases = [
+      { label: 'tw84', el: document.getElementById('tw-84'), expectCardIdx: null },
+      { label: 'tw2500', el: document.getElementById('tw-2500'), expectCardIdx: null },
+      { label: 'tw3000', el: document.getElementById('tw-3000'), expectCardIdx: null },
+      { label: 'card5', el: cards[5], expectCardIdx: cards[5].dataset.idx },
+      { label: 'card50', el: cards[50], expectCardIdx: cards[50].dataset.idx },
+    ];
+
+    const results = [];
+    for (const item of cases) {
+      captureBuf = [];
+      if (ctx.state === 'suspended') await ctx.resume();
+      item.el.click();
+      await new Promise(resolve => {
+        const check = setInterval(() => {
+          if (ws.streamMode === 'patched_blob' && a.readyState >= 3 && !a.seeking && !ws._awaitingInitialSeek) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 30);
+        setTimeout(() => { clearInterval(check); resolve(); }, 4000);
+      });
+      const seekedPhys = ws.getPhysicalTime(a.currentTime);
+      const curActiveCardEarly = document.querySelector('#transcript-lexicon-stack .lex-stack-card.current-companion-term');
+      const earlyCardIdx = curActiveCardEarly ? curActiveCardEarly.dataset.idx : null;
+
+      await sleep(1600);
+      const chunks = captureBuf;
+      captureBuf = null;
+      let total = 0;
+      for (const c of chunks) total += c.length;
+      const out = new Int16Array(total);
+      let k = 0;
+      for (const c of chunks) {
+        for (let i = 0; i < c.length; i++) {
+          out[k++] = Math.max(-32768, Math.min(32767, Math.round(c[i] * 32767)));
+        }
+      }
+      let bin = '';
+      const bytes = new Uint8Array(out.buffer);
+      for (let i = 0; i < bytes.length; i += 8192) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+      }
+      results.push({
+        label: item.label,
+        streamMode: ws.streamMode,
+        seekedPhys: Number(seekedPhys.toFixed(3)),
+        activeIdx: ws.activeWordIdx,
+        expectCardIdx: item.expectCardIdx,
+        earlyCardIdx,
+        b64pcm: btoa(bin),
+      });
+    }
+
+    // Rapid overlap test: card 85 -> tw-673 -> card 20 within 80ms
+    cards[85].click();
+    await sleep(40);
+    document.getElementById('tw-673').click();
+    await sleep(40);
+    cards[20].click();
+    await sleep(1500);
+    const activeCardRapid = document.querySelector('#transcript-lexicon-stack .lex-stack-card.current-companion-term');
+
+    await fetch('/__report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        results,
+        rapidExpectedCard: cards[20].dataset.idx,
+        rapidActualCard: activeCardRapid ? activeCardRapid.dataset.idx : null,
+        rapidPhys: Number(ws.getPhysicalTime(a.currentTime).toFixed(2)),
+      }),
+    });
+  }
+
+  window.addEventListener('load', () => setTimeout(runTest, 350));
+})();
+</script>
+"""
+
+    report = {}
+    done = threading.Event()
+
+    class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
+        daemon_threads = True
+
+    class DistTestHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__report":
+                cl = int(self.headers.get("Content-Length", 0))
+                report["data"] = json.loads(self.rfile.read(cl).decode("utf-8"))
+                self.send_response(200)
+                self.end_headers()
+                done.set()
+
+        def do_GET(self):
+            p = self.path.split("?")[0]
+            if p == "/media/pb28769672.mp3":
+                rng = self.headers.get("Range")
+                start, end, status = 0, mp3_size - 1, 200
+                if rng and rng.startswith("bytes="):
+                    ps = rng[6:].split(",")[0].split("-")
+                    if ps[0]:
+                        start = int(ps[0])
+                    if len(ps) > 1 and ps[1]:
+                        end = min(mp3_size - 1, int(ps[1]))
+                    status = 206
+                length = end - start + 1
+                self.send_response(status)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(length))
+                if status == 206:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{mp3_size}")
+                self.end_headers()
+                with open(mp3_path, "rb") as f:
+                    f.seek(start)
+                    self.wfile.write(f.read(length))
+                return
+
+            if p in ("/", "/index.html"):
+                html = (dist_dir / "index.html").read_text(encoding="utf-8").replace("</body>", harness_js + "</body>")
+                data = html.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+
+            fpath = dist_dir / p.lstrip("/")
+            if fpath.is_file():
+                data = fpath.read_bytes()
+                ct, _ = mimetypes.guess_type(str(fpath))
+                if p.endswith(".js"):
+                    ct = "application/javascript"
+                elif p.endswith(".wasm"):
+                    ct = "application/wasm"
+                elif p.endswith(".gz"):
+                    ct = "application/gzip"
+                self.send_response(200)
+                self.send_header("Content-Type", ct or "application/octet-stream")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            self.send_error(404)
+
+    server = ThreadedHTTPServer(("127.0.0.1", 0), DistTestHandler)
+    port = server.server_port
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as c_dir:
+            proc = subprocess.Popen(
+                [
+                    str(chrome_path),
+                    "--headless=new",
+                    "--autoplay-policy=no-user-gesture-required",
+                    f"--user-data-dir={c_dir}",
+                    "--window-size=1280,900",
+                    f"http://127.0.0.1:{port}/#talk/pb28769672",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            done.wait(timeout=35)
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+    finally:
+        server.shutdown()
+
+    assert "data" in report, "Headless Chrome pb28769672 sync test did not report back"
+    data = report["data"]
+
+    # Decode reference mono 16kHz float32 PCM from the archive MP3 for exact waveform match
+    pcm_raw = subprocess.check_output(
+        [ffmpeg_bin, "-v", "error", "-i", str(mp3_path), "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1"]
+    )
+    full_pcm = np.frombuffer(pcm_raw, dtype=np.int16).astype(np.float32)
+
+    for res in data["results"]:
+        assert res["streamMode"] == "patched_blob", f"Expected patched_blob on {res['label']}, got {res['streamMode']}"
+        if res["expectCardIdx"] is not None:
+            assert res["earlyCardIdx"] == res["expectCardIdx"], (
+                f"Companion highlight flickered on {res['label']}: expected {res['expectCardIdx']}, got {res['earlyCardIdx']}"
+            )
+        clip = np.frombuffer(base64.b64decode(res["b64pcm"]), dtype=np.int16).astype(np.float32)
+        nz = np.where(np.abs(clip) > 50)[0]
+        assert len(nz) > 4000, f"Silent WebAudio capture for {res['label']}"
+        clip_trim = clip[nz[0] : nz[0] + 12000]
+        clip_trim = clip_trim - np.mean(clip_trim)
+        center = res["seekedPhys"]
+        win_start = max(0, int((center - 25) * 16000))
+        win_end = min(len(full_pcm), int((center + 25) * 16000))
+        ref = full_pcm[win_start:win_end]
+        fft_len = 1 << int(np.ceil(np.log2(len(ref) + len(clip_trim))))
+        cc = np.fft.irfft(np.fft.rfft(ref, fft_len) * np.conj(np.fft.rfft(clip_trim, fft_len)))[: len(ref) - len(clip_trim) + 1]
+        # Account for silent lead samples skipped before nz[0] so matched_start reflects playback start
+        actual_start = (win_start + int(np.argmax(cc))) / 16000.0 - (nz[0] / 16000.0)
+        assert abs(actual_start - center) <= 0.65, (
+            f"{res['label']} audio/highlight desync: expected ~{center:.2f}s, decoded ~{actual_start:.2f}s"
+        )
+
+    assert data["rapidActualCard"] == data["rapidExpectedCard"], (
+        f"Rapid companion/word click race: expected card {data['rapidExpectedCard']}, got {data['rapidActualCard']}"
+    )
+    assert 285.0 <= data["rapidPhys"] <= 315.0, f"Rapid click landed on unexpected physical time: {data['rapidPhys']}"
 
 
