@@ -11,7 +11,7 @@ pytest tests/
 Specifically:
 - `tests/test_cross_browser_word_sync.py`:
   - Verifies that all VBR episodes in `databases/dhamma_transcripts.db` store unwarped physical PCM timestamps in `episode_words` and valid full-duration `VBR1` trailers.
-  - Launches headless **Mozilla Firefox** and headless **Google Chrome** against a pure static HTTP server (serving the raw unpatched VBR MP3 with `Access-Control-Allow-Origin: *` just like Podbean CDN) to verify both `pb27802310` parity and full `dist/` Chrome PCM cross-correlation on `pb28769672` (`test_headless_chrome_pb28769672_patched_vbr_and_companion_sync`) across transcript words, companion cards, and rapid consecutive clicks.
+  - Launches headless **Mozilla Firefox** and headless **Google Chrome** against a pure static HTTP server (serving raw MP3s with `Access-Control-Allow-Origin: *` just like Podbean CDN) to verify `pb27802310` parity (`O(1)` `< 1.5 MB` late-talk MSE seek on 88.7 MB MP3), full `dist/` Chrome PCM cross-correlation on `pb28769672` (`streamMode == 'mse_vbr'`, `seekOffset == 0.0`, `< 4 MB` across 5 jumps, continuous cross-chunk boundary playback, and rapid `card85 -> tw673 -> card20` ordering), `pb28585203` CBR mobile clock-vs-highlight parity (`1.0x`/`2.0x`), and automatic `200 OK` non-206 downgrade from `'mse_vbr'` to `'patched_blob'`.
 - `tests/test_audio_cdn_sync.py`:
   - Verifies 1:1 bit-for-bit parity between local `archive/` MP3 files and Podbean CDN streams.
 - `tests/test_export_web.py`:

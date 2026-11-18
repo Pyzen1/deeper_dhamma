@@ -1193,167 +1193,134 @@ def test_sampled_newly_transcribed_episodes_one_to_one_word_sync_parity():
             conn.close()
 
 
-def test_headless_chrome_pb28769672_patched_vbr_and_companion_sync():
-    """
-    End-to-end headless Chrome regression test for VBR talk pb28769672:
-    1. Automatically activates client-side Xing -> Info patched progressive streaming
-       (`streamMode == 'patched_blob'`) in Chromium instead of coarse 1% Xing TOC seeking.
-    2. Verifies real WebAudio output matches true physical audio timestamps (< 0.5s delta via
-       PCM cross-correlation against reference decoded audio) across transcript word clicks
-       (tw-84, tw-2500, tw-3000) and Lexicon Companion card clicks.
-    3. Verifies companion card highlights do not flicker backwards during seek lead-in and
-       rapid consecutive word/companion clicks honor the latest target without race jumps.
-    """
-    import base64
-    import mimetypes
-    import shutil
+def _decode_mp3_pcm_16k(mp3_path: Path, start_sec: float | None = None, duration_sec: float | None = None):
+    """Decode mono 16kHz float32 reference PCM from an MP3 file (full or windowed)."""
     import numpy as np
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    cmd = [ffmpeg_bin, "-v", "error"]
+    if start_sec is not None and start_sec > 0:
+        cmd += ["-ss", f"{start_sec:.3f}"]
+    if duration_sec is not None and duration_sec > 0:
+        cmd += ["-t", f"{duration_sec:.3f}"]
+    cmd += ["-i", str(mp3_path), "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1"]
+    pcm_raw = subprocess.check_output(cmd)
+    return np.frombuffer(pcm_raw, dtype=np.int16).astype(np.float32)
+
+
+def _match_pcm_timestamp_sec(full_pcm, clip_b64: str, center_sec: float, pcm_offset_sec: float = 0.0, radius_sec: float = 25.0) -> float:
+    """Finds the true physical timestamp (seconds) of captured WebAudio PCM via FFT cross-correlation."""
+    import base64
+    import numpy as np
+
+    clip = np.frombuffer(base64.b64decode(clip_b64), dtype=np.int16).astype(np.float32)
+    nz = np.where(np.abs(clip) > 50)[0]
+    assert len(nz) > 4000, f"Silent WebAudio capture ({len(nz)} non-zero samples)"
+    clip_trim = clip[nz[0] : nz[0] + 12000]
+    clip_trim = clip_trim - np.mean(clip_trim)
+
+    rel_center = center_sec - pcm_offset_sec
+    win_start = max(0, int((rel_center - radius_sec) * 16000))
+    win_end = min(len(full_pcm), int((rel_center + radius_sec) * 16000))
+    ref = full_pcm[win_start:win_end]
+    assert len(ref) > len(clip_trim) + 100, "Reference PCM window too short for correlation"
+
+    fft_len = 1 << int(np.ceil(np.log2(len(ref) + len(clip_trim))))
+    cc = np.fft.irfft(np.fft.rfft(ref, fft_len) * np.conj(np.fft.rfft(clip_trim, fft_len)))[: len(ref) - len(clip_trim) + 1]
+    return pcm_offset_sec + (win_start + int(np.argmax(cc))) / 16000.0 - (nz[0] / 16000.0)
+
+
+def _run_headless_chrome_dist_media_test(ep_id: str, mp3_path: Path, run_body_js: str, allow_range: bool = True, timeout_sec: float = 40.0) -> dict:
+    """Serves built dist/ alongside a local archive MP3 and executes `run_body_js` in headless Chrome."""
+    import mimetypes
     from deeper_dhamma.export_web import _is_dist_stale, export_static_site
 
     chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
     ffmpeg_bin = shutil.which("ffmpeg")
-    mp3_path = PROJECT_ROOT / "archive/2026/2026_rains_retreat/2026-09-29_2026_rains_retreat_07_12_getting_out_of_a_rut_ajahn_brahmali.mp3"
     dist_dir = PROJECT_ROOT / "dist"
 
     if not (chrome_path.exists() and ffmpeg_bin and mp3_path.exists() and TRANSCRIPTS_DB_PATH.exists()):
-        pytest.skip("Chrome, ffmpeg, or pb28769672 archive assets not present")
+        pytest.skip(f"Chrome, ffmpeg, or {ep_id} archive assets not present")
 
     if not (dist_dir / "index.html").exists() or _is_dist_stale(dist_dir):
         export_static_site(dist_dir)
 
     mp3_size = mp3_path.stat().st_size
-    harness_js = r"""
+    harness_js = f"""
 <script>
-(function() {
+(function() {{
   const origFetch = window.fetch.bind(window);
-  window.fetch = function(input, init) {
-    if (typeof input === 'string' && input.includes('podbean.com')) {
-      input = location.origin + '/media/pb28769672.mp3';
-    }
+  window.fetch = function(input, init) {{
+    if (typeof input === 'string' && input.includes('podbean.com')) {{
+      input = location.origin + '/media/{ep_id}.mp3';
+    }}
     return origFetch(input, init);
-  };
+  }};
   const aProto = HTMLMediaElement.prototype;
   const srcDesc = Object.getOwnPropertyDescriptor(aProto, 'src');
-  Object.defineProperty(aProto, 'src', {
-    get() { return srcDesc.get.call(this); },
-    set(v) {
-      if (typeof v === 'string' && v.includes('podbean.com')) {
-        v = location.origin + '/media/pb28769672.mp3';
-      }
+  Object.defineProperty(aProto, 'src', {{
+    get() {{ return srcDesc.get.call(this); }},
+    set(v) {{
+      if (typeof v === 'string' && v.includes('podbean.com')) {{
+        v = location.origin + '/media/{ep_id}.mp3';
+      }}
       return srcDesc.set.call(this, v);
-    }
-  });
+    }}
+  }});
 
-  async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-  async function waitReady() {
-    for (let i = 0; i < 200; i++) {
-      const ws = window.WordSync;
-      const cards = document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card');
-      if (document.getElementById('tw-3000') && ws && ws.currentEpisodeId === 'pb28769672' && cards.length > 50) {
-        return;
-      }
-      await sleep(100);
-    }
-    throw new Error('Timed out waiting for pb28769672 readiness');
-  }
-
-  async function runTest() {
-    await waitReady();
-    const a = document.getElementById('native-audio');
-    const ws = window.WordSync;
-    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-    const srcNode = ctx.createMediaElementSource(a);
-    const proc = ctx.createScriptProcessor(4096, 1, 1);
-    srcNode.connect(proc);
-    proc.connect(ctx.destination);
-    let captureBuf = null;
-    proc.onaudioprocess = (e) => {
-      if (captureBuf) captureBuf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-    };
-
-    const cards = Array.from(document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card'));
-    const cases = [
-      { label: 'tw84', el: document.getElementById('tw-84'), expectCardIdx: null },
-      { label: 'tw2500', el: document.getElementById('tw-2500'), expectCardIdx: null },
-      { label: 'tw3000', el: document.getElementById('tw-3000'), expectCardIdx: null },
-      { label: 'card5', el: cards[5], expectCardIdx: cards[5].dataset.idx },
-      { label: 'card50', el: cards[50], expectCardIdx: cards[50].dataset.idx },
-    ];
-
-    const results = [];
-    for (const item of cases) {
-      captureBuf = [];
-      if (ctx.state === 'suspended') await ctx.resume();
-      item.el.click();
-      await new Promise(resolve => {
-        const check = setInterval(() => {
-          if (ws.streamMode === 'patched_blob' && a.readyState >= 3 && !a.seeking && !ws._awaitingInitialSeek) {
-            clearInterval(check);
-            resolve();
-          }
-        }, 30);
-        setTimeout(() => { clearInterval(check); resolve(); }, 4000);
-      });
-      const seekedPhys = ws.getPhysicalTime(a.currentTime);
-      const curActiveCardEarly = document.querySelector('#transcript-lexicon-stack .lex-stack-card.current-companion-term');
-      const earlyCardIdx = curActiveCardEarly ? curActiveCardEarly.dataset.idx : null;
-
-      await sleep(1600);
-      const chunks = captureBuf;
-      captureBuf = null;
-      let total = 0;
-      for (const c of chunks) total += c.length;
-      const out = new Int16Array(total);
-      let k = 0;
-      for (const c of chunks) {
-        for (let i = 0; i < c.length; i++) {
-          out[k++] = Math.max(-32768, Math.min(32767, Math.round(c[i] * 32767)));
-        }
-      }
-      let bin = '';
-      const bytes = new Uint8Array(out.buffer);
-      for (let i = 0; i < bytes.length; i += 8192) {
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
-      }
-      results.push({
-        label: item.label,
-        streamMode: ws.streamMode,
-        seekedPhys: Number(seekedPhys.toFixed(3)),
-        activeIdx: ws.activeWordIdx,
-        expectCardIdx: item.expectCardIdx,
-        earlyCardIdx,
-        b64pcm: btoa(bin),
-      });
-    }
-
-    // Rapid overlap test: card 85 -> tw-673 -> card 20 within 80ms
-    cards[85].click();
-    await sleep(40);
-    document.getElementById('tw-673').click();
-    await sleep(40);
-    cards[20].click();
-    await sleep(1500);
-    const activeCardRapid = document.querySelector('#transcript-lexicon-stack .lex-stack-card.current-companion-term');
-
-    await fetch('/__report', {
+  async function sleep(ms) {{ return new Promise(r => setTimeout(r, ms)); }}
+  async function waitUntil(pred, timeoutMs = 8000, stepMs = 30) {{
+    const deadline = performance.now() + timeoutMs;
+    while (performance.now() < deadline) {{
+      if (pred()) return true;
+      await sleep(stepMs);
+    }}
+    return Boolean(pred());
+  }}
+  function encodePcmInt16Chunks(chunks) {{
+    let total = 0;
+    for (const c of chunks) total += c.length;
+    const out = new Int16Array(total);
+    let k = 0;
+    for (const c of chunks) {{
+      for (let i = 0; i < c.length; i++) {{
+        out[k++] = Math.max(-32768, Math.min(32767, Math.round(c[i] * 32767)));
+      }}
+    }}
+    let bin = '';
+    const bytes = new Uint8Array(out.buffer);
+    for (let i = 0; i < bytes.length; i += 8192) {{
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    }}
+    return btoa(bin);
+  }}
+  async function reportResult(payload) {{
+    await origFetch('/__report', {{
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        results,
-        rapidExpectedCard: cards[20].dataset.idx,
-        rapidActualCard: activeCardRapid ? activeCardRapid.dataset.idx : null,
-        rapidPhys: Number(ws.getPhysicalTime(a.currentTime).toFixed(2)),
-      }),
-    });
-  }
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify(payload),
+    }});
+  }}
+  async function getMediaStats() {{
+    const r = await origFetch('/__stats');
+    return r.json();
+  }}
 
-  window.addEventListener('load', () => setTimeout(runTest, 350));
-})();
+  async function runTest() {{
+    {run_body_js}
+  }}
+
+  window.addEventListener('load', () => setTimeout(() => {{
+    runTest().catch(err => reportResult({{ error: String(err && err.stack || err) }}));
+  }}, 350));
+}})();
 </script>
 """
 
     report = {}
     done = threading.Event()
+    stats_lock = threading.Lock()
+    media_stats = {"bytes": 0, "requests": []}
 
     class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
         daemon_threads = True
@@ -1372,28 +1339,52 @@ def test_headless_chrome_pb28769672_patched_vbr_and_companion_sync():
 
         def do_GET(self):
             p = self.path.split("?")[0]
-            if p == "/media/pb28769672.mp3":
+            if p == "/__stats":
+                with stats_lock:
+                    body = json.dumps(media_stats).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            if p == f"/media/{ep_id}.mp3":
                 rng = self.headers.get("Range")
                 start, end, status = 0, mp3_size - 1, 200
-                if rng and rng.startswith("bytes="):
+                if allow_range and rng and rng.startswith("bytes="):
                     ps = rng[6:].split(",")[0].split("-")
                     if ps[0]:
                         start = int(ps[0])
                     if len(ps) > 1 and ps[1]:
                         end = min(mp3_size - 1, int(ps[1]))
                     status = 206
-                length = end - start + 1
+                length = max(0, end - start + 1)
                 self.send_response(status)
                 self.send_header("Content-Type", "audio/mpeg")
-                self.send_header("Accept-Ranges", "bytes")
+                if allow_range:
+                    self.send_header("Accept-Ranges", "bytes")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("Content-Length", str(length))
                 if status == 206:
                     self.send_header("Content-Range", f"bytes {start}-{end}/{mp3_size}")
                 self.end_headers()
-                with open(mp3_path, "rb") as f:
-                    f.seek(start)
-                    self.wfile.write(f.read(length))
+                with stats_lock:
+                    media_stats["requests"].append({"status": status, "range": rng, "length": length})
+                try:
+                    with open(mp3_path, "rb") as f:
+                        f.seek(start)
+                        rem = length
+                        while rem > 0:
+                            chunk = f.read(min(262144, rem))
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            with stats_lock:
+                                media_stats["bytes"] += len(chunk)
+                            rem -= len(chunk)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
                 return
 
             if p in ("/", "/index.html"):
@@ -1436,12 +1427,12 @@ def test_headless_chrome_pb28769672_patched_vbr_and_companion_sync():
                     "--autoplay-policy=no-user-gesture-required",
                     f"--user-data-dir={c_dir}",
                     "--window-size=1280,900",
-                    f"http://127.0.0.1:{port}/#talk/pb28769672",
+                    f"http://127.0.0.1:{port}/#talk/{ep_id}",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            done.wait(timeout=35)
+            done.wait(timeout=timeout_sec)
             proc.kill()
             try:
                 proc.wait(timeout=5)
@@ -1450,41 +1441,440 @@ def test_headless_chrome_pb28769672_patched_vbr_and_companion_sync():
     finally:
         server.shutdown()
 
-    assert "data" in report, "Headless Chrome pb28769672 sync test did not report back"
-    data = report["data"]
+    assert "data" in report, f"Headless Chrome {ep_id} test did not report back"
+    assert "error" not in report["data"], f"Headless Chrome JS error: {report['data'].get('error')}"
+    report["data"]["serverMediaStats"] = media_stats
+    return report["data"]
 
-    # Decode reference mono 16kHz float32 PCM from the archive MP3 for exact waveform match
-    pcm_raw = subprocess.check_output(
-        [ffmpeg_bin, "-v", "error", "-i", str(mp3_path), "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1"]
+
+def test_headless_chrome_pb28769672_patched_vbr_and_companion_sync():
+    """
+    End-to-end headless Chrome test against the real built `dist/` application for VBR talk `pb28769672`:
+    1. Verifies Chromium uses O(1) VBR1 frame-aligned HTTP Range + MediaSource (`streamMode == 'mse_vbr'`,
+       `seekOffset == 0.0`) fetching < 4 MB across 5 jumps across the 26 MB talk.
+    2. Verifies real WebAudio output matches true physical audio timestamps (<= 0.65s delta via
+       PCM cross-correlation) across transcript word clicks (`tw-84`, `tw-2500`, `tw-3000`) and
+       Lexicon Companion card clicks.
+    3. Verifies seamless continuous playback across an MSE chunk boundary (>= 5.0s continuous play
+       crossing chunk 1 -> chunk 2 append) with zero tail PCM drift.
+    4. Verifies zero companion card flicker during seek lead-in and rapid click ordering (`card85 -> tw673 -> card20`).
+    """
+    mp3_path = PROJECT_ROOT / "archive/2026/2026_rains_retreat/2026-09-29_2026_rains_retreat_07_12_getting_out_of_a_rut_ajahn_brahmali.mp3"
+
+    run_body_js = r"""
+    const ready = await waitUntil(() => {
+      const ws = window.WordSync;
+      const cards = document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card');
+      return document.getElementById('tw-3000') && ws && ws.currentEpisodeId === 'pb28769672' && cards.length > 50;
+    }, 20000, 100);
+    if (!ready) throw new Error('Timed out waiting for pb28769672 readiness');
+
+    const a = document.getElementById('native-audio');
+    const ws = window.WordSync;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const srcNode = ctx.createMediaElementSource(a);
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    srcNode.connect(proc);
+    proc.connect(ctx.destination);
+    let captureBuf = null;
+    proc.onaudioprocess = (e) => {
+      if (captureBuf) captureBuf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    };
+
+    const cards = Array.from(document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card'));
+    const cases = [
+      { label: 'tw84', el: document.getElementById('tw-84'), expectCardIdx: null },
+      { label: 'tw2500', el: document.getElementById('tw-2500'), expectCardIdx: null },
+      { label: 'tw3000', el: document.getElementById('tw-3000'), expectCardIdx: null },
+      { label: 'card5', el: cards[5], expectCardIdx: cards[5].dataset.idx },
+      { label: 'card50', el: cards[50], expectCardIdx: cards[50].dataset.idx },
+    ];
+
+    const results = [];
+    for (const item of cases) {
+      captureBuf = [];
+      if (ctx.state === 'suspended') await ctx.resume();
+      item.el.click();
+      await waitUntil(() => (
+        ws.streamMode === 'mse_vbr' &&
+        !ws.isSeekLocked() &&
+        a.readyState >= 3 &&
+        !a.seeking &&
+        !ws._awaitingInitialSeek
+      ), 6000, 30);
+      const seekedPhys = ws.getPhysicalTime(a.currentTime);
+      const curActiveCardEarly = document.querySelector('#transcript-lexicon-stack .lex-stack-card.current-companion-term');
+      const earlyCardIdx = curActiveCardEarly ? curActiveCardEarly.dataset.idx : null;
+
+      await sleep(1600);
+      const chunks = captureBuf;
+      captureBuf = null;
+      results.push({
+        label: item.label,
+        streamMode: ws.streamMode,
+        seekOffset: Number((ws.seekOffset || 0).toFixed(4)),
+        seekedPhys: Number(seekedPhys.toFixed(3)),
+        activeIdx: ws.activeWordIdx,
+        expectCardIdx: item.expectCardIdx,
+        earlyCardIdx,
+        b64pcm: encodePcmInt16Chunks(chunks),
+      });
+    }
+    const statsAfterFiveSeeks = await getMediaStats();
+
+    // Continuous cross-chunk MSE boundary test:
+    // Seek to tw-84 to buffer chunk 1 [~28s..~68s], find a word ~4.2s before chunk end,
+    // click it (hits buffered fast path / continuous prefetch), and record >= 5.2s across chunk seam.
+    document.getElementById('tw-84').click();
+    await waitUntil(() => (
+      ws.streamMode === 'mse_vbr' &&
+      ws._mse && ws._mse.sourceBuffer && ws._mse.sourceBuffer.buffered.length > 0 &&
+      !ws.isSeekLocked() && a.readyState >= 3
+    ), 6000, 30);
+    const end1 = ws._mse.sourceBuffer.buffered.end(0);
+    let boundaryWord = null;
+    let bestBoundaryDiff = Infinity;
+    document.querySelectorAll('#drawer-turns-container .transcript-word').forEach(el => {
+      const st = parseFloat(el.dataset.start);
+      const diff = Math.abs(st - (end1 - 4.2));
+      if (!isNaN(st) && st <= end1 - 3.0 && diff < bestBoundaryDiff) {
+        bestBoundaryDiff = diff;
+        boundaryWord = el;
+      }
+    });
+    if (!boundaryWord) throw new Error('Could not locate word near chunk 1 end');
+
+    captureBuf = [];
+    boundaryWord.click();
+    await waitUntil(() => (
+      ws.streamMode === 'mse_vbr' && !ws.isSeekLocked() && a.readyState >= 3 && !a.seeking
+    ), 4000, 20);
+    const boundaryPlayStartPhys = ws.getPhysicalTime(a.currentTime);
+    captureBuf = [];
+    await sleep(5400);
+    const boundaryEndPhys = ws.getPhysicalTime(a.currentTime);
+    const tailChunks = captureBuf;
+    captureBuf = null;
+    const end2 = (ws._mse && ws._mse.sourceBuffer && ws._mse.sourceBuffer.buffered.length > 0)
+      ? ws._mse.sourceBuffer.buffered.end(0)
+      : end1;
+    // Keep final ~1.5s of recorded WebAudio (`~6` scriptProcessor buffers) past chunk boundary
+    const tailSlice = tailChunks.slice(-Math.min(tailChunks.length, 6));
+    let tailSamples = 0;
+    for (const c of tailSlice) tailSamples += c.length;
+
+    // Rapid overlap test: card 85 -> tw-673 -> card 20 within 80ms
+    cards[85].click();
+    await sleep(40);
+    document.getElementById('tw-673').click();
+    await sleep(40);
+    cards[20].click();
+    await waitUntil(() => (
+      ws.streamMode === 'mse_vbr' && !ws.isSeekLocked() && a.readyState >= 3 && !a.seeking
+    ), 5000, 30);
+    await sleep(1200);
+    const activeCardRapid = document.querySelector('#transcript-lexicon-stack .lex-stack-card.current-companion-term');
+
+    await reportResult({
+      results,
+      bytesAfterFiveSeeks: statsAfterFiveSeeks.bytes,
+      boundary: {
+        end1: Number(end1.toFixed(3)),
+        end2: Number(end2.toFixed(3)),
+        startPhys: Number(boundaryPlayStartPhys.toFixed(3)),
+        endPhys: Number(boundaryEndPhys.toFixed(3)),
+        tailDurationSec: Number((tailSamples / 16000.0).toFixed(3)),
+        tailB64Pcm: encodePcmInt16Chunks(tailSlice),
+      },
+      rapidExpectedCard: cards[20].dataset.idx,
+      rapidActualCard: activeCardRapid ? activeCardRapid.dataset.idx : null,
+      rapidPhys: Number(ws.getPhysicalTime(a.currentTime).toFixed(2)),
+    });
+    """
+
+    data = _run_headless_chrome_dist_media_test("pb28769672", mp3_path, run_body_js, allow_range=True, timeout_sec=45.0)
+    full_pcm = _decode_mp3_pcm_16k(mp3_path)
+
+    # 1. O(1) bandwidth budget across 5 seeks on the 26 MB talk
+    assert data["bytesAfterFiveSeeks"] < 4_000_000, (
+        f"Expected < 4 MB HTTP Range bytes across 5 seeks, transferred {data['bytesAfterFiveSeeks']:,} bytes"
     )
-    full_pcm = np.frombuffer(pcm_raw, dtype=np.int16).astype(np.float32)
 
     for res in data["results"]:
-        assert res["streamMode"] == "patched_blob", f"Expected patched_blob on {res['label']}, got {res['streamMode']}"
+        assert res["streamMode"] == "mse_vbr", f"Expected mse_vbr on {res['label']}, got {res['streamMode']}"
+        assert abs(res["seekOffset"]) < 0.001, f"Expected seekOffset 0.0 on mse_vbr, got {res['seekOffset']}"
         if res["expectCardIdx"] is not None:
             assert res["earlyCardIdx"] == res["expectCardIdx"], (
                 f"Companion highlight flickered on {res['label']}: expected {res['expectCardIdx']}, got {res['earlyCardIdx']}"
             )
-        clip = np.frombuffer(base64.b64decode(res["b64pcm"]), dtype=np.int16).astype(np.float32)
-        nz = np.where(np.abs(clip) > 50)[0]
-        assert len(nz) > 4000, f"Silent WebAudio capture for {res['label']}"
-        clip_trim = clip[nz[0] : nz[0] + 12000]
-        clip_trim = clip_trim - np.mean(clip_trim)
-        center = res["seekedPhys"]
-        win_start = max(0, int((center - 25) * 16000))
-        win_end = min(len(full_pcm), int((center + 25) * 16000))
-        ref = full_pcm[win_start:win_end]
-        fft_len = 1 << int(np.ceil(np.log2(len(ref) + len(clip_trim))))
-        cc = np.fft.irfft(np.fft.rfft(ref, fft_len) * np.conj(np.fft.rfft(clip_trim, fft_len)))[: len(ref) - len(clip_trim) + 1]
-        # Account for silent lead samples skipped before nz[0] so matched_start reflects playback start
-        actual_start = (win_start + int(np.argmax(cc))) / 16000.0 - (nz[0] / 16000.0)
-        assert abs(actual_start - center) <= 0.65, (
-            f"{res['label']} audio/highlight desync: expected ~{center:.2f}s, decoded ~{actual_start:.2f}s"
+        actual_start = _match_pcm_timestamp_sec(full_pcm, res["b64pcm"], res["seekedPhys"])
+        assert abs(actual_start - res["seekedPhys"]) <= 0.65, (
+            f"{res['label']} audio/highlight desync: expected ~{res['seekedPhys']:.2f}s, decoded ~{actual_start:.2f}s"
         )
 
+    # 2. Continuous cross-chunk playback verification
+    b = data["boundary"]
+    assert b["end2"] > b["end1"] + 20.0, f"MSE chunk 2 failed to append ahead: end1={b['end1']}, end2={b['end2']}"
+    assert b["endPhys"] > b["end1"] + 0.5, f"Playback did not cross chunk boundary {b['end1']}: endPhys={b['endPhys']}"
+    tail_expected = b["endPhys"] - b["tailDurationSec"]
+    tail_actual = _match_pcm_timestamp_sec(full_pcm, b["tailB64Pcm"], tail_expected)
+    assert abs(tail_actual - tail_expected) <= 0.65, (
+        f"Cross-chunk MSE drift/gap at boundary {b['end1']}s: expected tail ~{tail_expected:.2f}s, decoded ~{tail_actual:.2f}s"
+    )
+
+    # 3. Rapid click ordering
     assert data["rapidActualCard"] == data["rapidExpectedCard"], (
         f"Rapid companion/word click race: expected card {data['rapidExpectedCard']}, got {data['rapidActualCard']}"
     )
     assert 285.0 <= data["rapidPhys"] <= 315.0, f"Rapid click landed on unexpected physical time: {data['rapidPhys']}"
+
+
+def test_headless_chrome_mse_range_refusal_fallback_to_patched_blob():
+    """
+    Verifies automatic downgrade from 'mse_vbr' to 'patched_blob' (Xing -> Info progressive Blob)
+    when the HTTP media server ignores Range headers (responds 200 OK instead of 206 Partial Content).
+    """
+    mp3_path = PROJECT_ROOT / "archive/2026/2026_rains_retreat/2026-09-29_2026_rains_retreat_07_12_getting_out_of_a_rut_ajahn_brahmali.mp3"
+
+    run_body_js = r"""
+    const ready = await waitUntil(() => {
+      const ws = window.WordSync;
+      const cards = document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card');
+      return document.getElementById('tw-2500') && ws && ws.currentEpisodeId === 'pb28769672' && cards.length > 50;
+    }, 20000, 100);
+    if (!ready) throw new Error('Timed out waiting for pb28769672 readiness');
+
+    const a = document.getElementById('native-audio');
+    const ws = window.WordSync;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const srcNode = ctx.createMediaElementSource(a);
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    srcNode.connect(proc);
+    proc.connect(ctx.destination);
+    let captureBuf = [];
+    proc.onaudioprocess = (e) => {
+      if (captureBuf) captureBuf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    };
+
+    const cards = Array.from(document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card'));
+    const card50 = cards[50];
+    if (ctx.state === 'suspended') await ctx.resume();
+    card50.click();
+
+    const settled = await waitUntil(() => (
+      ws.streamMode === 'patched_blob' &&
+      !ws.isSeekLocked() &&
+      a.readyState >= 3 &&
+      !a.seeking &&
+      !ws._awaitingInitialSeek
+    ), 12000, 50);
+    if (!settled) throw new Error('Timed out waiting for patched_blob fallback (mode=' + ws.streamMode + ')');
+
+    captureBuf = [];
+    const seekedPhys = ws.getPhysicalTime(a.currentTime);
+    const earlyActiveCard = document.querySelector('#transcript-lexicon-stack .lex-stack-card.current-companion-term');
+    const earlyCardIdx = earlyActiveCard ? earlyActiveCard.dataset.idx : null;
+
+    await sleep(1600);
+    const chunks = captureBuf;
+    captureBuf = null;
+
+    const mediaUrl = ws.currentEpisode && ws.currentEpisode.media_url ? ws.currentEpisode.media_url : '';
+    await reportResult({
+      streamMode: ws.streamMode,
+      mseMarkedFailed: Boolean(mediaUrl && ws._mseFailed[mediaUrl]),
+      seekedPhys: Number(seekedPhys.toFixed(3)),
+      expectCardIdx: card50.dataset.idx,
+      earlyCardIdx,
+      b64pcm: encodePcmInt16Chunks(chunks),
+    });
+    """
+
+    data = _run_headless_chrome_dist_media_test("pb28769672", mp3_path, run_body_js, allow_range=False, timeout_sec=35.0)
+    assert data["streamMode"] == "patched_blob", f"Expected automatic patched_blob fallback, got {data['streamMode']}"
+    assert data["mseMarkedFailed"] is True, "Expected _mseFailed flag cached after 200 non-206 response"
+    assert data["earlyCardIdx"] == data["expectCardIdx"], (
+        f"Companion flicker during fallback: expected {data['expectCardIdx']}, got {data['earlyCardIdx']}"
+    )
+    full_pcm = _decode_mp3_pcm_16k(mp3_path)
+    actual_start = _match_pcm_timestamp_sec(full_pcm, data["b64pcm"], data["seekedPhys"])
+    assert abs(actual_start - data["seekedPhys"]) <= 0.65, (
+        f"Fallback patched_blob audio desync: expected ~{data['seekedPhys']:.2f}s, decoded ~{actual_start:.2f}s"
+    )
+
+
+def test_headless_chrome_pb27802310_late_talk_mse_seek_o1():
+    """
+    O(1) late-talk verification on 88.7 MB / 107-minute VBR talk `pb27802310`:
+    Jumps directly past 4500s (~80% into the talk) via full UI click in headless Chrome and verifies:
+    - < 1.5 MB transferred over HTTP Range (vs 88.7 MB full MP3),
+    - `streamMode == 'mse_vbr'` and `seekOffset == 0.0`,
+    - Stable companion highlight and <= 0.65s real WebAudio PCM alignment against windowed reference PCM.
+    """
+    mp3_path = PROJECT_ROOT / "archive/2026/2026_march_9_day_sutta_retreat/2026-03-28_2026_march_9_day_sutta_retreat_07_26_ajahn_brahmali_ayya_karunika.mp3"
+
+    run_body_js = r"""
+    const ready = await waitUntil(() => {
+      const ws = window.WordSync;
+      const cards = document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card');
+      return ws && ws.currentEpisodeId === 'pb27802310' && ws.words && ws.words.length > 5000 && cards.length > 10;
+    }, 20000, 100);
+    if (!ready) throw new Error('Timed out waiting for pb27802310 readiness');
+
+    const a = document.getElementById('native-audio');
+    const ws = window.WordSync;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const srcNode = ctx.createMediaElementSource(a);
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    srcNode.connect(proc);
+    proc.connect(ctx.destination);
+    let captureBuf = [];
+    proc.onaudioprocess = (e) => {
+      if (captureBuf) captureBuf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    };
+
+    const cards = Array.from(document.querySelectorAll('#transcript-lexicon-stack .lex-stack-card'));
+    const lateCard = cards[Math.min(cards.length - 1, Math.floor(cards.length * 0.80))];
+
+    if (ctx.state === 'suspended') await ctx.resume();
+    lateCard.click();
+
+    const settled = await waitUntil(() => (
+      ws.streamMode === 'mse_vbr' &&
+      !ws.isSeekLocked() &&
+      a.readyState >= 3 &&
+      !a.seeking &&
+      !ws._awaitingInitialSeek
+    ), 8000, 30);
+    if (!settled) throw new Error('Timed out waiting for pb27802310 late-talk MSE seek');
+
+    captureBuf = [];
+    const seekedPhys = ws.getPhysicalTime(a.currentTime);
+    const curActiveCard = document.querySelector('#transcript-lexicon-stack .lex-stack-card.current-companion-term');
+    const earlyCardIdx = curActiveCard ? curActiveCard.dataset.idx : null;
+
+    await sleep(1600);
+    const chunks = captureBuf;
+    captureBuf = null;
+    const stats = await getMediaStats();
+
+    await reportResult({
+      streamMode: ws.streamMode,
+      seekOffset: Number((ws.seekOffset || 0).toFixed(4)),
+      seekedPhys: Number(seekedPhys.toFixed(3)),
+      expectCardIdx: lateCard.dataset.idx,
+      earlyCardIdx,
+      bytesTransferred: stats.bytes,
+      b64pcm: encodePcmInt16Chunks(chunks),
+    });
+    """
+
+    data = _run_headless_chrome_dist_media_test("pb27802310", mp3_path, run_body_js, allow_range=True, timeout_sec=35.0)
+    assert data["streamMode"] == "mse_vbr"
+    assert abs(data["seekOffset"]) < 0.001
+    assert data["seekedPhys"] > 4000.0, f"Expected late-talk seek > 4000s, got {data['seekedPhys']}"
+    assert data["bytesTransferred"] < 1_500_000, (
+        f"Expected < 1.5 MB HTTP Range transfer on 88.7 MB pb27802310, transferred {data['bytesTransferred']:,} bytes"
+    )
+    assert data["earlyCardIdx"] == data["expectCardIdx"], (
+        f"Companion card mismatch on pb27802310 late seek: expected {data['expectCardIdx']}, got {data['earlyCardIdx']}"
+    )
+
+    win_off = max(0.0, data["seekedPhys"] - 35.0)
+    win_pcm = _decode_mp3_pcm_16k(mp3_path, start_sec=win_off, duration_sec=70.0)
+    actual_start = _match_pcm_timestamp_sec(win_pcm, data["b64pcm"], data["seekedPhys"], pcm_offset_sec=win_off)
+    assert abs(actual_start - data["seekedPhys"]) <= 0.65, (
+        f"pb27802310 late-talk MSE desync: expected ~{data['seekedPhys']:.2f}s, decoded ~{actual_start:.2f}s"
+    )
+
+
+def test_headless_chrome_pb28585203_cbr_clock_and_word_sync_parity():
+    """
+    End-to-end headless Chrome verification for CBR talk `pb28585203` (`301x565` mobile viewport):
+    1. Confirms `streamMode == 'cdn'` and `seekOffset == 0.0` across Turn 1 (`0:28`), `#tw-30`
+       (`talks`, `30.64s`), and late-talk seek (`#tw-2500`, `~1287s`), with <= 0.65s WebAudio PCM match.
+    2. Verifies the displayed player clock (`#time-current`) stays synchronized via `onClockTick` /
+       `'pause'` with `.active-word` at `1.0x` and `2.0x` so `'talks'` (`>= 30.64s`) never highlights
+       while the clock displays `0:29`.
+    """
+    mp3_path = PROJECT_ROOT / "archive/2026/2026_rains_retreat/2026-09-09_2026_rains_retreat_02_12_the_one_event_that_matters_ajahn_brahm.mp3"
+
+    run_body_js = r"""
+    const ready = await waitUntil(() => {
+      const ws = window.WordSync;
+      return document.getElementById('tw-2500') && ws && ws.currentEpisodeId === 'pb28585203';
+    }, 20000, 100);
+    if (!ready) throw new Error('Timed out waiting for pb28585203 readiness');
+
+    const a = document.getElementById('native-audio');
+    const ws = window.WordSync;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const srcNode = ctx.createMediaElementSource(a);
+    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    srcNode.connect(proc);
+    proc.connect(ctx.destination);
+    let captureBuf = null;
+    proc.onaudioprocess = (e) => {
+      if (captureBuf) captureBuf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    };
+
+    const clockSkewViolations = [];
+    for (const rate of [1.0, 2.0]) {
+      if (ctx.state === 'suspended') await ctx.resume();
+      document.querySelector('#turn-1 .turn-time-btn').click();
+      await waitUntil(() => !ws.isSeekLocked() && a.readyState >= 3 && !a.seeking && !a.paused, 6000, 25);
+      a.playbackRate = rate;
+      for (let step = 0; step < 90; step++) {
+        await sleep(30);
+        const uiTime = document.getElementById('time-current').textContent;
+        const activeId = ws.activeWordEl ? ws.activeWordEl.id : null;
+        const activeStart = ws.activeWordEl ? parseFloat(ws.activeWordEl.dataset.start) : -1;
+        if (uiTime === '0:29' && activeStart >= 30.0) {
+          clockSkewViolations.push({ rate, uiTime, activeId, activeStart, t: a.currentTime });
+        }
+        if (a.currentTime > 31.3) break;
+      }
+      a.pause();
+      await sleep(50);
+    }
+
+    // Verify Turn 1 ('0:28'), #tw-30 ('talks'), and #tw-2500 real PCM alignment
+    const pcmCases = [];
+    for (const spec of [
+      { label: 'tw30', el: document.getElementById('tw-30') },
+      { label: 'tw2500', el: document.getElementById('tw-2500') },
+    ]) {
+      captureBuf = [];
+      a.playbackRate = 1.0;
+      if (ctx.state === 'suspended') await ctx.resume();
+      spec.el.click();
+      await waitUntil(() => !ws.isSeekLocked() && a.readyState >= 3 && !a.seeking && !ws._awaitingInitialSeek, 6000, 25);
+      const seekedPhys = ws.getPhysicalTime(a.currentTime);
+      await sleep(1500);
+      const chunks = captureBuf;
+      captureBuf = null;
+      pcmCases.push({
+        label: spec.label,
+        streamMode: ws.streamMode,
+        seekOffset: Number((ws.seekOffset || 0).toFixed(4)),
+        seekedPhys: Number(seekedPhys.toFixed(3)),
+        b64pcm: encodePcmInt16Chunks(chunks),
+      });
+    }
+
+    await reportResult({ clockSkewViolations, pcmCases });
+    """
+
+    data = _run_headless_chrome_dist_media_test("pb28585203", mp3_path, run_body_js, allow_range=True, timeout_sec=35.0)
+    assert data["clockSkewViolations"] == [], f"Clock/highlight skew detected on pb28585203: {data['clockSkewViolations']}"
+    for c in data["pcmCases"]:
+        assert c["streamMode"] == "cdn"
+        assert abs(c["seekOffset"]) < 0.001
+        win_off = max(0.0, c["seekedPhys"] - 30.0)
+        win_pcm = _decode_mp3_pcm_16k(mp3_path, start_sec=win_off, duration_sec=60.0)
+        actual = _match_pcm_timestamp_sec(win_pcm, c["b64pcm"], c["seekedPhys"], pcm_offset_sec=win_off)
+        assert abs(actual - c["seekedPhys"]) <= 0.65, (
+            f"pb28585203 {c['label']} desync: expected ~{c['seekedPhys']:.2f}s, decoded ~{actual:.2f}s"
+        )
 
 

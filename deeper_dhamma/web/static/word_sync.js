@@ -40,11 +40,19 @@
     turnWordMap: {}, // Map of turnIdx -> [words]
     vbrData: null, // Parsed VBR1 seek table if episode is VBR
     vbrCache: {}, // Cache of episodeId -> { words, vbrData, bytesLoaded }
-    streamMode: 'cdn', // 'cdn' (direct Podbean CDN) or 'patched_blob' (client-side Info-patched Blob)
+    streamMode: 'cdn', // 'cdn' | 'patched_blob' | 'mse_vbr'
     seekOffset: 0.0, // Constant physical-minus-stream clock offset established at last seek
     _seekTargetWordTime: null, // Optional exact word start time targeted by the latest seek
     _pendingProgrammaticSeek: false,
+    _awaitingInitialSeek: false,
+    _syncPhase: 'idle', // 'idle' | 'buffering' | 'seeking' | 'playing'
+    _seekSeq: 0,
+    _lockedWordIdx: -1,
+    _lockedCompanionIdx: -1,
+    onCompanionLock: null,
     _ffStreams: {}, // Client-side progressive Fetch + Xing->Info patched Blob state keyed by media_url
+    _mse: null, // Active MediaSource frame-aligned VBR session
+    _mseFailed: {}, // Cache of media_url -> true when Range/MSE is unavailable
     isFirefox: typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent || ''),
     activeWordEl: null,
     activeWordIdx: -1,
@@ -52,6 +60,8 @@
     paliFirstWordsSet: new Set(),
     _lastSpokenWordId: null,
     onPaliTermSpoken: null,
+    _lastClockSecond: -1,
+    onClockTick: null,
     metrics: {
       format: 'binary_blob',
       bytesLoaded: 0,
@@ -63,6 +73,7 @@
     _boundAudio: null,
     _userInteractedAt: 0,
     _programmaticScrollUntil: 0,
+    _scrollTarget: null, // { top, until, ratio } unified smooth-scroll target
     _teleprompterLine: null,
 
     /**
@@ -86,7 +97,44 @@
         return;
       }
       this._programmaticScrollUntil = 0;
+      this._scrollTarget = null;
       this._userInteractedAt = performance.now();
+    },
+
+    /**
+     * Starts a canonical monotonic seek transaction across async fetches, <audio> seeks,
+     * active word highlights, companion card locks, and reading-zone scrolling.
+     */
+    beginSeek: function (opts = {}) {
+      const seq = ++this._seekSeq;
+      if (this._mse && this._mse.abortCtrl) {
+        try { this._mse.abortCtrl.abort(); } catch (_) {}
+        this._mse.abortCtrl = null;
+        this._mse.fetchingNext = false;
+      }
+      this._syncPhase = 'buffering';
+      this._pendingProgrammaticSeek = true;
+      this._awaitingInitialSeek = true;
+      this._seekTargetWordTime = typeof opts.wordStartSec === 'number' ? opts.wordStartSec : null;
+      this._teleprompterLine = null;
+      this._lastClockSecond = -1;
+
+      let lockedWordIdx = typeof opts.wordIdx === 'number' && !isNaN(opts.wordIdx) ? opts.wordIdx : -1;
+      if (opts.wordEl) {
+        this.setActiveWordElement(opts.wordEl, lockedWordIdx);
+        lockedWordIdx = this.activeWordIdx;
+      }
+      this._lockedWordIdx = lockedWordIdx;
+      this._lockedCompanionIdx = typeof opts.companionIdx === 'number' ? opts.companionIdx : -1;
+      return seq;
+    },
+
+    isCurrentSeek: function (seq) {
+      return seq === this._seekSeq;
+    },
+
+    isSeekLocked: function () {
+      return this._syncPhase === 'buffering' || this._awaitingInitialSeek || Boolean(this._boundAudio && this._boundAudio.seeking && this._syncPhase === 'seeking');
     },
 
     /**
@@ -278,17 +326,23 @@
       this._boundAudio = audio;
 
       const onPlay = () => this.startLoop();
-      const onPause = () => this.stopLoop();
+      const onPause = () => {
+        if (!this._scrollTarget) {
+          this.stopLoop();
+        }
+      };
       const onSeeked = () => {
         this._lastSpokenWordId = null;
         if (this._pendingProgrammaticSeek) {
           if (!audio.seeking) {
             this._pendingProgrammaticSeek = false;
+            this._syncPhase = audio.paused ? 'idle' : 'playing';
           }
         } else if (this.vbrData) {
           // External/native seek not initiated via prepareSeek: infer physical offset
+          this._syncPhase = audio.paused ? 'idle' : 'playing';
           const rawT = audio.currentTime;
-          if (rawT <= 0.05) {
+          if (this.streamMode === 'mse_vbr' || rawT <= 0.05) {
             this.seekOffset = 0.0;
           } else if (this.streamMode === 'patched_blob') {
             const physT = this._interp(rawT, this.vbrData.linearSeekTimes, this.vbrData.pcmTimes);
@@ -320,10 +374,18 @@
     startLoop: function () {
       if (this._rafId) return;
       const step = () => {
+        if (this._scrollTarget) {
+          this._stepScrollAnimation();
+        }
         if (this._boundAudio && !this._boundAudio.paused) {
+          if (this.streamMode === 'mse_vbr') {
+            this.maybePrefetchMseNextChunk(this._boundAudio);
+          }
           if (!this.playingEpisodeId || this.currentEpisodeId === this.playingEpisodeId) {
             this.update(this._boundAudio.currentTime);
           }
+          this._rafId = requestAnimationFrame(step);
+        } else if (this._scrollTarget) {
           this._rafId = requestAnimationFrame(step);
         } else {
           this._rafId = null;
@@ -449,10 +511,15 @@
       this.turnWordMap = {};
       this._teleprompterLine = null;
       this._userInteractedAt = 0;
-      if (!isSameEpisode) {
+      if (!isSameEpisode && (!this.playingEpisodeId || this.playingEpisodeId === epId)) {
         this._pendingProgrammaticSeek = false;
         this._awaitingInitialSeek = false;
         this._seekTargetWordTime = null;
+        this._syncPhase = 'idle';
+        this._lockedWordIdx = -1;
+        this._lockedCompanionIdx = -1;
+        this._scrollTarget = null;
+        this._lastClockSecond = -1;
       }
       this.clearHighlights();
 
@@ -488,8 +555,8 @@
       this.metrics.loadMs = Math.round(performance.now() - t0);
       this.metrics.wordCount = this.words.length;
 
-      // Proactively start progressive VBR stream buffering & in-memory Xing->Info patching
-      if (this.vbrData && episode.media_url) {
+      // Proactively start progressive VBR stream buffering ONLY when MSE audio/mpeg is unsupported or unavailable
+      if (this.vbrData && episode.media_url && (!this.isMseVbrSupported() || this._mseFailed[episode.media_url])) {
         this.ensurePatchedStream(episode.media_url);
       }
 
@@ -926,6 +993,324 @@
     },
 
     /**
+     * Checks whether the current browser supports frame-aligned MP3 MediaSource Extensions.
+     */
+    isMseVbrSupported: function () {
+      return (
+        typeof MediaSource !== 'undefined' &&
+        typeof MediaSource.isTypeSupported === 'function' &&
+        MediaSource.isTypeSupported('audio/mpeg') &&
+        typeof AbortController !== 'undefined'
+      );
+    },
+
+    /**
+     * Disposes any active MediaSource VBR session and aborts in-flight range fetches.
+     */
+    resetMseSession: function () {
+      const s = this._mse;
+      if (!s) return;
+      this._mse = null;
+      if (s.abortCtrl) {
+        try { s.abortCtrl.abort(); } catch (_) {}
+      }
+      if (s.abortOpen) {
+        try { s.abortOpen(); } catch (_) {}
+        s.abortOpen = null;
+      }
+      if (s.objectUrl) {
+        const staleUrl = s.objectUrl;
+        setTimeout(() => {
+          try { URL.revokeObjectURL(staleUrl); } catch (_) {}
+        }, 5000);
+      }
+    },
+
+    _findVbrSampleIndexBefore: function (targetSec) {
+      if (!this.vbrData || !this.vbrData.pcmTimes.length) return 0;
+      const goal = Math.max(0, targetSec - 0.10);
+      const times = this.vbrData.pcmTimes;
+      let low = 0;
+      let high = times.length - 1;
+      let best = 0;
+      while (low <= high) {
+        const mid = (low + high) >> 1;
+        if (times[mid] <= goal) {
+          best = mid;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+      return best;
+    },
+
+    _waitSourceBufferIdle: function (sb) {
+      if (!sb || !sb.updating) return Promise.resolve();
+      return new Promise((resolve) => {
+        sb.addEventListener('updateend', () => resolve(), { once: true });
+      });
+    },
+
+    _getBufferedWindowFor: function (sb, t) {
+      if (!sb || !sb.buffered) return null;
+      for (let i = 0; i < sb.buffered.length; i++) {
+        const st = sb.buffered.start(i);
+        const en = sb.buffered.end(i);
+        if (t >= st - 0.05 && t <= en) {
+          return { start: st, end: en };
+        }
+      }
+      return null;
+    },
+
+    /**
+     * O(1) VBR1 frame-aligned HTTP Range + MediaSource seek & load for Chromium browsers.
+     * Fetches only a ~40s MPEG frame-aligned window around `targetPhysicalSec` with `seekOffset = 0.0`.
+     */
+    mseSeekAndLoad: async function (audio, mediaUrl, targetPhysicalSec, seekSeq, shouldPlay) {
+      if (!audio || !mediaUrl || !this.vbrData || !this.isMseVbrSupported() || this._mseFailed[mediaUrl]) {
+        return { ok: false, reason: 'unsupported' };
+      }
+
+      const vbr = this.vbrData;
+      const totalSamples = vbr.pcmTimes.length;
+      if (totalSamples === 0) return { ok: false, reason: 'no_samples' };
+
+      const clampedPhys = Math.max(0, Math.min(Math.max(0, vbr.totalDurSec - 0.1), targetPhysicalSec));
+
+      // Re-use or initialize MSE session for this mediaUrl
+      let session = this._mse;
+      if (!session || session.mediaUrl !== mediaUrl || audio.src !== session.objectUrl || session.failed) {
+        this.resetMseSession();
+        const ms = new MediaSource();
+        const objectUrl = URL.createObjectURL(ms);
+        session = {
+          mediaUrl,
+          mediaSource: ms,
+          objectUrl,
+          sourceBuffer: null,
+          nextSampleIdx: 0,
+          fetchingNext: false,
+          abortCtrl: null,
+          queue: Promise.resolve(),
+          failed: false,
+          openPromise: null,
+          abortOpen: null,
+        };
+        session.openPromise = new Promise((resolve, reject) => {
+          let settled = false;
+          session.abortOpen = () => {
+            if (!settled) {
+              settled = true;
+              const err = new Error('MSE session aborted');
+              err.name = 'AbortError';
+              reject(err);
+            }
+          };
+          const onOpen = () => {
+            if (settled) return;
+            settled = true;
+            session.abortOpen = null;
+            try {
+              ms.duration = vbr.totalDurSec;
+              if (!session.sourceBuffer) {
+                session.sourceBuffer = ms.addSourceBuffer('audio/mpeg');
+              }
+              resolve(session);
+            } catch (err) {
+              reject(err);
+            }
+          };
+          if (ms.readyState === 'open') {
+            onOpen();
+          } else {
+            ms.addEventListener('sourceopen', onOpen, { once: true });
+          }
+        });
+        this._mse = session;
+        audio.src = objectUrl;
+      }
+
+      const runTask = async () => {
+        if (!this.isCurrentSeek(seekSeq) || session !== this._mse || session.failed) {
+          return { ok: false, aborted: true };
+        }
+        await session.openPromise;
+        if (!this.isCurrentSeek(seekSeq) || session !== this._mse || session.failed) {
+          return { ok: false, aborted: true };
+        }
+
+        const sb = session.sourceBuffer;
+        const ms = session.mediaSource;
+        if (!sb || ms.readyState === 'closed') {
+          return { ok: false, reason: 'closed' };
+        }
+
+        // Fast path: target is already buffered with adequate headroom
+        const existingWin = this._getBufferedWindowFor(sb, clampedPhys);
+        const atTalkEnd = session.nextSampleIdx >= totalSamples;
+        if (existingWin && (atTalkEnd || existingWin.end - clampedPhys >= 4.0)) {
+          this.streamMode = 'mse_vbr';
+          const seekT = this.prepareSeek(clampedPhys, this._seekTargetWordTime);
+          this._awaitingInitialSeek = false;
+          const clampedSeek = Math.max(existingWin.start, Math.min(existingWin.end - 0.02, seekT));
+          const didChangeTime = Math.abs((audio.currentTime || 0) - clampedSeek) > 0.002;
+          audio.currentTime = clampedSeek;
+          if (!didChangeTime && !audio.seeking) {
+            this._pendingProgrammaticSeek = false;
+            this._syncPhase = shouldPlay ? 'playing' : (audio.paused ? 'idle' : 'playing');
+          }
+          if (shouldPlay) audio.play().catch(() => {});
+          return { ok: true, cached: true };
+        }
+
+        const i0 = this._findVbrSampleIndexBefore(clampedPhys);
+        const CHUNK_STRIDE = 20; // ~40s MPEG frame-aligned window
+        const i1 = Math.min(totalSamples, i0 + CHUNK_STRIDE);
+        const b0 = vbr.id3Len + vbr.byteOffsets[i0];
+        const b1 = i1 < totalSamples ? (vbr.id3Len + vbr.byteOffsets[i1] - 1) : (vbr.id3Len + vbr.bytesLen - 1);
+
+        const abortCtrl = new AbortController();
+        session.abortCtrl = abortCtrl;
+        let resp;
+        try {
+          resp = await fetch(mediaUrl, {
+            headers: { Range: `bytes=${b0}-${b1}` },
+            signal: abortCtrl.signal,
+          });
+        } catch (err) {
+          if (err && err.name === 'AbortError') return { ok: false, aborted: true };
+          throw err;
+        }
+        if (resp.status !== 206) {
+          try { if (resp.body) await resp.body.cancel(); } catch (_) {}
+          throw new Error(`HTTP Range not honored (${resp.status})`);
+        }
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const buf = await resp.arrayBuffer();
+        if (!this.isCurrentSeek(seekSeq) || session !== this._mse || session.failed) {
+          return { ok: false, aborted: true };
+        }
+
+        await this._waitSourceBufferIdle(sb);
+        try { sb.abort(); } catch (_) {}
+        await this._waitSourceBufferIdle(sb);
+        if (sb.buffered.length > 0) {
+          sb.remove(0, Infinity);
+          await this._waitSourceBufferIdle(sb);
+        }
+        if (!this.isCurrentSeek(seekSeq) || session !== this._mse) {
+          return { ok: false, aborted: true };
+        }
+
+        sb.timestampOffset = vbr.pcmTimes[i0];
+        sb.appendBuffer(buf);
+        await this._waitSourceBufferIdle(sb);
+        if (!this.isCurrentSeek(seekSeq) || session !== this._mse) {
+          return { ok: false, aborted: true };
+        }
+
+        session.nextSampleIdx = i1;
+        if (i1 >= totalSamples && ms.readyState === 'open' && !sb.updating) {
+          try { ms.endOfStream(); } catch (_) {}
+        }
+
+        const win = this._getBufferedWindowFor(sb, clampedPhys) ||
+          (sb.buffered.length ? { start: sb.buffered.start(0), end: sb.buffered.end(0) } : null);
+        this.streamMode = 'mse_vbr';
+        const seekT = this.prepareSeek(clampedPhys, this._seekTargetWordTime);
+        this._awaitingInitialSeek = false;
+        const clampedSeek = win
+          ? Math.max(win.start, Math.min(Math.max(win.start, win.end - 0.02), seekT))
+          : seekT;
+        const didChangeTime = Math.abs((audio.currentTime || 0) - clampedSeek) > 0.002;
+        audio.currentTime = clampedSeek;
+        if (!didChangeTime && !audio.seeking) {
+          this._pendingProgrammaticSeek = false;
+          this._syncPhase = shouldPlay ? 'playing' : (audio.paused ? 'idle' : 'playing');
+        }
+        if (shouldPlay) audio.play().catch(() => {});
+        return { ok: true };
+      };
+
+      const chained = session.queue.then(runTask, runTask);
+      session.queue = chained.catch(() => {});
+      try {
+        return await chained;
+      } catch (err) {
+        if (!err || err.name !== 'AbortError') {
+          console.warn('[WordSync] MSE VBR fallback to patched_blob:', err);
+          this._mseFailed[mediaUrl] = true;
+          session.failed = true;
+          if (this._mse === session) {
+            this.resetMseSession();
+          }
+        }
+        return { ok: false, reason: 'error' };
+      }
+    },
+
+    /**
+     * Prefetches the next contiguous frame-aligned VBR1 window during MSE continuous playback.
+     */
+    maybePrefetchMseNextChunk: function (audio) {
+      const s = this._mse;
+      if (!audio || !s || s.failed || s.fetchingNext || audio.src !== s.objectUrl || !this.vbrData) return;
+      const vbr = this.vbrData;
+      const totalSamples = vbr.pcmTimes.length;
+      if (s.nextSampleIdx >= totalSamples || !s.sourceBuffer) return;
+
+      const sb = s.sourceBuffer;
+      const win = this._getBufferedWindowFor(sb, audio.currentTime);
+      if (!win || win.end - audio.currentTime > 18.0) return;
+
+      s.fetchingNext = true;
+      const i0 = s.nextSampleIdx;
+      const CHUNK_STRIDE = 20;
+      const i1 = Math.min(totalSamples, i0 + CHUNK_STRIDE);
+      const b0 = vbr.id3Len + vbr.byteOffsets[i0];
+      const b1 = i1 < totalSamples ? (vbr.id3Len + vbr.byteOffsets[i1] - 1) : (vbr.id3Len + vbr.bytesLen - 1);
+
+      const abortCtrl = new AbortController();
+      s.abortCtrl = abortCtrl;
+      const doAppend = async () => {
+        try {
+          const resp = await fetch(s.mediaUrl, {
+            headers: { Range: `bytes=${b0}-${b1}` },
+            signal: abortCtrl.signal,
+          });
+          if (resp.status !== 206) {
+            try { if (resp.body) await resp.body.cancel(); } catch (_) {}
+            return;
+          }
+          const buf = await resp.arrayBuffer();
+          if (s !== this._mse || s.failed || s.nextSampleIdx !== i0) return;
+
+          await this._waitSourceBufferIdle(sb);
+          if (win.start < audio.currentTime - 120) {
+            sb.remove(0, audio.currentTime - 120);
+            await this._waitSourceBufferIdle(sb);
+          }
+          if (s !== this._mse || s.failed || s.nextSampleIdx !== i0) return;
+          sb.appendBuffer(buf);
+          await this._waitSourceBufferIdle(sb);
+          s.nextSampleIdx = i1;
+          if (i1 >= totalSamples && s.mediaSource && s.mediaSource.readyState === 'open' && !sb.updating) {
+            try { s.mediaSource.endOfStream(); } catch (_) {}
+          }
+        } catch (_) {
+          // Aborted by newer seek or transient network drop
+        } finally {
+          if (s === this._mse) s.fetchingNext = false;
+        }
+      };
+      s.queue = s.queue.then(doAppend, doAppend);
+    },
+
+    /**
      * Piecewise-linear interpolation helper over sorted arrays `xs` -> `ys`.
      */
     _interp: function (x, xs, ys) {
@@ -967,10 +1352,11 @@
       const clampedPhys = Math.max(0, Number(targetPhysicalSec) || 0);
       this._seekTargetWordTime = typeof targetWordStartSec === 'number' ? targetWordStartSec : null;
       this._pendingProgrammaticSeek = true;
+      this._syncPhase = 'seeking';
       this._lastSpokenWordId = null;
       this._teleprompterLine = null;
 
-      if (clampedPhys <= 0.01 || !this.vbrData) {
+      if (this.streamMode === 'mse_vbr' || clampedPhys <= 0.01 || !this.vbrData) {
         this.seekOffset = 0.0;
         return clampedPhys;
       }
@@ -1367,11 +1753,112 @@
     },
 
     /**
+     * Computes unobstructed reading bounds inside #main-content (or window fallback),
+     * handling collapsing bottom-sheet transitions deterministically across all viewports.
+     */
+    getReadingZoneBounds: function () {
+      const sc = this.getScrollContainer();
+      const isShell = Boolean(sc && sc !== window);
+      const mainRect = isShell ? sc.getBoundingClientRect() : null;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+      const topFloor = mainRect ? Math.max(0, mainRect.top) : 0;
+
+      const toolbar = document.getElementById('transcript-sticky-toolbar');
+      const toolbarBottom = toolbar ? Math.max(topFloor, toolbar.getBoundingClientRect().bottom) : topFloor;
+
+      const playerBar = document.getElementById('audio-player-bar');
+      let bottomLimit = mainRect ? Math.min(viewportHeight, mainRect.bottom) : viewportHeight;
+      if (playerBar) {
+        bottomLimit = Math.min(bottomLimit, playerBar.getBoundingClientRect().top);
+      }
+
+      const companionBar = document.getElementById('transcript-lexicon-companion');
+      if (companionBar && typeof window !== 'undefined' && window.getComputedStyle) {
+        const compStyle = window.getComputedStyle(companionBar);
+        const tickerEl = document.getElementById('lex-mobile-ticker');
+        const tickerStyle = tickerEl ? window.getComputedStyle(tickerEl) : null;
+        const isBottomSheet = compStyle.display !== 'none' && (
+          (tickerStyle && tickerStyle.display !== 'none') ||
+          compStyle.position === 'fixed' ||
+          (isShell && viewportWidth <= 1100)
+        );
+        if (isBottomSheet) {
+          if (!companionBar.classList.contains('is-expanded') && tickerEl) {
+            const tickerRect = tickerEl.getBoundingClientRect();
+            const barH = tickerRect.height > 0 ? tickerRect.height + 12 : 52;
+            const pTop = playerBar ? playerBar.getBoundingClientRect().top : bottomLimit;
+            bottomLimit = Math.min(bottomLimit, Math.max(toolbarBottom + 80, pTop - barH));
+          } else {
+            const compRect = companionBar.getBoundingClientRect();
+            if (compRect.height > 0) {
+              bottomLimit = Math.min(bottomLimit, compRect.top);
+            }
+          }
+        }
+      }
+
+      return {
+        sc,
+        toolbarBottom,
+        bottomLimit,
+        availableHeight: bottomLimit - toolbarBottom,
+      };
+    },
+
+    _stepScrollAnimation: function () {
+      const target = this._scrollTarget;
+      if (!target) return;
+      const now = performance.now();
+      if (now >= target.until) {
+        this.setScrollTop(target.top);
+        this._scrollTarget = null;
+        return;
+      }
+      const cur = this.getScrollTop();
+      const diff = target.top - cur;
+      if (Math.abs(diff) <= 0.75) {
+        this.setScrollTop(target.top);
+        this._scrollTarget = null;
+        return;
+      }
+      this.setScrollTop(cur + diff * 0.18);
+    },
+
+    /**
+     * Unified single-owner reading-zone scroll positioning used by companion jumps,
+     * search phrase navigation, and deep links—avoids native vs rAF scroll fighting.
+     */
+    scrollToElement: function (el, options = {}) {
+      if (!el) return;
+      const behavior = options.behavior || 'auto';
+      const bounds = this.getReadingZoneBounds();
+      const availH = Math.max(80, bounds.availableHeight);
+      const rect = el.getBoundingClientRect();
+      const ratio = typeof options.ratio === 'number' ? options.ratio : 0.35;
+      const desiredTop = bounds.toolbarBottom + Math.min(availH * ratio, Math.max(20, (availH - rect.height) / 2));
+      const targetScrollY = Math.max(0, this.getScrollTop() + (rect.top - desiredTop));
+
+      if (behavior === 'smooth') {
+        this._programmaticScrollUntil = performance.now() + 500;
+        this._scrollTarget = { top: targetScrollY, until: performance.now() + 500 };
+        this.startLoop();
+      } else {
+        this._scrollTarget = null;
+        this.setScrollTop(targetScrollY);
+      }
+    },
+
+    /**
      * In 'track' mode, drives a continuous, seamless teleprompter scroll on every animation frame.
      * Continuously interpolates vertical document position across the duration of each line,
      * so text glides upward at a steady, gentle, constant velocity without jumping at line breaks.
      */
     updateTeleprompter: function (currentTime, targetIdx, wordEl) {
+      if (this._scrollTarget) {
+        this._stepScrollAnimation();
+        return;
+      }
       if (this.mode !== 'track' || !wordEl || !this.words || targetIdx < 0) return;
 
       const view = document.getElementById('transcript-view');
@@ -1381,54 +1868,9 @@
       const now = performance.now();
       if (now < this._programmaticScrollUntil || now - this._userInteractedAt < 2500) return;
 
-      const sc = this.getScrollContainer();
-      const isShell = Boolean(sc && sc !== window);
-      const mainRect = isShell ? sc.getBoundingClientRect() : null;
-      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-      const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-      const topFloor = mainRect ? Math.max(0, mainRect.top) : 0;
-
-      // 1. Calculate active reading viewport bounds between sticky toolbar and audio player
-      const toolbar = document.getElementById('transcript-sticky-toolbar');
-      let toolbarBottom = topFloor;
-      if (toolbar) {
-        toolbarBottom = Math.max(topFloor, toolbar.getBoundingClientRect().bottom);
-      }
-
-      const playerBar = document.getElementById('audio-player-bar');
-      let playerTop = mainRect ? Math.min(viewportHeight, mainRect.bottom) : viewportHeight;
-      if (playerBar) {
-        playerTop = Math.min(playerTop, playerBar.getBoundingClientRect().top);
-      }
-
-      const companionBar = document.getElementById('transcript-lexicon-companion');
-      if (companionBar) {
-        const compStyle = typeof window !== 'undefined' && window.getComputedStyle
-          ? window.getComputedStyle(companionBar)
-          : null;
-        const tickerEl = document.getElementById('lex-mobile-ticker');
-        const tickerStyle = tickerEl && typeof window !== 'undefined' && window.getComputedStyle
-          ? window.getComputedStyle(tickerEl)
-          : null;
-        const isBottomSheet = !compStyle || (
-          compStyle.display !== 'none' &&
-          (
-            (tickerStyle && tickerStyle.display !== 'none') ||
-            compStyle.position === 'fixed' ||
-            (isShell && viewportWidth <= 1100)
-          )
-        );
-        if (isBottomSheet) {
-          const compRect = companionBar.getBoundingClientRect();
-          if (compRect.height > 0) {
-            playerTop = Math.min(playerTop, compRect.top);
-          }
-        }
-      }
-
-      const availableHeight = playerTop - toolbarBottom;
-      if (availableHeight <= 100) return;
-      const centerLine = toolbarBottom + (availableHeight * 0.46);
+      const bounds = this.getReadingZoneBounds();
+      if (bounds.availableHeight <= 100) return;
+      const centerLine = bounds.toolbarBottom + (bounds.availableHeight * 0.46);
 
       // 2. Line interpolation: continuous progress across the line
       const line = this.getLineInfo(targetIdx, wordEl);
@@ -1473,12 +1915,25 @@
       if (this._awaitingInitialSeek) {
         return;
       }
+      if (this._boundAudio && this._boundAudio.seeking && this._syncPhase === 'seeking') {
+        return;
+      }
 
       const currentTime = this.getPhysicalTime(rawCurrentTime);
 
-      // Clear seek lead-in target once playback passes the targeted word start
+      const floorSec = Math.floor(Math.max(0, currentTime));
+      if (floorSec !== this._lastClockSecond) {
+        this._lastClockSecond = floorSec;
+        if (typeof this.onClockTick === 'function') {
+          this.onClockTick(currentTime, rawCurrentTime);
+        }
+      }
+
+      // Clear seek lead-in target & companion lock once playback passes the targeted word start
       if (this._seekTargetWordTime !== null && currentTime >= this._seekTargetWordTime) {
         this._seekTargetWordTime = null;
+        this._lockedWordIdx = -1;
+        this._lockedCompanionIdx = -1;
       }
 
       // Binary search across words for physical currentTime
@@ -1535,12 +1990,16 @@
      * Binary search to find the active word matching physical currentTime.
      */
     findWordIndex: function (time) {
-      // If currently in the lead-in before a specifically sought word, highlight that word
+      // Hold the sought target word only over its true lead-in window (wider 10s allowance reserved for raw Firefox VBR CDN fallback)
+      const leadWindowSec = (this.streamMode === 'cdn' && this.vbrData && this.isFirefox) ? 10.0 : 0.90;
       if (
         this._seekTargetWordTime !== null &&
-        time >= this._seekTargetWordTime - 10.0 &&
+        time >= this._seekTargetWordTime - leadWindowSec &&
         time < this._seekTargetWordTime
       ) {
+        if (this._lockedWordIdx >= 0 && this._lockedWordIdx < this.words.length) {
+          return this._lockedWordIdx;
+        }
         const leadIdx = this._findExactWordAtStart(this._seekTargetWordTime);
         if (leadIdx >= 0) return leadIdx;
       }

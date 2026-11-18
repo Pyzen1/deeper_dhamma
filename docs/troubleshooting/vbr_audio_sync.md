@@ -93,29 +93,35 @@ Because Deeper Dhamma is deployed as a **100% static public website** (`dist/` h
                                        |
                                        v
 +-----------------------------------------------------------------------------+
-| 2. Client-Side Browser Engine (`WordSync` in `word_sync.js`)                |
+| 2. Client-Side 3-Tier VBR Engine (`WordSync` in `word_sync.js` & `app.js`)  |
 |    - Queries `episode_words` from SQLite WASM and parses `VBR1` in < 5ms.   |
-|    - Universal VBR Stream Neutralization (`streamMode = 'patched_blob'`):    |
-|      Across Chromium, Firefox, and Safari, progressively fetches `media_url`|
-|      from Podbean CDN via CORS `fetch()`, patches the 8-byte `Xing` header  |
-|      to `Info\x00\x00\x00\x03` in client-side `Uint8Array` memory (3-talk   |
-|      LRU cache with 512 KB read-ahead), and serves a progressive `Blob` URL |
-|      using deterministic `linearSeekTimes` (`±0.25s` accuracy, cold/warm).  |
-|    - Falls back to `streamMode = 'cdn'` only if CORS fetch fails.           |
+|    - Tier 1 (`streamMode = 'mse_vbr'`, Chromium/Edge): `mseSeekAndLoad()`   |
+|      computes O(1) MPEG frame-aligned HTTP `Range` bounds (`id3Len +        |
+|      byteOffsets[i0]`) for a ~40s (`CHUNK_STRIDE = 20`) window, sets        |
+|      `SourceBuffer.timestampOffset = pcmTimes[i0]` (`seekOffset = 0.0`),    |
+|      and seamlessly prefetches contiguous chunks ahead of playback.         |
+|    - Tier 2 (`streamMode = 'patched_blob'`, Firefox/Safari or non-206):     |
+|      Progressively fetches `media_url` via CORS `fetch()`, patches the      |
+|      8-byte `Xing` header to `Info\x00\x00\x00\x03` in `Uint8Array` memory, |
+|      and serves a progressive `Blob` URL (`linearSeekTimes`, ±0.25s).       |
+|    - Tier 3 (`streamMode = 'cdn'`): Direct stream fallback on CORS block.  |
 +-----------------------------------------------------------------------------+
                                        |
                                        v
 +-----------------------------------------------------------------------------+
-| 3. Constant-Offset 1:1 Playback Clock & Click-Race Guards (`word_sync.js`)  |
-|    - `state._audioSeekSeq` discards stale async seek/fetch completions.       |
-|    - `WordSync.setActiveWordElement()` updates highlight + index atomically.|
-|    - `_programmaticScrollUntil` yields 60fps `updateTeleprompter()` while   |
-|      `scrollElementIntoReadingZone(..., 'smooth')` settles companion jumps. |
-|    - `syncProgress()` ignores `audio.seeking` / `_awaitingInitialSeek`, and |
-|      `updateActiveCompanionTerm()` honors `_seekTargetWordTime` lead-in.    |
-|    - On seek to `targetPhys`: `streamSeek = WordSync.prepareSeek(targetPhys)`|
-|      establishes `seekOffset = targetPhys - streamSeek`, keeping `physTime` |
-|      = `audio.currentTime + seekOffset` locked 1:1 to 44.1 kHz PCM audio.   |
+| 3. Unified Seek State Machine & Single-Owner Scroll (`word_sync.js`)        |
+|    - `WordSync.beginSeek()` / `isCurrentSeek()` / `isSeekLocked()` track    |
+|      monotonic `_seekSeq` and `_syncPhase` (`idle|buffering|seeking|playing`|
+|      ), aborting stale Range fetches across `playAudioSegment` & `safeSeek`.|
+|    - `WordSync.setActiveWordElement()` and `wordIdx`-locked companion       |
+|      tracking (`term.wordIdx <= activeWordIdx`) prevent lead-in flip-back;  |
+|      pre-target hold is tightened to `0.90s` (`10s` only on Firefox CDN).   |
+|    - `onClockTick` syncs `#time-current` on every floored-second crossing   |
+|      inside `rAF` (plus `'pause'`/`'ended'`) to prevent clock vs word skew. |
+|    - `WordSync.scrollToElement()` + `updateTeleprompter()` share one `rAF`  |
+|      reading-zone animator (`getReadingZoneBounds()`), ending scroll fights.|
+|    - `physTime = audio.currentTime + seekOffset` (`0.0` in MSE mode) keeps  |
+|      playback locked 1:1 to decoded 44.1 kHz PCM audio.                     |
 +-----------------------------------------------------------------------------+
 ```
 
