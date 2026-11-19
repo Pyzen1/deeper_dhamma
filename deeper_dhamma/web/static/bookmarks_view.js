@@ -65,6 +65,9 @@
       if (state.isDbReady && state.activeTab === 'browse-view' && state.browse.bookmarkedOnly) {
         loadBrowseCatalog({ append: false, skipHistory: true });
       }
+      if (state.isDbReady && state.activeTab === 'search-view' && state.search.bookmarkedOnly && typeof DD.executeSearch === 'function') {
+        DD.executeSearch(state.currentQuery, { keepPage: true, skipHistory: true });
+      }
     },
 
     getAll() {
@@ -164,6 +167,9 @@
       }
       if (els.catCntBookmarked) {
         els.catCntBookmarked.textContent = count.toLocaleString();
+      }
+      if (els.searchCatCntBookmarked) {
+        els.searchCatCntBookmarked.textContent = count.toLocaleString();
       }
     },
 

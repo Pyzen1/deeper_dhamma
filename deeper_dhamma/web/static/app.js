@@ -98,6 +98,20 @@
       totalSegments: 0,
       filteredEpisodeIds: [],
       filteredFilterOpts: null,
+      teachers: [],
+      teacherMatch: 'any',
+      years: [],
+      titleQuery: '',
+      titleWholeWord: false,
+      durationBuckets: [],
+      minDurationMin: '',
+      maxDurationMin: '',
+      collections: [],
+      formats: [],
+      coTaughtOnly: false,
+      bookmarkedOnly: false,
+      sort: 'rank',
+      debounceTimer: null,
     },
     currentFilteredTalks: [],
     dateFilterMode: 'year',
@@ -139,8 +153,6 @@
     searchInput: document.getElementById('search-input'),
     clearSearchBtn: document.getElementById('clear-search-btn'),
     exactCheckbox: document.getElementById('exact-mode-checkbox'),
-    teacherFilter: document.getElementById('teacher-filter-select'),
-    yearFilter: document.getElementById('year-filter-select'),
     btnModeYear: document.getElementById('btn-mode-year'),
     btnModeRange: document.getElementById('btn-mode-range'),
     dateRangeInputs: document.getElementById('date-range-inputs'),
@@ -536,10 +548,14 @@
           break;
 
         case 'search':
-        default:
+        default: {
+          if (typeof DD.applySearchParamsFromRoute === 'function') {
+            DD.applySearchParamsFromRoute(params);
+          }
           switchTab('search-view', { skipHistory: true });
           const targetQ = params.q || '';
-          if (targetQ !== state.currentQuery) {
+          const hasSearchFilters = typeof DD.hasActiveSearchFilters === 'function' && DD.hasActiveSearchFilters();
+          if (targetQ !== state.currentQuery || hasSearchFilters) {
             if (els.searchInput) {
               els.searchInput.value = targetQ;
               els.clearSearchBtn.style.display = targetQ.length > 0 ? 'inline-block' : 'none';
@@ -553,6 +569,7 @@
             executeSearch('', { skipHistory: true });
           }
           break;
+        }
       }
     },
   };
@@ -710,29 +727,11 @@
         els.notesSvgTranscribed.textContent = transcribedFormatted;
       }
 
-      // Populate search filter dropdowns (idempotent across hot-swaps)
-      if (data.teachers && els.teacherFilter) {
-        els.teacherFilter.innerHTML = '<option value="">All Monastics</option>';
-        data.teachers.forEach(t => {
-          const opt1 = document.createElement('option');
-          opt1.value = t;
-          opt1.textContent = t;
-          els.teacherFilter.appendChild(opt1);
-        });
-      }
-
-      if (data.years && els.yearFilter) {
-        els.yearFilter.innerHTML = '<option value="">All Years</option>';
-        data.years.forEach(y => {
-          const opt1 = document.createElement('option');
-          opt1.value = y;
-          opt1.textContent = y;
-          els.yearFilter.appendChild(opt1);
-        });
-      }
-
-      // Populate multi-faceted Browse filter UI
+      // Populate multi-faceted Browse & Search filter UI
       populateBrowseFilterFacets(data);
+      if (typeof DD.populateSearchFilterFacets === 'function') {
+        DD.populateSearchFilterFacets(data);
+      }
 
       if (els.btnDownloadAllArchive && data.transcribed_episodes) {
         els.btnDownloadAllArchive.innerHTML = `<span class="material-symbols-outlined ms-inline" aria-hidden="true">inventory_2</span> Download All Transcripts (${data.transcribed_episodes}) <span class="material-symbols-outlined ms-inline" aria-hidden="true">arrow_drop_down</span>`;
@@ -807,71 +806,6 @@
       executeSearch(els.searchInput.value.trim());
     });
 
-    els.teacherFilter.addEventListener('change', () => {
-      executeSearch(els.searchInput.value.trim());
-    });
-
-    els.yearFilter.addEventListener('change', () => {
-      executeSearch(els.searchInput.value.trim());
-    });
-
-    if (els.btnModeYear && els.btnModeRange) {
-      els.btnModeYear.addEventListener('click', () => {
-        state.dateFilterMode = 'year';
-        els.btnModeYear.classList.add('active');
-        els.btnModeRange.classList.remove('active');
-        els.yearFilter.style.display = 'inline-block';
-        els.dateRangeInputs.style.display = 'none';
-        executeSearch(els.searchInput.value.trim());
-      });
-
-      els.btnModeRange.addEventListener('click', () => {
-        state.dateFilterMode = 'range';
-        els.btnModeRange.classList.add('active');
-        els.btnModeYear.classList.remove('active');
-        els.yearFilter.style.display = 'none';
-        els.dateRangeInputs.style.display = 'inline-flex';
-        executeSearch(els.searchInput.value.trim());
-      });
-    }
-
-    if (els.startDateInput) {
-      els.startDateInput.addEventListener('change', () => {
-        executeSearch(els.searchInput.value.trim());
-      });
-    }
-
-    if (els.endDateInput) {
-      els.endDateInput.addEventListener('change', () => {
-        executeSearch(els.searchInput.value.trim());
-      });
-    }
-
-    if (els.sortOrderSelect) {
-      els.sortOrderSelect.addEventListener('change', () => {
-        executeSearch(els.searchInput.value.trim());
-      });
-    }
-
-    if (els.resetFiltersBtn) {
-      els.resetFiltersBtn.addEventListener('click', () => {
-        els.searchInput.value = '';
-        els.clearSearchBtn.style.display = 'none';
-        els.exactCheckbox.checked = false;
-        els.teacherFilter.value = '';
-        els.yearFilter.value = '';
-        if (els.startDateInput) els.startDateInput.value = '';
-        if (els.endDateInput) els.endDateInput.value = '';
-        if (els.sortOrderSelect) els.sortOrderSelect.value = 'rank';
-        state.dateFilterMode = 'year';
-        if (els.btnModeYear) els.btnModeYear.classList.add('active');
-        if (els.btnModeRange) els.btnModeRange.classList.remove('active');
-        if (els.yearFilter) els.yearFilter.style.display = 'inline-block';
-        if (els.dateRangeInputs) els.dateRangeInputs.style.display = 'none';
-        executeSearch('');
-      });
-    }
-
     const goToSearchPage = (nextOffset) => {
       const limit = state.search.limit || 50;
       const total = state.search.totalEpisodes || 0;
@@ -918,6 +852,9 @@
 
     setupDownloadDropdowns();
     setupBrowseFilterListeners();
+    if (typeof DD.setupSearchFilterListeners === 'function') {
+      DD.setupSearchFilterListeners();
+    }
 
     if (els.btnBrowseLoadMore) {
       els.btnBrowseLoadMore.addEventListener('click', () => {
@@ -1576,8 +1513,11 @@
       const docRoute = docFilter
         ? `documents?id=${activeDocId}&q=${encodeURIComponent(docFilter)}`
         : `documents?id=${activeDocId}`;
+      const searchRoute = typeof DD.buildSearchRouteHash === 'function'
+        ? DD.buildSearchRouteHash(state.currentQuery).replace(/^#/, '')
+        : (state.currentQuery ? `search?q=${encodeURIComponent(state.currentQuery)}` : 'search');
       const tabToRouteMap = {
-        'search-view': state.currentQuery ? `search?q=${encodeURIComponent(state.currentQuery)}` : 'search',
+        'search-view': searchRoute,
         'browse-view': buildBrowseRouteHash().replace(/^#/, ''),
         'bookmarks-view': 'bookmarks',
         'lexicon-view': state.lexicon.term ? `lexicon?term=${encodeURIComponent(state.lexicon.term)}` : 'lexicon',

@@ -1107,7 +1107,7 @@ function handleGetStats() {
   };
 }
 
-function handleGetEpisodes({
+function normalizeEpisodeFilterCriteria({
   teacher,
   teachers,
   teacherMatch = 'any',
@@ -1124,16 +1124,7 @@ function handleGetEpisodes({
   formats = null,
   coTaughtOnly = false,
   episodeIds = null,
-  sort = 'date_desc',
-  transcribedOnly = true,
-  limit = 50,
-  offset = 0,
 } = {}) {
-  if (db && episodesMetaList.length === 0) {
-    rebuildEpisodesMetaCache();
-  }
-
-  // Normalize teacher list (supports both single `teacher` and multi `teachers`)
   const rawTeachers = [];
   if (Array.isArray(teachers)) {
     for (let i = 0; i < teachers.length; i++) {
@@ -1146,7 +1137,6 @@ function handleGetEpisodes({
   const targetTeacherSlugs = rawTeachers.map(resolveTeacherToSlug).filter(Boolean);
   const useAllTeachers = teacherMatch === 'all';
 
-  // Normalize year set (supports both single `year` and multi `years`)
   const yearSet = new Set();
   if (Array.isArray(years)) {
     for (let i = 0; i < years.length; i++) {
@@ -1170,78 +1160,156 @@ function handleGetEpisodes({
   const colList = Array.isArray(collections) ? collections.filter(Boolean) : [];
   const fmtList = Array.isArray(formats) ? formats.filter(Boolean) : [];
   const allowedIdsSet = Array.isArray(episodeIds) ? new Set(episodeIds) : null;
-  const hasTitleQuery = Boolean(titleQuery && String(titleQuery).trim());
+  const cleanTitleQuery = titleQuery ? String(titleQuery).trim() : '';
+  const hasTitleQuery = Boolean(cleanTitleQuery);
 
+  const hasAnyFilter = Boolean(
+    allowedIdsSet ||
+    yearSet.size > 0 ||
+    startDate ||
+    endDate ||
+    targetTeacherSlugs.length > 0 ||
+    coTaughtOnly ||
+    colList.length > 0 ||
+    fmtList.length > 0 ||
+    hasMinDur ||
+    hasMaxDur ||
+    bucketSet ||
+    hasTitleQuery
+  );
+
+  return {
+    targetTeacherSlugs,
+    useAllTeachers,
+    yearSet,
+    startDate: startDate || '',
+    endDate: endDate || '',
+    bucketSet,
+    hasMinDur,
+    hasMaxDur,
+    minDurVal,
+    maxDurVal,
+    colList,
+    fmtList,
+    coTaughtOnly: Boolean(coTaughtOnly),
+    allowedIdsSet,
+    hasTitleQuery,
+    titleQuery: cleanTitleQuery,
+    titleWholeWord: Boolean(titleWholeWord),
+    hasAnyFilter,
+  };
+}
+
+function matchesEpisodeFilterCriteria(ep, criteria) {
+  if (!ep) return false;
+  if (!criteria || !criteria.hasAnyFilter) return true;
+
+  if (criteria.allowedIdsSet && !criteria.allowedIdsSet.has(ep.id)) return false;
+
+  if (criteria.yearSet.size > 0) {
+    const epYear = ep._year || (ep.year ? Number(ep.year) : (ep.date && /^\d{4}/.test(ep.date) ? Number(ep.date.slice(0, 4)) : 0));
+    if (!criteria.yearSet.has(epYear)) return false;
+  }
+  if (criteria.startDate && (ep.date || '') < criteria.startDate) return false;
+  if (criteria.endDate && (ep.date || '') > criteria.endDate) return false;
+
+  if (criteria.targetTeacherSlugs.length > 0) {
+    if (ep._teacherSlugs && ep._teacherSlugs.size > 0) {
+      if (criteria.useAllTeachers) {
+        for (let t = 0; t < criteria.targetTeacherSlugs.length; t++) {
+          const slug = criteria.targetTeacherSlugs[t];
+          if (!ep._teacherSlugs.has(slug) && !(ep._teacherLowerNames && ep._teacherLowerNames.has(slug))) {
+            return false;
+          }
+        }
+      } else {
+        let anyMatched = false;
+        for (let t = 0; t < criteria.targetTeacherSlugs.length; t++) {
+          const slug = criteria.targetTeacherSlugs[t];
+          if (ep._teacherSlugs.has(slug) || (ep._teacherLowerNames && ep._teacherLowerNames.has(slug))) {
+            anyMatched = true;
+            break;
+          }
+        }
+        if (!anyMatched) return false;
+      }
+    } else {
+      const primary = (ep.primary_display || '').toLowerCase();
+      const identifiedRaw = (ep.identified_teachers || '').toLowerCase();
+      const identifiedList = identifiedRaw ? identifiedRaw.split(',').map((s) => stripTeacherNote(s).toLowerCase()).filter(Boolean) : [];
+      const matchesOne = (slug) => {
+        const wordBoundaryRe = new RegExp(`\\b${escapeRegExp(slug)}\\b`, 'i');
+        return primary === slug || identifiedList.includes(slug) || wordBoundaryRe.test(ep.primary_display || '') || wordBoundaryRe.test(ep.identified_teachers || '');
+      };
+      if (criteria.useAllTeachers) {
+        if (!criteria.targetTeacherSlugs.every(matchesOne)) return false;
+      } else if (!criteria.targetTeacherSlugs.some(matchesOne)) {
+        return false;
+      }
+    }
+  }
+
+  if (criteria.coTaughtOnly && (!ep._categories || !ep._categories.has('co_taught'))) return false;
+
+  if (criteria.colList.length > 0) {
+    let colMatch = false;
+    for (let c = 0; c < criteria.colList.length; c++) {
+      if (ep._categories && ep._categories.has(criteria.colList[c])) {
+        colMatch = true;
+        break;
+      }
+    }
+    if (!colMatch) return false;
+  }
+
+  if (criteria.fmtList.length > 0) {
+    let fmtMatch = false;
+    for (let f = 0; f < criteria.fmtList.length; f++) {
+      if (ep._categories && ep._categories.has(criteria.fmtList[f])) {
+        fmtMatch = true;
+        break;
+      }
+    }
+    if (!fmtMatch) return false;
+  }
+
+  if (criteria.hasMinDur || criteria.hasMaxDur) {
+    const durMin = ep._durMin !== undefined ? ep._durMin : Math.round((ep.duration_sec || 0) / 60);
+    if (criteria.hasMinDur && durMin < criteria.minDurVal) return false;
+    if (criteria.hasMaxDur && durMin > criteria.maxDurVal) return false;
+  } else if (criteria.bucketSet && !criteria.bucketSet.has(ep._durBucket)) {
+    return false;
+  }
+
+  if (criteria.hasTitleQuery) {
+    const normTitle = ep._normTitle !== undefined ? ep._normTitle : foldDiacritics(ep.title || '');
+    if (!matchesTitleQuery(normTitle, criteria.titleQuery, criteria.titleWholeWord)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function handleGetEpisodes(opts = {}) {
+  const {
+    sort = 'date_desc',
+    transcribedOnly = true,
+    limit = 50,
+    offset = 0,
+  } = opts;
+  if (db && episodesMetaList.length === 0) {
+    rebuildEpisodesMetaCache();
+  }
+
+  const criteria = normalizeEpisodeFilterCriteria(opts);
   const filtered = [];
   let totalDurationSec = 0;
 
   for (let i = 0; i < episodesMetaList.length; i++) {
     const ep = episodesMetaList[i];
     if (transcribedOnly && !ep.is_transcribed) continue;
-    if (allowedIdsSet && !allowedIdsSet.has(ep.id)) continue;
-
-    if (yearSet.size > 0 && !yearSet.has(ep._year)) continue;
-    if (startDate && (ep.date || '') < startDate) continue;
-    if (endDate && (ep.date || '') > endDate) continue;
-
-    if (targetTeacherSlugs.length > 0) {
-      if (useAllTeachers) {
-        let allMatched = true;
-        for (let t = 0; t < targetTeacherSlugs.length; t++) {
-          const slug = targetTeacherSlugs[t];
-          if (!ep._teacherSlugs.has(slug) && !ep._teacherLowerNames.has(slug)) {
-            allMatched = false;
-            break;
-          }
-        }
-        if (!allMatched) continue;
-      } else {
-        let anyMatched = false;
-        for (let t = 0; t < targetTeacherSlugs.length; t++) {
-          const slug = targetTeacherSlugs[t];
-          if (ep._teacherSlugs.has(slug) || ep._teacherLowerNames.has(slug)) {
-            anyMatched = true;
-            break;
-          }
-        }
-        if (!anyMatched) continue;
-      }
-    }
-
-    if (coTaughtOnly && !ep._categories.has('co_taught')) continue;
-
-    if (colList.length > 0) {
-      let colMatch = false;
-      for (let c = 0; c < colList.length; c++) {
-        if (ep._categories.has(colList[c])) {
-          colMatch = true;
-          break;
-        }
-      }
-      if (!colMatch) continue;
-    }
-
-    if (fmtList.length > 0) {
-      let fmtMatch = false;
-      for (let f = 0; f < fmtList.length; f++) {
-        if (ep._categories.has(fmtList[f])) {
-          fmtMatch = true;
-          break;
-        }
-      }
-      if (!fmtMatch) continue;
-    }
-
-    if (hasMinDur || hasMaxDur) {
-      if (hasMinDur && ep._durMin < minDurVal) continue;
-      if (hasMaxDur && ep._durMin > maxDurVal) continue;
-    } else if (bucketSet && !bucketSet.has(ep._durBucket)) {
-      continue;
-    }
-
-    if (hasTitleQuery && !matchesTitleQuery(ep._normTitle, titleQuery, Boolean(titleWholeWord))) {
-      continue;
-    }
+    if (!matchesEpisodeFilterCriteria(ep, criteria)) continue;
 
     filtered.push(ep);
     totalDurationSec += ep._durSec;
@@ -1587,36 +1655,11 @@ function escapeRegExp(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function matchesEpisodeFilters(ep, { teacher, year, startDate, endDate }) {
-  if (!ep) return false;
-  if (teacher) {
-    const targetSlug = resolveTeacherToSlug(teacher);
-    if (ep._teacherSlugs && ep._teacherSlugs.size > 0) {
-      if (!ep._teacherSlugs.has(targetSlug) && !(ep._teacherLowerNames && ep._teacherLowerNames.has(targetSlug))) {
-        return false;
-      }
-    } else {
-      const tf = teacher.trim().toLowerCase();
-      const primary = (ep.primary_display || '').toLowerCase();
-      const identifiedRaw = (ep.identified_teachers || '').toLowerCase();
-      const identifiedList = identifiedRaw ? identifiedRaw.split(',').map((s) => stripTeacherNote(s).toLowerCase()).filter(Boolean) : [];
-      const wordBoundaryRe = new RegExp(`\\b${escapeRegExp(tf)}\\b`, 'i');
-      const matchesTeacher =
-        primary === tf ||
-        identifiedList.includes(tf) ||
-        wordBoundaryRe.test(ep.primary_display || '') ||
-        wordBoundaryRe.test(ep.identified_teachers || '');
-      if (!matchesTeacher) return false;
-    }
-  }
-  if (year) {
-    const yNum = Number(year);
-    const epYear = ep._year || (ep.year ? Number(ep.year) : (ep.date && /^\d{4}/.test(ep.date) ? Number(ep.date.slice(0, 4)) : 0));
-    if (epYear !== yNum) return false;
-  }
-  if (startDate && (ep.date || '') < startDate) return false;
-  if (endDate && (ep.date || '') > endDate) return false;
-  return true;
+function matchesEpisodeFilters(ep, filterOpts = {}) {
+  const criteria = filterOpts && filterOpts.hasAnyFilter !== undefined
+    ? filterOpts
+    : normalizeEpisodeFilterCriteria(filterOpts);
+  return matchesEpisodeFilterCriteria(ep, criteria);
 }
 
 function extractExplicitHighlightInfo(cleanQuery) {
@@ -1666,9 +1709,21 @@ async function handleSearchFTS({
   query,
   exact = false,
   teacher,
+  teachers,
+  teacherMatch = 'any',
   year,
+  years,
   startDate,
   endDate,
+  titleQuery,
+  titleWholeWord = false,
+  minDurationMin = null,
+  maxDurationMin = null,
+  durationBuckets = null,
+  collections = null,
+  formats = null,
+  coTaughtOnly = false,
+  episodeIds = null,
   sort = 'rank',
   limit = 500,
   episodeLimit = null,
@@ -1737,8 +1792,29 @@ async function handleSearchFTS({
     WHERE transcripts_fts MATCH ? AND transcripts_fts.rowid IN
   `;
 
-  const hasEpFilters = Boolean(teacher || year || startDate || endDate);
-  const filterCriteria = { teacher, year, startDate, endDate };
+  if (db && episodesMetaList.length === 0) {
+    rebuildEpisodesMetaCache();
+  }
+
+  const filterCriteria = normalizeEpisodeFilterCriteria({
+    teacher,
+    teachers,
+    teacherMatch,
+    year,
+    years,
+    startDate,
+    endDate,
+    titleQuery,
+    titleWholeWord,
+    minDurationMin,
+    maxDurationMin,
+    durationBuckets,
+    collections,
+    formats,
+    coTaughtOnly,
+    episodeIds,
+  });
+  const hasEpFilters = filterCriteria.hasAnyFilter;
   const talksList = (activeManifest && activeManifest.talks) ? activeManifest.talks : [];
   const mountedCount = isShardedMode ? talksList.filter((t) => shardHandles.has(t.id)).length : 1;
 
@@ -1748,10 +1824,20 @@ async function handleSearchFTS({
     sharded: isShardedMode,
     q: cleanQuery,
     exact: Boolean(exact),
-    teacher: teacher || '',
-    year: year || '',
-    startDate: startDate || '',
-    endDate: endDate || '',
+    teachers: filterCriteria.targetTeacherSlugs,
+    teacherMatch: filterCriteria.useAllTeachers ? 'all' : 'any',
+    years: Array.from(filterCriteria.yearSet).sort((a, b) => a - b),
+    startDate: filterCriteria.startDate,
+    endDate: filterCriteria.endDate,
+    titleQuery: filterCriteria.titleQuery,
+    titleWholeWord: filterCriteria.titleWholeWord,
+    minDur: filterCriteria.minDurVal,
+    maxDur: filterCriteria.maxDurVal,
+    buckets: filterCriteria.bucketSet ? Array.from(filterCriteria.bucketSet).sort() : null,
+    col: filterCriteria.colList,
+    fmt: filterCriteria.fmtList,
+    coTaughtOnly: filterCriteria.coTaughtOnly,
+    episodeIds: filterCriteria.allowedIdsSet ? Array.from(filterCriteria.allowedIdsSet).sort() : null,
     sort: sort || 'rank',
   });
 
@@ -1999,8 +2085,10 @@ async function handleSearchFTS({
         const ep = episodesMetaMap.get(c.episode_id) || {};
         grp = {
           episode_id: c.episode_id,
+          year: ep._year || 0,
           date: ep.date || '',
-          duration_sec: ep.duration_sec || 0,
+          duration_sec: ep._durSec || ep.duration_sec || 0,
+          normTitle: ep._normTitle || '',
           bestRank: c.rank_score || 0,
           segments: [],
         };
@@ -2020,12 +2108,20 @@ async function handleSearchFTS({
       g.episodeRankScore = g.bestRank - 0.35 * Math.log(1 + g.segments.length);
     }
 
-    if (sort === 'date_asc') {
+    if (sort === 'year_desc') {
+      sortedEpisodes.sort((a, b) => (b.year - a.year) || (b.date || '').localeCompare(a.date || '') || b.episode_id.localeCompare(a.episode_id));
+    } else if (sort === 'year_asc') {
+      sortedEpisodes.sort((a, b) => (a.year - b.year) || (a.date || '').localeCompare(b.date || '') || a.episode_id.localeCompare(b.episode_id));
+    } else if (sort === 'date_asc') {
       sortedEpisodes.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.episode_id.localeCompare(b.episode_id));
     } else if (sort === 'date_desc') {
       sortedEpisodes.sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.episode_id.localeCompare(a.episode_id));
     } else if (sort === 'duration_desc') {
-      sortedEpisodes.sort((a, b) => (b.duration_sec || 0) - (a.duration_sec || 0) || (b.date || '').localeCompare(a.date || ''));
+      sortedEpisodes.sort((a, b) => (b.duration_sec || 0) - (a.duration_sec || 0) || (b.year - a.year) || (b.date || '').localeCompare(a.date || ''));
+    } else if (sort === 'duration_asc') {
+      sortedEpisodes.sort((a, b) => (a.duration_sec || 0) - (b.duration_sec || 0) || (b.year - a.year) || (b.date || '').localeCompare(a.date || ''));
+    } else if (sort === 'title_asc') {
+      sortedEpisodes.sort((a, b) => (a.normTitle || '').localeCompare(b.normTitle || '') || (b.year - a.year));
     } else {
       sortedEpisodes.sort((a, b) => (a.episodeRankScore - b.episodeRankScore) || (b.date || '').localeCompare(a.date || ''));
     }

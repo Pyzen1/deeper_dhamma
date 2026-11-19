@@ -23,6 +23,826 @@
   const openTranscriptDrawer = (...args) => DD.openTranscriptDrawer(...args);
   const switchTab = (...args) => DD.switchTab(...args);
 
+  Object.assign(els, {
+    searchTeachersDropdown: document.getElementById('search-teachers-dropdown'),
+    searchTeachersBtn: document.getElementById('search-teachers-btn'),
+    searchTeachersLabel: document.getElementById('search-teachers-label'),
+    searchTeachersSearch: document.getElementById('search-teachers-search'),
+    searchTeachersList: document.getElementById('search-teachers-list'),
+    searchTeachersSelectedInfo: document.getElementById('search-teachers-selected-info'),
+    searchTeachersModeHint: document.getElementById('search-teachers-mode-hint'),
+    btnSearchTeacherModeAny: document.getElementById('btn-search-teacher-mode-any'),
+    btnSearchTeacherModeAll: document.getElementById('btn-search-teacher-mode-all'),
+    btnSearchTeachersClear: document.getElementById('btn-search-teachers-clear'),
+
+    searchYearsDropdown: document.getElementById('search-years-dropdown'),
+    searchYearsBtn: document.getElementById('search-years-btn'),
+    searchYearsLabel: document.getElementById('search-years-label'),
+    searchEraPresets: document.getElementById('search-era-presets'),
+    searchYearFrom: document.getElementById('search-year-from'),
+    searchYearTo: document.getElementById('search-year-to'),
+    btnSearchYearRangeAdd: document.getElementById('btn-search-year-range-add'),
+    searchYearsGrid: document.getElementById('search-years-grid'),
+    btnSearchYearsClear: document.getElementById('btn-search-years-clear'),
+
+    searchDurationDropdown: document.getElementById('search-duration-dropdown'),
+    searchDurationBtn: document.getElementById('search-duration-btn'),
+    searchDurationLabel: document.getElementById('search-duration-label'),
+    searchDurationBuckets: document.getElementById('search-duration-buckets'),
+    searchMinDuration: document.getElementById('search-min-duration'),
+    searchMaxDuration: document.getElementById('search-max-duration'),
+    btnSearchDurationClear: document.getElementById('btn-search-duration-clear'),
+
+    searchCategoryDropdown: document.getElementById('search-category-dropdown'),
+    searchCategoryBtn: document.getElementById('search-category-btn'),
+    searchCategoryLabel: document.getElementById('search-category-label'),
+    searchCollectionsList: document.getElementById('search-collections-list'),
+    searchFormatsList: document.getElementById('search-formats-list'),
+    searchCotaughtCheckbox: document.getElementById('search-cotaught-checkbox'),
+    searchBookmarkedCheckbox: document.getElementById('search-bookmarked-checkbox'),
+    searchCatCntBookmarked: document.getElementById('search-cat-cnt-bookmarked'),
+    btnSearchCategoryClear: document.getElementById('btn-search-category-clear'),
+
+    searchTitleDropdown: document.getElementById('search-title-dropdown'),
+    searchTitleBtn: document.getElementById('search-title-btn'),
+    searchTitleLabel: document.getElementById('search-title-label'),
+    searchTitleInput: document.getElementById('search-title-input'),
+    searchClearTitleBtn: document.getElementById('search-clear-title-btn'),
+    searchTitleWordCheckbox: document.getElementById('search-title-word-checkbox'),
+    btnSearchTitleClear: document.getElementById('btn-search-title-clear'),
+
+    searchActiveChips: document.getElementById('search-active-chips'),
+  });
+
+  // ==========================================================================
+  // Multi-Faceted Search Filters (Mirrors Browse View)
+  // ==========================================================================
+
+  function hasActiveSearchFilters() {
+    const s = state.search;
+    const startDateVal = (els.startDateInput && els.startDateInput.value) || '';
+    const endDateVal = (els.endDateInput && els.endDateInput.value) || '';
+    const sortVal = (els.sortOrderSelect && els.sortOrderSelect.value) || s.sort || 'rank';
+    return Boolean(
+      s.teachers.length > 0 ||
+      (state.dateFilterMode === 'year' && s.years.length > 0) ||
+      (state.dateFilterMode === 'range' && (startDateVal || endDateVal)) ||
+      (s.titleQuery && s.titleQuery.trim()) ||
+      s.titleWholeWord ||
+      s.durationBuckets.length > 0 ||
+      s.minDurationMin !== '' ||
+      s.maxDurationMin !== '' ||
+      s.collections.length > 0 ||
+      s.formats.length > 0 ||
+      s.coTaughtOnly ||
+      s.bookmarkedOnly ||
+      (sortVal && sortVal !== 'rank')
+    );
+  }
+
+  function populateSearchFilterFacets(data) {
+    if (!data) return;
+    if (els.searchYearsGrid) els.searchYearsGrid.innerHTML = '';
+    if (typeof DD.renderTeachersChecklistInto === 'function') {
+      DD.renderTeachersChecklistInto(els.searchTeachersList, els.searchTeachersSearch, state.search.teachers);
+    }
+    if (typeof DD.renderYearsGridInto === 'function') {
+      DD.renderYearsGridInto(els.searchYearsGrid, els.searchEraPresets, state.search.years);
+    }
+    if (typeof DD.populateYearRangeSelects === 'function') {
+      DD.populateYearRangeSelects(els.searchYearFrom, els.searchYearTo, state.browseYears);
+    }
+    if (typeof DD.populateFacetCountsInto === 'function') {
+      DD.populateFacetCountsInto(data, 'search-');
+    }
+    if (els.searchCatCntBookmarked) {
+      els.searchCatCntBookmarked.textContent = BookmarkStore.count().toLocaleString();
+    }
+    syncSearchFilterControlsFromState();
+  }
+
+  function updateSearchFilterButtonsAndSummary() {
+    const s = state.search;
+    const colLabels = DD.BROWSE_COLLECTION_LABELS || {};
+    const fmtLabels = DD.BROWSE_FORMAT_LABELS || {};
+    const durLabels = DD.BROWSE_DURATION_LABELS || {};
+    const getTeacherName = DD.getTeacherDisplayNameBySlug || ((slug) => slug);
+    const fmtYearsLabel = DD.formatYearsSummaryLabel || ((yrs) => (yrs.length ? `Years: ${yrs.length}` : 'Years: All'));
+
+    // 1. Monastics button
+    if (els.searchTeachersLabel && els.searchTeachersBtn) {
+      if (s.teachers.length === 0) {
+        els.searchTeachersLabel.textContent = 'Monastics: All';
+        els.searchTeachersBtn.classList.remove('has-selection');
+      } else if (s.teachers.length === 1) {
+        els.searchTeachersLabel.textContent = getTeacherName(s.teachers[0]);
+        els.searchTeachersBtn.classList.add('has-selection');
+      } else {
+        const modeLabel = s.teacherMatch === 'all' ? 'All' : 'Any';
+        els.searchTeachersLabel.textContent = `${s.teachers.length} Monastics (${modeLabel})`;
+        els.searchTeachersBtn.classList.add('has-selection');
+      }
+    }
+    if (els.searchTeachersSelectedInfo) {
+      els.searchTeachersSelectedInfo.textContent = `${s.teachers.length} selected`;
+    }
+    if (els.btnSearchTeacherModeAny && els.btnSearchTeacherModeAll) {
+      els.btnSearchTeacherModeAny.classList.toggle('active', s.teacherMatch !== 'all');
+      els.btnSearchTeacherModeAll.classList.toggle('active', s.teacherMatch === 'all');
+    }
+    if (els.searchTeachersModeHint) {
+      els.searchTeachersModeHint.innerHTML = s.teacherMatch === 'all'
+        ? 'Show co-taught talks featuring <strong>all</strong> selected monastics together.'
+        : 'Show talks featuring <strong>any</strong> selected monastic.';
+    }
+
+    // 2. Years button
+    if (els.searchYearsLabel && els.searchYearsBtn) {
+      els.searchYearsLabel.textContent = fmtYearsLabel(s.years);
+      els.searchYearsBtn.classList.toggle('has-selection', s.years.length > 0);
+    }
+
+    // 3. Length button
+    if (els.searchDurationLabel && els.searchDurationBtn) {
+      const hasMin = s.minDurationMin !== '' && !Number.isNaN(Number(s.minDurationMin));
+      const hasMax = s.maxDurationMin !== '' && !Number.isNaN(Number(s.maxDurationMin));
+      if (hasMin || hasMax) {
+        if (hasMin && hasMax) {
+          els.searchDurationLabel.textContent = `Length: ${s.minDurationMin}–${s.maxDurationMin} min`;
+        } else if (hasMin) {
+          els.searchDurationLabel.textContent = `Length: ≥ ${s.minDurationMin} min`;
+        } else {
+          els.searchDurationLabel.textContent = `Length: ≤ ${s.maxDurationMin} min`;
+        }
+        els.searchDurationBtn.classList.add('has-selection');
+      } else if (s.durationBuckets.length > 0) {
+        if (s.durationBuckets.length === 1) {
+          els.searchDurationLabel.textContent = `Length: ${durLabels[s.durationBuckets[0]] || s.durationBuckets[0]}`;
+        } else {
+          els.searchDurationLabel.textContent = `Length: ${s.durationBuckets.length} ranges`;
+        }
+        els.searchDurationBtn.classList.add('has-selection');
+      } else {
+        els.searchDurationLabel.textContent = 'Length: Any';
+        els.searchDurationBtn.classList.remove('has-selection');
+      }
+    }
+
+    // 4. Collection & Type button
+    const catCount = s.collections.length + s.formats.length + (s.coTaughtOnly ? 1 : 0) + (s.bookmarkedOnly ? 1 : 0);
+    if (els.searchCategoryLabel && els.searchCategoryBtn) {
+      if (catCount === 0) {
+        els.searchCategoryLabel.textContent = 'Collection & Type: All';
+        els.searchCategoryBtn.classList.remove('has-selection');
+      } else {
+        const parts = [
+          ...s.collections.map((c) => colLabels[c] || c),
+          ...s.formats.map((f) => fmtLabels[f] || f),
+        ];
+        if (s.coTaughtOnly) parts.push('Co-taught');
+        if (s.bookmarkedOnly) parts.push('Bookmarked');
+        els.searchCategoryLabel.textContent = parts.length <= 2
+          ? `Type: ${parts.join(', ')}`
+          : `Type: ${parts.length} active`;
+        els.searchCategoryBtn.classList.add('has-selection');
+      }
+    }
+
+    // 5. Title button
+    if (els.searchTitleLabel && els.searchTitleBtn) {
+      const trimmedTitle = (s.titleQuery || '').trim();
+      if (trimmedTitle) {
+        const shortTitle = trimmedTitle.length > 18 ? `${trimmedTitle.slice(0, 17)}…` : trimmedTitle;
+        els.searchTitleLabel.textContent = `Title: "${shortTitle}"`;
+        els.searchTitleBtn.classList.add('has-selection');
+      } else if (s.titleWholeWord) {
+        els.searchTitleLabel.textContent = 'Title: Whole Word';
+        els.searchTitleBtn.classList.add('has-selection');
+      } else {
+        els.searchTitleLabel.textContent = 'Title: Any';
+        els.searchTitleBtn.classList.remove('has-selection');
+      }
+    }
+
+    // 6. Active filter chips
+    if (els.searchActiveChips) {
+      const chips = [];
+      if (s.titleQuery && s.titleQuery.trim()) {
+        chips.push(`<button type="button" class="browse-filter-chip" data-clear-chip="title" title="Remove title filter">Title: "${escapeHtml(s.titleQuery.trim())}"${s.titleWholeWord ? ' (word)' : ''} ✕</button>`);
+      }
+      if (s.teachers.length >= 2) {
+        const nextMode = s.teacherMatch === 'all' ? 'Any (OR)' : 'All / Co-taught (AND)';
+        chips.push(`<button type="button" class="browse-filter-chip browse-filter-chip-mode" data-toggle-teacher-mode="1" title="Click to switch monastic matching between Any (OR) and All (AND)">Match: ${s.teacherMatch === 'all' ? 'All (AND)' : 'Any (OR)'} ⇄ ${nextMode}</button>`);
+      }
+      s.teachers.forEach((slug) => {
+        chips.push(`<button type="button" class="browse-filter-chip" data-remove-teacher="${escapeHtml(slug)}" title="Remove ${escapeHtml(getTeacherName(slug))}">${escapeHtml(getTeacherName(slug))} ✕</button>`);
+      });
+
+      if (state.dateFilterMode === 'range') {
+        const startVal = (els.startDateInput && els.startDateInput.value) || '';
+        const endVal = (els.endDateInput && els.endDateInput.value) || '';
+        if (startVal || endVal) {
+          const rangeText = startVal && endVal ? `${startVal} – ${endVal}` : (startVal ? `From ${startVal}` : `Until ${endVal}`);
+          chips.push(`<button type="button" class="browse-filter-chip" data-clear-chip="daterange" title="Clear date range">Dates: ${escapeHtml(rangeText)} ✕</button>`);
+        }
+      } else if (s.years.length > 0) {
+        const sortedYears = [...s.years].sort((a, b) => b - a);
+        if (sortedYears.length <= 4) {
+          sortedYears.forEach((y) => {
+            chips.push(`<button type="button" class="browse-filter-chip" data-remove-year="${y}" title="Remove year ${y}">${y} ✕</button>`);
+          });
+        } else {
+          chips.push(`<button type="button" class="browse-filter-chip" data-clear-chip="years" title="Clear selected years">${escapeHtml(fmtYearsLabel(sortedYears))} ✕</button>`);
+        }
+      }
+
+      if (s.minDurationMin !== '' || s.maxDurationMin !== '') {
+        const label = (s.minDurationMin !== '' && s.maxDurationMin !== '')
+          ? `${s.minDurationMin}–${s.maxDurationMin} min`
+          : (s.minDurationMin !== '' ? `≥ ${s.minDurationMin} min` : `≤ ${s.maxDurationMin} min`);
+        chips.push(`<button type="button" class="browse-filter-chip" data-clear-chip="duration" title="Clear length filter">Length: ${escapeHtml(label)} ✕</button>`);
+      } else {
+        s.durationBuckets.forEach((bk) => {
+          chips.push(`<button type="button" class="browse-filter-chip" data-remove-dur="${escapeHtml(bk)}" title="Remove duration range">Length: ${escapeHtml(durLabels[bk] || bk)} ✕</button>`);
+        });
+      }
+
+      s.collections.forEach((c) => {
+        chips.push(`<button type="button" class="browse-filter-chip" data-remove-col="${escapeHtml(c)}">${escapeHtml(colLabels[c] || c)} ✕</button>`);
+      });
+      s.formats.forEach((f) => {
+        chips.push(`<button type="button" class="browse-filter-chip" data-remove-fmt="${escapeHtml(f)}">${escapeHtml(fmtLabels[f] || f)} ✕</button>`);
+      });
+      if (s.coTaughtOnly) {
+        chips.push(`<button type="button" class="browse-filter-chip" data-clear-chip="cotaught">Co-taught (2+) ✕</button>`);
+      }
+      if (s.bookmarkedOnly) {
+        chips.push(`<button type="button" class="browse-filter-chip" data-clear-chip="bookmarked">🔖 Bookmarked ✕</button>`);
+      }
+
+      els.searchActiveChips.innerHTML = chips.join('');
+    }
+  }
+
+  function syncSearchFilterControlsFromState() {
+    const s = state.search;
+    if (els.searchTitleInput) els.searchTitleInput.value = s.titleQuery || '';
+    if (els.searchClearTitleBtn) els.searchClearTitleBtn.style.display = (s.titleQuery || '').trim() ? 'inline-block' : 'none';
+    if (els.searchTitleWordCheckbox) els.searchTitleWordCheckbox.checked = Boolean(s.titleWholeWord);
+
+    if (els.searchTeachersList) {
+      const teacherCbs = els.searchTeachersList.querySelectorAll('input[data-teacher-slug]');
+      if (teacherCbs.length > 0) {
+        const tSet = new Set(s.teachers);
+        teacherCbs.forEach((cb) => {
+          cb.checked = tSet.has(cb.dataset.teacherSlug);
+        });
+      } else if (typeof DD.renderTeachersChecklistInto === 'function') {
+        DD.renderTeachersChecklistInto(els.searchTeachersList, els.searchTeachersSearch, s.teachers);
+      }
+    }
+    if (typeof DD.renderYearsGridInto === 'function') {
+      DD.renderYearsGridInto(els.searchYearsGrid, els.searchEraPresets, s.years);
+    }
+
+    if (els.btnModeYear && els.btnModeRange) {
+      els.btnModeYear.classList.toggle('active', state.dateFilterMode !== 'range');
+      els.btnModeRange.classList.toggle('active', state.dateFilterMode === 'range');
+    }
+    if (els.searchYearsDropdown) {
+      els.searchYearsDropdown.style.display = state.dateFilterMode === 'range' ? 'none' : 'inline-block';
+    }
+    if (els.dateRangeInputs) {
+      els.dateRangeInputs.style.display = state.dateFilterMode === 'range' ? 'inline-flex' : 'none';
+    }
+
+    if (els.searchDurationBuckets) {
+      const bucketSet = new Set(s.durationBuckets);
+      els.searchDurationBuckets.querySelectorAll('input[data-dur-bucket]').forEach((cb) => {
+        cb.checked = bucketSet.has(cb.dataset.durBucket);
+      });
+    }
+    if (els.searchMinDuration) els.searchMinDuration.value = s.minDurationMin !== '' ? String(s.minDurationMin) : '';
+    if (els.searchMaxDuration) els.searchMaxDuration.value = s.maxDurationMin !== '' ? String(s.maxDurationMin) : '';
+
+    if (els.searchCollectionsList) {
+      const colSet = new Set(s.collections);
+      els.searchCollectionsList.querySelectorAll('input[data-collection]').forEach((cb) => {
+        cb.checked = colSet.has(cb.dataset.collection);
+      });
+    }
+    if (els.searchFormatsList) {
+      const fmtSet = new Set(s.formats);
+      els.searchFormatsList.querySelectorAll('input[data-format]').forEach((cb) => {
+        cb.checked = fmtSet.has(cb.dataset.format);
+      });
+    }
+    if (els.searchCotaughtCheckbox) els.searchCotaughtCheckbox.checked = Boolean(s.coTaughtOnly);
+    if (els.searchBookmarkedCheckbox) els.searchBookmarkedCheckbox.checked = Boolean(s.bookmarkedOnly);
+    if (els.sortOrderSelect) els.sortOrderSelect.value = s.sort || 'rank';
+
+    updateSearchFilterButtonsAndSummary();
+  }
+
+  function buildSearchFilterOpts() {
+    const s = state.search;
+    const opts = {};
+    if (s.teachers.length > 0) {
+      opts.teachers = [...s.teachers];
+      opts.teacherMatch = s.teacherMatch || 'any';
+    }
+    if (state.dateFilterMode === 'range') {
+      const startDateVal = (els.startDateInput && els.startDateInput.value) || '';
+      const endDateVal = (els.endDateInput && els.endDateInput.value) || '';
+      if (startDateVal) opts.startDate = startDateVal;
+      if (endDateVal) opts.endDate = endDateVal;
+    } else if (s.years.length > 0) {
+      opts.years = [...s.years];
+    }
+    if (s.titleQuery && s.titleQuery.trim()) {
+      opts.titleQuery = s.titleQuery.trim();
+      opts.titleWholeWord = Boolean(s.titleWholeWord);
+    }
+    if (s.minDurationMin !== '' && !Number.isNaN(Number(s.minDurationMin))) {
+      opts.minDurationMin = Number(s.minDurationMin);
+    }
+    if (s.maxDurationMin !== '' && !Number.isNaN(Number(s.maxDurationMin))) {
+      opts.maxDurationMin = Number(s.maxDurationMin);
+    }
+    if (opts.minDurationMin === undefined && opts.maxDurationMin === undefined && s.durationBuckets.length > 0) {
+      opts.durationBuckets = [...s.durationBuckets];
+    }
+    if (s.collections.length > 0) opts.collections = [...s.collections];
+    if (s.formats.length > 0) opts.formats = [...s.formats];
+    if (s.coTaughtOnly) opts.coTaughtOnly = true;
+    if (s.bookmarkedOnly) opts.episodeIds = BookmarkStore.getAll();
+    return opts;
+  }
+
+  function buildSearchRouteHash(query = state.currentQuery) {
+    const s = state.search;
+    const qp = new URLSearchParams();
+    if (query) qp.set('q', query);
+    if (s.teachers.length > 0) qp.set('teachers', s.teachers.join(','));
+    if (s.teachers.length > 1 && s.teacherMatch === 'all') qp.set('tmode', 'all');
+    if (state.dateFilterMode === 'range') {
+      const startVal = (els.startDateInput && els.startDateInput.value) || '';
+      const endVal = (els.endDateInput && els.endDateInput.value) || '';
+      if (startVal || endVal) {
+        qp.set('dmode', 'range');
+        if (startVal) qp.set('sdate', startVal);
+        if (endVal) qp.set('edate', endVal);
+      }
+    } else if (s.years.length > 0) {
+      qp.set('years', [...s.years].sort((a, b) => b - a).join(','));
+    }
+    if (s.titleQuery && s.titleQuery.trim()) qp.set('title', s.titleQuery.trim());
+    if (s.titleWholeWord) qp.set('tword', '1');
+    if (s.minDurationMin !== '') qp.set('minm', String(s.minDurationMin));
+    if (s.maxDurationMin !== '') qp.set('maxm', String(s.maxDurationMin));
+    if (s.minDurationMin === '' && s.maxDurationMin === '' && s.durationBuckets.length > 0) {
+      qp.set('dur', s.durationBuckets.join(','));
+    }
+    if (s.collections.length > 0) qp.set('col', s.collections.join(','));
+    if (s.formats.length > 0) qp.set('fmt', s.formats.join(','));
+    if (s.coTaughtOnly) qp.set('cotaught', '1');
+    if (s.bookmarkedOnly) qp.set('bmk', '1');
+    const sortVal = (els.sortOrderSelect && els.sortOrderSelect.value) || s.sort || 'rank';
+    if (sortVal && sortVal !== 'rank') qp.set('sort', sortVal);
+    const qs = qp.toString();
+    return qs ? `#search?${qs}` : '#search';
+  }
+
+  function applySearchParamsFromRoute(params = {}) {
+    const s = state.search;
+    const splitCsv = (val) => val ? String(val).split(',').map((item) => item.trim()).filter(Boolean) : [];
+    s.teachers = splitCsv(params.teachers);
+    s.teacherMatch = params.tmode === 'all' ? 'all' : 'any';
+    if (params.dmode === 'range' || params.sdate || params.edate) {
+      state.dateFilterMode = 'range';
+      if (els.startDateInput) els.startDateInput.value = params.sdate || '';
+      if (els.endDateInput) els.endDateInput.value = params.edate || '';
+      s.years = [];
+    } else {
+      state.dateFilterMode = 'year';
+      if (els.startDateInput) els.startDateInput.value = '';
+      if (els.endDateInput) els.endDateInput.value = '';
+      s.years = splitCsv(params.years).map((y) => Number(y)).filter((y) => y > 0);
+    }
+    s.titleQuery = params.title ? String(params.title) : '';
+    s.titleWholeWord = params.tword === '1' || params.tword === 'true';
+    s.minDurationMin = (params.minm !== undefined && params.minm !== '') ? String(params.minm) : '';
+    s.maxDurationMin = (params.maxm !== undefined && params.maxm !== '') ? String(params.maxm) : '';
+    s.durationBuckets = (s.minDurationMin === '' && s.maxDurationMin === '') ? splitCsv(params.dur) : [];
+    s.collections = splitCsv(params.col);
+    s.formats = splitCsv(params.fmt);
+    s.coTaughtOnly = params.cotaught === '1' || params.cotaught === 'true';
+    s.bookmarkedOnly = params.bmk === '1' || params.bmk === 'true';
+    s.sort = params.sort || 'rank';
+    syncSearchFilterControlsFromState();
+  }
+
+  function resetSearchFilters() {
+    const s = state.search;
+    if (els.searchInput) els.searchInput.value = '';
+    if (els.clearSearchBtn) els.clearSearchBtn.style.display = 'none';
+    if (els.exactCheckbox) els.exactCheckbox.checked = false;
+    if (els.startDateInput) els.startDateInput.value = '';
+    if (els.endDateInput) els.endDateInput.value = '';
+    if (els.searchTeachersSearch) els.searchTeachersSearch.value = '';
+    if (els.searchYearFrom) els.searchYearFrom.value = '';
+    if (els.searchYearTo) els.searchYearTo.value = '';
+    state.dateFilterMode = 'year';
+
+    s.teachers = [];
+    s.teacherMatch = 'any';
+    s.years = [];
+    s.titleQuery = '';
+    s.titleWholeWord = false;
+    s.durationBuckets = [];
+    s.minDurationMin = '';
+    s.maxDurationMin = '';
+    s.collections = [];
+    s.formats = [];
+    s.coTaughtOnly = false;
+    s.bookmarkedOnly = false;
+    s.sort = 'rank';
+
+    syncSearchFilterControlsFromState();
+    executeSearch('');
+  }
+
+  function triggerSearchWithCurrentQuery() {
+    const q = (els.searchInput && els.searchInput.value.trim()) || '';
+    executeSearch(q);
+  }
+
+  function setupSearchFilterListeners() {
+    // 0. Date Mode Toggle, Date Range, Sort & Reset
+    if (els.btnModeYear && els.btnModeRange) {
+      els.btnModeYear.addEventListener('click', () => {
+        state.dateFilterMode = 'year';
+        els.btnModeYear.classList.add('active');
+        els.btnModeRange.classList.remove('active');
+        if (els.searchYearsDropdown) els.searchYearsDropdown.style.display = 'inline-block';
+        if (els.dateRangeInputs) els.dateRangeInputs.style.display = 'none';
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+
+      els.btnModeRange.addEventListener('click', () => {
+        state.dateFilterMode = 'range';
+        els.btnModeRange.classList.add('active');
+        els.btnModeYear.classList.remove('active');
+        if (els.searchYearsDropdown) els.searchYearsDropdown.style.display = 'none';
+        if (els.dateRangeInputs) els.dateRangeInputs.style.display = 'inline-flex';
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+
+    if (els.startDateInput) {
+      els.startDateInput.addEventListener('change', () => {
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+
+    if (els.endDateInput) {
+      els.endDateInput.addEventListener('change', () => {
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+
+    if (els.sortOrderSelect) {
+      els.sortOrderSelect.addEventListener('change', () => {
+        state.search.sort = els.sortOrderSelect.value || 'rank';
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+
+    if (els.resetFiltersBtn) {
+      els.resetFiltersBtn.addEventListener('click', () => {
+        resetSearchFilters();
+      });
+    }
+
+    // Focus helpers when popovers open (popover open/close/clamp is handled globally by setupBrowseFilterListeners)
+    if (els.searchTeachersBtn && els.searchTeachersSearch) {
+      els.searchTeachersBtn.addEventListener('click', () => {
+        if (els.searchTeachersDropdown && els.searchTeachersDropdown.classList.contains('open')) {
+          setTimeout(() => els.searchTeachersSearch.focus(), 20);
+        }
+      });
+    }
+    if (els.searchTitleBtn && els.searchTitleInput) {
+      els.searchTitleBtn.addEventListener('click', () => {
+        if (els.searchTitleDropdown && els.searchTitleDropdown.classList.contains('open')) {
+          setTimeout(() => els.searchTitleInput.focus(), 20);
+        }
+      });
+    }
+
+    // 1. Title filter + Whole Word toggle
+    if (els.searchTitleInput) {
+      els.searchTitleInput.addEventListener('input', () => {
+        const val = els.searchTitleInput.value;
+        state.search.titleQuery = val;
+        if (els.searchClearTitleBtn) {
+          els.searchClearTitleBtn.style.display = val.trim() ? 'inline-block' : 'none';
+        }
+        clearTimeout(state.search.debounceTimer);
+        state.search.debounceTimer = setTimeout(() => {
+          updateSearchFilterButtonsAndSummary();
+          triggerSearchWithCurrentQuery();
+        }, 160);
+      });
+    }
+    if (els.searchClearTitleBtn) {
+      els.searchClearTitleBtn.addEventListener('click', () => {
+        state.search.titleQuery = '';
+        if (els.searchTitleInput) {
+          els.searchTitleInput.value = '';
+          els.searchTitleInput.focus();
+        }
+        els.searchClearTitleBtn.style.display = 'none';
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    if (els.searchTitleWordCheckbox) {
+      els.searchTitleWordCheckbox.addEventListener('change', () => {
+        state.search.titleWholeWord = els.searchTitleWordCheckbox.checked;
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    if (els.btnSearchTitleClear) {
+      els.btnSearchTitleClear.addEventListener('click', () => {
+        state.search.titleQuery = '';
+        state.search.titleWholeWord = false;
+        if (els.searchTitleInput) els.searchTitleInput.value = '';
+        if (els.searchClearTitleBtn) els.searchClearTitleBtn.style.display = 'none';
+        if (els.searchTitleWordCheckbox) els.searchTitleWordCheckbox.checked = false;
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+
+    // 2. Monastics multi-select
+    if (els.searchTeachersSearch) {
+      els.searchTeachersSearch.addEventListener('input', () => {
+        if (typeof DD.renderTeachersChecklistInto === 'function') {
+          DD.renderTeachersChecklistInto(els.searchTeachersList, els.searchTeachersSearch, state.search.teachers);
+        }
+      });
+    }
+    if (els.searchTeachersList) {
+      els.searchTeachersList.addEventListener('change', (e) => {
+        const cb = e.target.closest('input[data-teacher-slug]');
+        if (!cb) return;
+        const slug = cb.dataset.teacherSlug;
+        const set = new Set(state.search.teachers);
+        if (cb.checked) set.add(slug);
+        else set.delete(slug);
+        state.search.teachers = Array.from(set);
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    const setSearchTeacherMode = (mode) => {
+      if (state.search.teacherMatch === mode) return;
+      state.search.teacherMatch = mode;
+      updateSearchFilterButtonsAndSummary();
+      if (state.search.teachers.length >= 2) {
+        triggerSearchWithCurrentQuery();
+      }
+    };
+    if (els.btnSearchTeacherModeAny) {
+      els.btnSearchTeacherModeAny.addEventListener('click', () => setSearchTeacherMode('any'));
+    }
+    if (els.btnSearchTeacherModeAll) {
+      els.btnSearchTeacherModeAll.addEventListener('click', () => setSearchTeacherMode('all'));
+    }
+    if (els.btnSearchTeachersClear) {
+      els.btnSearchTeachersClear.addEventListener('click', () => {
+        state.search.teachers = [];
+        if (els.searchTeachersSearch) els.searchTeachersSearch.value = '';
+        if (typeof DD.renderTeachersChecklistInto === 'function') {
+          DD.renderTeachersChecklistInto(els.searchTeachersList, els.searchTeachersSearch, state.search.teachers);
+        }
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+
+    // 3. Years grouping & multi-select
+    if (els.searchYearsGrid) {
+      els.searchYearsGrid.addEventListener('click', (e) => {
+        const btn = e.target.closest('.year-chip-btn[data-year]');
+        if (!btn) return;
+        const y = Number(btn.dataset.year);
+        const set = new Set(state.search.years);
+        if (set.has(y)) set.delete(y);
+        else set.add(y);
+        state.search.years = Array.from(set).sort((a, b) => b - a);
+        if (typeof DD.renderYearsGridInto === 'function') {
+          DD.renderYearsGridInto(els.searchYearsGrid, els.searchEraPresets, state.search.years);
+        }
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    if (els.searchEraPresets) {
+      els.searchEraPresets.addEventListener('click', (e) => {
+        const btn = e.target.closest('.era-preset-btn[data-era]');
+        if (!btn || typeof DD.getYearsForEraPreset !== 'function') return;
+        const eraYears = DD.getYearsForEraPreset(btn.dataset.era);
+        if (eraYears.length === 0) return;
+        const set = new Set(state.search.years);
+        const allSelected = eraYears.every((y) => set.has(y));
+        if (allSelected) eraYears.forEach((y) => set.delete(y));
+        else eraYears.forEach((y) => set.add(y));
+        state.search.years = Array.from(set).sort((a, b) => b - a);
+        if (typeof DD.renderYearsGridInto === 'function') {
+          DD.renderYearsGridInto(els.searchYearsGrid, els.searchEraPresets, state.search.years);
+        }
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    if (els.btnSearchYearRangeAdd) {
+      els.btnSearchYearRangeAdd.addEventListener('click', () => {
+        const y1 = Number(els.searchYearFrom && els.searchYearFrom.value);
+        const y2 = Number(els.searchYearTo && els.searchYearTo.value);
+        if (!y1 && !y2) return;
+        const lo = y1 && y2 ? Math.min(y1, y2) : (y1 || y2);
+        const hi = y1 && y2 ? Math.max(y1, y2) : (y1 || y2);
+        const set = new Set(state.search.years);
+        (state.browseYears || []).forEach((y) => {
+          if (y >= lo && y <= hi) set.add(y);
+        });
+        state.search.years = Array.from(set).sort((a, b) => b - a);
+        if (typeof DD.renderYearsGridInto === 'function') {
+          DD.renderYearsGridInto(els.searchYearsGrid, els.searchEraPresets, state.search.years);
+        }
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    if (els.btnSearchYearsClear) {
+      els.btnSearchYearsClear.addEventListener('click', () => {
+        state.search.years = [];
+        if (els.searchYearFrom) els.searchYearFrom.value = '';
+        if (els.searchYearTo) els.searchYearTo.value = '';
+        if (typeof DD.renderYearsGridInto === 'function') {
+          DD.renderYearsGridInto(els.searchYearsGrid, els.searchEraPresets, state.search.years);
+        }
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+
+    // 4. Duration buckets & custom min/max
+    if (els.searchDurationBuckets) {
+      els.searchDurationBuckets.addEventListener('change', (e) => {
+        const cb = e.target.closest('input[data-dur-bucket]');
+        if (!cb) return;
+        const bk = cb.dataset.durBucket;
+        const set = new Set(state.search.durationBuckets);
+        if (cb.checked) set.add(bk);
+        else set.delete(bk);
+        state.search.durationBuckets = Array.from(set);
+        state.search.minDurationMin = '';
+        state.search.maxDurationMin = '';
+        if (els.searchMinDuration) els.searchMinDuration.value = '';
+        if (els.searchMaxDuration) els.searchMaxDuration.value = '';
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    const onSearchCustomDurChange = () => {
+      state.search.minDurationMin = els.searchMinDuration ? els.searchMinDuration.value.trim() : '';
+      state.search.maxDurationMin = els.searchMaxDuration ? els.searchMaxDuration.value.trim() : '';
+      if (state.search.minDurationMin !== '' || state.search.maxDurationMin !== '') {
+        state.search.durationBuckets = [];
+        if (els.searchDurationBuckets) {
+          els.searchDurationBuckets.querySelectorAll('input[data-dur-bucket]').forEach((cb) => {
+            cb.checked = false;
+          });
+        }
+      }
+      clearTimeout(state.search.debounceTimer);
+      state.search.debounceTimer = setTimeout(() => {
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      }, 220);
+    };
+    if (els.searchMinDuration) els.searchMinDuration.addEventListener('input', onSearchCustomDurChange);
+    if (els.searchMaxDuration) els.searchMaxDuration.addEventListener('input', onSearchCustomDurChange);
+    if (els.btnSearchDurationClear) {
+      els.btnSearchDurationClear.addEventListener('click', () => {
+        state.search.durationBuckets = [];
+        state.search.minDurationMin = '';
+        state.search.maxDurationMin = '';
+        syncSearchFilterControlsFromState();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+
+    // 5. Collections, Formats & Attributes
+    if (els.searchCollectionsList) {
+      els.searchCollectionsList.addEventListener('change', (e) => {
+        const cb = e.target.closest('input[data-collection]');
+        if (!cb) return;
+        const set = new Set(state.search.collections);
+        if (cb.checked) set.add(cb.dataset.collection);
+        else set.delete(cb.dataset.collection);
+        state.search.collections = Array.from(set);
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    if (els.searchFormatsList) {
+      els.searchFormatsList.addEventListener('change', (e) => {
+        const cb = e.target.closest('input[data-format]');
+        if (!cb) return;
+        const set = new Set(state.search.formats);
+        if (cb.checked) set.add(cb.dataset.format);
+        else set.delete(cb.dataset.format);
+        state.search.formats = Array.from(set);
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    if (els.searchCotaughtCheckbox) {
+      els.searchCotaughtCheckbox.addEventListener('change', () => {
+        state.search.coTaughtOnly = els.searchCotaughtCheckbox.checked;
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    if (els.searchBookmarkedCheckbox) {
+      els.searchBookmarkedCheckbox.addEventListener('change', () => {
+        state.search.bookmarkedOnly = els.searchBookmarkedCheckbox.checked;
+        updateSearchFilterButtonsAndSummary();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+    if (els.btnSearchCategoryClear) {
+      els.btnSearchCategoryClear.addEventListener('click', () => {
+        state.search.collections = [];
+        state.search.formats = [];
+        state.search.coTaughtOnly = false;
+        state.search.bookmarkedOnly = false;
+        syncSearchFilterControlsFromState();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+
+    // 6. Active Filter Chips removal
+    if (els.searchActiveChips) {
+      els.searchActiveChips.addEventListener('click', (e) => {
+        const btn = e.target.closest('.browse-filter-chip');
+        if (!btn) return;
+        if (btn.dataset.toggleTeacherMode) {
+          state.search.teacherMatch = state.search.teacherMatch === 'all' ? 'any' : 'all';
+        } else if (btn.dataset.removeTeacher) {
+          state.search.teachers = state.search.teachers.filter((t) => t !== btn.dataset.removeTeacher);
+        } else if (btn.dataset.removeYear) {
+          const y = Number(btn.dataset.removeYear);
+          state.search.years = state.search.years.filter((yr) => yr !== y);
+        } else if (btn.dataset.removeDur) {
+          state.search.durationBuckets = state.search.durationBuckets.filter((bk) => bk !== btn.dataset.removeDur);
+        } else if (btn.dataset.removeCol) {
+          state.search.collections = state.search.collections.filter((c) => c !== btn.dataset.removeCol);
+        } else if (btn.dataset.removeFmt) {
+          state.search.formats = state.search.formats.filter((f) => f !== btn.dataset.removeFmt);
+        } else if (btn.dataset.clearChip === 'title') {
+          state.search.titleQuery = '';
+          state.search.titleWholeWord = false;
+        } else if (btn.dataset.clearChip === 'years') {
+          state.search.years = [];
+        } else if (btn.dataset.clearChip === 'daterange') {
+          if (els.startDateInput) els.startDateInput.value = '';
+          if (els.endDateInput) els.endDateInput.value = '';
+        } else if (btn.dataset.clearChip === 'duration') {
+          state.search.durationBuckets = [];
+          state.search.minDurationMin = '';
+          state.search.maxDurationMin = '';
+        } else if (btn.dataset.clearChip === 'cotaught') {
+          state.search.coTaughtOnly = false;
+        } else if (btn.dataset.clearChip === 'bookmarked') {
+          state.search.bookmarkedOnly = false;
+        }
+        syncSearchFilterControlsFromState();
+        triggerSearchWithCurrentQuery();
+      });
+    }
+  }
+
   // ==========================================================================
   // Full-Text Search Execution
   // ==========================================================================
@@ -32,18 +852,11 @@
     if (!options.keepPage) {
       state.search.offset = 0;
     }
-    const teacherVal = (els.teacherFilter && els.teacherFilter.value) || '';
-    const yearVal = (els.yearFilter && els.yearFilter.value) || '';
-    const startDateVal = (els.startDateInput && els.startDateInput.value) || '';
-    const endDateVal = (els.endDateInput && els.endDateInput.value) || '';
-    const sortVal = (els.sortOrderSelect && els.sortOrderSelect.value) || 'rank';
+    const sortVal = (els.sortOrderSelect && els.sortOrderSelect.value) || state.search.sort || 'rank';
+    state.search.sort = sortVal;
 
-    const hasFilters = Boolean(
-      teacherVal ||
-      (state.dateFilterMode === 'year' && yearVal) ||
-      (state.dateFilterMode === 'range' && (startDateVal || endDateVal)) ||
-      (sortVal && sortVal !== 'rank' && sortVal !== 'date_desc')
-    );
+    const hasFilters = hasActiveSearchFilters();
+    updateSearchFilterButtonsAndSummary();
 
     // If no text query and no filters, show empty state
     if (!query && !hasFilters) {
@@ -75,7 +888,7 @@
     switchTab('search-view', { skipHistory: true });
 
     if (!options.skipHistory) {
-      const searchHash = query ? `#search?q=${encodeURIComponent(query)}` : '#search';
+      const searchHash = buildSearchRouteHash(query);
       if (window.location.hash !== searchHash) {
         if (options.pushHistory) {
           state.historyDepth++;
@@ -86,22 +899,18 @@
       }
     }
 
+    const activeFilterOpts = buildSearchFilterOpts();
+
     // Case 1: Search query provided (FTS search, 50 talks per page)
     if (query) {
       state.search.filteredFilterOpts = null;
       const searchOpts = {
+        ...activeFilterOpts,
         episodeLimit: state.search.limit,
         offset: state.search.offset,
         exact: els.exactCheckbox.checked,
         sort: sortVal,
       };
-
-      if (teacherVal) searchOpts.teacher = teacherVal;
-      if (state.dateFilterMode === 'year' && yearVal) searchOpts.year = yearVal;
-      if (state.dateFilterMode === 'range') {
-        if (startDateVal) searchOpts.startDate = startDateVal;
-        if (endDateVal) searchOpts.endDate = endDateVal;
-      }
 
       try {
         const data = await dbService.search(query, searchOpts);
@@ -115,17 +924,12 @@
     // Case 2: No search query, but filters active (Browse by Filter, 50 talks per page)
     try {
       const filterOpts = {
+        ...activeFilterOpts,
         transcribedOnly: true,
         limit: state.search.limit,
         offset: state.search.offset,
-        sort: sortVal === 'rank' ? 'date_desc' : sortVal,
+        sort: sortVal === 'rank' ? 'year_desc' : sortVal,
       };
-      if (teacherVal) filterOpts.teacher = teacherVal;
-      if (state.dateFilterMode === 'year' && yearVal) filterOpts.year = yearVal;
-      if (state.dateFilterMode === 'range') {
-        if (startDateVal) filterOpts.startDate = startDateVal;
-        if (endDateVal) filterOpts.endDate = endDateVal;
-      }
 
       state.search.filteredFilterOpts = filterOpts;
       state.search.filteredEpisodeIds = [];
@@ -221,7 +1025,7 @@
               ${formatEpisodeDateHtml(ep)}
               <span>• <span class="material-symbols-outlined ms-sm" aria-hidden="true">schedule</span> ${durMin} mins</span>
             </div>
-            <h3 class="episode-title">${escapeHtml(ep.title)}</h3>
+            <h3 class="episode-title">${typeof DD.highlightTitleText === 'function' ? DD.highlightTitleText(ep.title, state.search.titleQuery, state.search.titleWholeWord) : escapeHtml(ep.title)}</h3>
           </div>
 
           <div class="episode-footer">
@@ -891,6 +1695,15 @@
   }
 
   Object.assign(DD, {
+    hasActiveSearchFilters,
+    populateSearchFilterFacets,
+    updateSearchFilterButtonsAndSummary,
+    syncSearchFilterControlsFromState,
+    buildSearchFilterOpts,
+    buildSearchRouteHash,
+    applySearchParamsFromRoute,
+    resetSearchFilters,
+    setupSearchFilterListeners,
     executeSearch,
     updateSearchPagination,
     renderFilterResults,

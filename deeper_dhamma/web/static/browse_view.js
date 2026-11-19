@@ -95,21 +95,21 @@
     }
   }
 
-  function renderBrowseTeachersChecklist() {
-    if (!els.browseTeachersList) return;
-    const filterTerm = (els.browseTeachersSearch && els.browseTeachersSearch.value || '').trim().toLowerCase();
-    const selectedSet = new Set(state.browse.teachers);
+  function renderTeachersChecklistInto(listEl, searchEl, selectedSlugs) {
+    if (!listEl) return;
+    const filterTerm = (searchEl && searchEl.value || '').trim().toLowerCase();
+    const selectedSet = new Set(selectedSlugs || []);
     const items = (state.browseTeachers || []).filter((t) => {
       if (!filterTerm) return true;
       return t.name.toLowerCase().includes(filterTerm);
     });
 
     if (items.length === 0) {
-      els.browseTeachersList.innerHTML = '<div class="popover-hint" style="padding: 0.4rem;">No matching monastics.</div>';
+      listEl.innerHTML = '<div class="popover-hint" style="padding: 0.4rem;">No matching monastics.</div>';
       return;
     }
 
-    els.browseTeachersList.innerHTML = items.map((t) => {
+    listEl.innerHTML = items.map((t) => {
       const checked = selectedSet.has(t.slug) ? ' checked' : '';
       return `
         <label class="popover-check-item">
@@ -122,13 +122,17 @@
     }).join('');
   }
 
-  function renderBrowseYearsGrid() {
-    if (!els.browseYearsGrid) return;
+  function renderBrowseTeachersChecklist() {
+    renderTeachersChecklistInto(els.browseTeachersList, els.browseTeachersSearch, state.browse.teachers);
+  }
+
+  function renderYearsGridInto(gridEl, eraPresetsEl, selectedYears) {
+    if (!gridEl) return;
     const years = state.browseYears || [];
     const counts = (state.stats && state.stats.year_counts) || {};
-    const selectedSet = new Set(state.browse.years);
+    const selectedSet = new Set(selectedYears || []);
 
-    const existingBtns = els.browseYearsGrid.querySelectorAll('.year-chip-btn[data-year]');
+    const existingBtns = gridEl.querySelectorAll('.year-chip-btn[data-year]');
     if (existingBtns.length === years.length && years.length > 0) {
       existingBtns.forEach((btn) => {
         const y = Number(btn.dataset.year);
@@ -137,7 +141,7 @@
         btn.setAttribute('aria-pressed', isSel ? 'true' : 'false');
       });
     } else {
-      els.browseYearsGrid.innerHTML = years.map((y) => {
+      gridEl.innerHTML = years.map((y) => {
         const selClass = selectedSet.has(y) ? ' selected' : '';
         const cnt = counts[y] || counts[String(y)] || 0;
         return `
@@ -149,11 +153,46 @@
       }).join('');
     }
 
-    if (els.browseEraPresets) {
-      els.browseEraPresets.querySelectorAll('.era-preset-btn').forEach((btn) => {
+    if (eraPresetsEl) {
+      eraPresetsEl.querySelectorAll('.era-preset-btn').forEach((btn) => {
         const eraYears = getYearsForEraPreset(btn.dataset.era);
         const allSelected = eraYears.length > 0 && eraYears.every((y) => selectedSet.has(y));
         btn.classList.toggle('active', allSelected);
+      });
+    }
+  }
+
+  function renderBrowseYearsGrid() {
+    renderYearsGridInto(els.browseYearsGrid, els.browseEraPresets, state.browse.years);
+  }
+
+  function populateYearRangeSelects(fromEl, toEl, years) {
+    if (!fromEl || !toEl || !years || years.length === 0) return;
+    const ascYears = [...years].sort((a, b) => a - b);
+    const descYears = [...years].sort((a, b) => b - a);
+    const prevFrom = fromEl.value;
+    const prevTo = toEl.value;
+    fromEl.innerHTML = '<option value="">From...</option>' +
+      ascYears.map((y) => `<option value="${y}">${y}</option>`).join('');
+    toEl.innerHTML = '<option value="">To...</option>' +
+      descYears.map((y) => `<option value="${y}">${y}</option>`).join('');
+    if (prevFrom) fromEl.value = prevFrom;
+    if (prevTo) toEl.value = prevTo;
+  }
+
+  function populateFacetCountsInto(data, idPrefix = '') {
+    if (!data) return;
+    if (data.duration_counts) {
+      Object.entries(data.duration_counts).forEach(([key, val]) => {
+        const domKey = key === 'm15_30' ? '15_30' : (key === 'm30_60' ? '30_60' : (key === 'm60_90' ? '60_90' : key));
+        const el = document.getElementById(`${idPrefix}dur-cnt-${domKey}`);
+        if (el) el.textContent = Number(val || 0).toLocaleString();
+      });
+    }
+    if (data.category_counts) {
+      Object.entries(data.category_counts).forEach(([key, val]) => {
+        const el = document.getElementById(`${idPrefix}cat-cnt-${key}`);
+        if (el) el.textContent = Number(val || 0).toLocaleString();
       });
     }
   }
@@ -177,33 +216,8 @@
     renderBrowseTeachersChecklist();
     renderBrowseYearsGrid();
 
-    if (els.browseYearFrom && els.browseYearTo && state.browseYears.length > 0) {
-      const ascYears = [...state.browseYears].sort((a, b) => a - b);
-      const descYears = [...state.browseYears].sort((a, b) => b - a);
-      const prevFrom = els.browseYearFrom.value;
-      const prevTo = els.browseYearTo.value;
-      els.browseYearFrom.innerHTML = '<option value="">From...</option>' +
-        ascYears.map((y) => `<option value="${y}">${y}</option>`).join('');
-      els.browseYearTo.innerHTML = '<option value="">To...</option>' +
-        descYears.map((y) => `<option value="${y}">${y}</option>`).join('');
-      if (prevFrom) els.browseYearFrom.value = prevFrom;
-      if (prevTo) els.browseYearTo.value = prevTo;
-    }
-
-    if (data.duration_counts) {
-      Object.entries(data.duration_counts).forEach(([key, val]) => {
-        const domKey = key === 'm15_30' ? '15_30' : (key === 'm30_60' ? '30_60' : (key === 'm60_90' ? '60_90' : key));
-        const el = document.getElementById(`dur-cnt-${domKey}`);
-        if (el) el.textContent = Number(val || 0).toLocaleString();
-      });
-    }
-
-    if (data.category_counts) {
-      Object.entries(data.category_counts).forEach(([key, val]) => {
-        const el = document.getElementById(`cat-cnt-${key}`);
-        if (el) el.textContent = Number(val || 0).toLocaleString();
-      });
-    }
+    populateYearRangeSelects(els.browseYearFrom, els.browseYearTo, state.browseYears);
+    populateFacetCountsInto(data, '');
 
     if (els.catCntBookmarked) {
       els.catCntBookmarked.textContent = BookmarkStore.count().toLocaleString();
@@ -1098,6 +1112,10 @@
     closeAllBrowsePopovers,
     getTeacherDisplayNameBySlug,
     getYearsForEraPreset,
+    renderTeachersChecklistInto,
+    renderYearsGridInto,
+    populateYearRangeSelects,
+    populateFacetCountsInto,
     renderBrowseTeachersChecklist,
     renderBrowseYearsGrid,
     populateBrowseFilterFacets,

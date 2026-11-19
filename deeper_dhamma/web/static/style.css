@@ -358,6 +358,8 @@ body::before {
 }
 
 .search-box-wrapper {
+  position: relative;
+  z-index: 40;
   background: var(--bg-surface-glass);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-lg);

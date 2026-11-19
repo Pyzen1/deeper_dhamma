@@ -568,10 +568,42 @@
   flex: 1 1 180px;
 }
 
-#browse-reset-filters-btn:disabled {
+#browse-reset-filters-btn:disabled,
+#reset-filters-btn:disabled {
   opacity: 0.4;
   cursor: default;
   pointer-events: none;
+}
+
+.search-facets-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.search-title-panel {
+  width: 310px;
+}
+
+.search-title-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.search-title-popover-row .popover-search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-active-chips {
+  margin-top: 0.75rem;
+}
+
+.search-active-chips:empty {
+  display: none;
+  margin-top: 0;
 }
 
 /* Active Summary & Removable Chips Bar */

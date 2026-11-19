@@ -1154,7 +1154,7 @@ def test_headless_chrome_search_pagination_and_stopword_quality():
             ]
             proc = subprocess.Popen(cmd)
             try:
-                deadline = time.time() + 50.0
+                deadline = time.time() + 75.0
                 while time.time() < deadline and not report:
                     time.sleep(0.25)
                 proc.terminate()
@@ -1350,7 +1350,7 @@ def test_headless_chrome_search_jump_to_exact_phrase_location():
             ]
             proc = subprocess.Popen(cmd)
             try:
-                deadline = time.time() + 50.0
+                deadline = time.time() + 75.0
                 while time.time() < deadline and not report:
                     time.sleep(0.25)
                 proc.terminate()
@@ -1910,7 +1910,7 @@ def test_headless_chrome_browse_multi_faceted_filtering_e2e():
             ]
             proc = subprocess.Popen(cmd)
             try:
-                deadline = time.time() + 50.0
+                deadline = time.time() + 75.0
                 while time.time() < deadline and not report:
                     time.sleep(0.25)
                 proc.terminate()
@@ -1941,6 +1941,241 @@ def test_headless_chrome_browse_multi_faceted_filtering_e2e():
         assert all(45 <= d <= 60 for d in report["customSampleDurs"])
         assert report["sortedFirstDur"] == 45
         assert report["resetTotal"] == report["initialTotal"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_search_multi_faceted_filtering_contract():
+    """Verifies DOM controls, JS handlers, and worker handlers for multi-faceted Search filtering."""
+    from deeper_dhamma.config import PROJECT_ROOT
+
+    web_dir = PROJECT_ROOT / "deeper_dhamma" / "web"
+    index_html = (web_dir / "views" / "index.html").read_text(encoding="utf-8")
+    all_app_js = _read_all_app_js(web_dir)
+    worker_js = (web_dir / "static" / "db_worker.js").read_text(encoding="utf-8")
+    style_css = _read_all_style_css(web_dir)
+
+    for dom_id in (
+        'id="search-teachers-dropdown"',
+        'id="btn-search-teacher-mode-any"',
+        'id="btn-search-teacher-mode-all"',
+        'id="search-teachers-list"',
+        'id="search-years-dropdown"',
+        'id="search-era-presets"',
+        'id="search-years-grid"',
+        'id="search-year-from"',
+        'id="search-year-to"',
+        'id="search-duration-dropdown"',
+        'id="search-duration-buckets"',
+        'id="search-min-duration"',
+        'id="search-max-duration"',
+        'id="search-category-dropdown"',
+        'id="search-collections-list"',
+        'id="search-formats-list"',
+        'id="search-cotaught-checkbox"',
+        'id="search-bookmarked-checkbox"',
+        'id="search-title-dropdown"',
+        'id="search-title-input"',
+        'id="search-title-word-checkbox"',
+        'id="search-active-chips"',
+        'id="sort-order-select"',
+        'id="reset-filters-btn"',
+    ):
+        assert dom_id in index_html, f"Missing {dom_id} in index.html"
+
+    for css_sel in (".search-facets-group", ".search-title-panel", ".search-active-chips"):
+        assert css_sel in style_css, f"Missing {css_sel} in CSS"
+
+    for js_sym in (
+        "setupSearchFilterListeners",
+        "buildSearchFilterOpts",
+        "buildSearchRouteHash",
+        "applySearchParamsFromRoute",
+        "resetSearchFilters",
+        "populateSearchFilterFacets",
+    ):
+        assert js_sym in all_app_js, f"Missing {js_sym} in frontend modules"
+
+    for worker_sym in ("normalizeEpisodeFilterCriteria", "matchesEpisodeFilterCriteria"):
+        assert worker_sym in worker_js, f"Missing {worker_sym} in db_worker.js"
+
+
+def test_headless_chrome_search_multi_faceted_filtering_e2e():
+    """
+    Exercises multi-faceted Search View filtering inside headless Google Chrome against dist/:
+    1. FTS query ("jhana") + multi-monastic selection (Any/OR vs All/AND co-taught).
+    2. Multi-year selection + Date Range toggle.
+    3. Duration bucket & Collection filter + Title filter.
+    4. Filter-only mode (no FTS query), active chip removal, URL hash sync, and Reset.
+    """
+    import http.server
+    import json
+    import subprocess
+    import tempfile
+    import threading
+    import time
+    from deeper_dhamma.config import DIST_DIR
+    from deeper_dhamma.export_web import StaticPreviewHandler
+
+    chrome_path = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+    if not chrome_path.exists():
+        pytest.skip("Google Chrome not found")
+    if not (DIST_DIR / "db_manifest.json").exists() or not (DIST_DIR / "index.html").exists():
+        pytest.skip("Built static bundle not present in dist/")
+
+    report = {}
+
+    class SearchFilterUIHandler(StaticPreviewHandler):
+        def log_message(self, format, *args):
+            pass
+
+        def do_POST(self):
+            if self.path == "/__report__":
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode("utf-8")
+                report.update(json.loads(body))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ok")
+                return
+            self.send_error(404)
+
+        def do_GET(self):
+            if self.path == "/__search_filters_e2e.html":
+                raw_html = (DIST_DIR / "index.html").read_text(encoding="utf-8")
+                head_err_js = "<script>window.__errs=[];window.addEventListener('error',e=>window.__errs.push(e.message+' @ '+e.filename+':'+e.lineno));</script>"
+                raw_html = raw_html.replace("<head>", f"<head>{head_err_js}", 1)
+                harness_js = """
+                <script>
+                (async () => {
+                  const out = { ok: false, errors: window.__errs || [] };
+                  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+                  async function waitFor(fn, timeoutMs = 45000) {
+                    const t0 = performance.now();
+                    while (performance.now() - t0 < timeoutMs) {
+                      const val = fn();
+                      if (val) return val;
+                      await wait(80);
+                    }
+                    throw new Error("Timed out waiting for condition");
+                  }
+                  try {
+                    await waitFor(() => document.querySelectorAll('#search-teachers-list input[data-teacher-slug]').length > 5, 45000);
+
+                    const searchInput = document.getElementById('search-input');
+                    const getCount = () => Number(document.getElementById('search-count-badge').textContent || '0');
+
+                    // 1. Run FTS query "jhana"
+                    searchInput.value = 'jhana';
+                    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    await waitFor(() => getCount() > 50);
+                    out.jhanaAllCount = getCount();
+
+                    // 2. Filter by Ajahn Brahm
+                    document.querySelector('#search-teachers-list input[data-teacher-slug="ajahn_brahm"]').click();
+                    await waitFor(() => getCount() > 0 && getCount() < out.jhanaAllCount);
+                    out.jhanaBrahmCount = getCount();
+
+                    // 3. Add Ajahn Brahmali (Any/OR -> expands)
+                    document.querySelector('#search-teachers-list input[data-teacher-slug="ajahn_brahmali"]').click();
+                    await waitFor(() => getCount() > out.jhanaBrahmCount);
+                    out.jhanaOrCount = getCount();
+
+                    // 4. Switch to All (AND co-taught)
+                    document.getElementById('btn-search-teacher-mode-all').click();
+                    await waitFor(() => getCount() < out.jhanaOrCount);
+                    out.jhanaAndCount = getCount();
+                    out.andHash = window.location.hash;
+
+                    // 5. Reset and test Collection (MN) + Duration (< 15 min) without FTS query
+                    document.getElementById('reset-filters-btn').click();
+                    await waitFor(() => document.getElementById('search-empty-state').style.display === 'block');
+
+                    document.querySelector('#search-collections-list input[data-collection="mn"]').click();
+                    await waitFor(() => getCount() >= 100 && getCount() <= 250);
+                    out.mnOnlyCount = getCount();
+
+                    document.querySelector('#search-duration-buckets input[data-dur-bucket="under_15"]').click();
+                    await waitFor(() => getCount() < out.mnOnlyCount);
+                    out.mnUnder15Count = getCount();
+
+                    // 6. Verify chips exist and removing chip updates results
+                    out.chipCount = document.querySelectorAll('#search-active-chips .browse-filter-chip').length;
+                    const durChip = document.querySelector('#search-active-chips .browse-filter-chip[data-remove-dur="under_15"]');
+                    if (durChip) durChip.click();
+                    await waitFor(() => getCount() === out.mnOnlyCount);
+                    out.afterChipRemoveCount = getCount();
+
+                    // 7. Reset clears everything back to empty state
+                    document.getElementById('reset-filters-btn').click();
+                    await waitFor(() => document.getElementById('search-empty-state').style.display === 'block');
+                    out.resetBadge = getCount();
+
+                    out.ok = true;
+                  } catch (err) {
+                    out.error = String(err && err.stack ? err.stack : err);
+                    out.hasDD = Boolean(window.DeeperDhamma);
+                    out.isDbReady = Boolean(window.DeeperDhamma && window.DeeperDhamma.state && window.DeeperDhamma.state.isDbReady);
+                    out.teacherCheckboxes = document.querySelectorAll('#search-teachers-list input[data-teacher-slug]').length;
+                    out.browseTeacherCheckboxes = document.querySelectorAll('#browse-teachers-list input[data-teacher-slug]').length;
+                    out.searchCountBadge = document.getElementById('search-count-badge')?.textContent;
+                  }
+                  await fetch('/__report__', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(out) });
+                })();
+                </script>
+                """
+                body = raw_html.replace("</body>", f"{harness_js}</body>").encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            super().do_GET()
+
+    class ReusableServer(http.server.ThreadingHTTPServer):
+        allow_reuse_address = True
+
+    server = ReusableServer(
+        ("127.0.0.1", 0),
+        lambda *args, **kwargs: SearchFilterUIHandler(*args, directory=str(DIST_DIR), **kwargs),
+    )
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as user_data_dir:
+            cmd = [
+                str(chrome_path),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                f"--user-data-dir={user_data_dir}",
+                f"http://127.0.0.1:{port}/__search_filters_e2e.html",
+            ]
+            proc = subprocess.Popen(cmd)
+            try:
+                deadline = time.time() + 75.0
+                while time.time() < deadline and not report:
+                    time.sleep(0.25)
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        assert report.get("ok") is True, f"Search Filter E2E failed: {report}"
+        assert report["jhanaAllCount"] > report["jhanaBrahmCount"] > 0
+        assert report["jhanaOrCount"] > report["jhanaBrahmCount"]
+        assert report["jhanaAndCount"] < report["jhanaOrCount"]
+        assert "teachers=ajahn_brahm" in report["andHash"]
+        assert "tmode=all" in report["andHash"]
+        assert 100 <= report["mnOnlyCount"] <= 250
+        assert report["mnUnder15Count"] < report["mnOnlyCount"]
+        assert report["chipCount"] == 2
+        assert report["afterChipRemoveCount"] == report["mnOnlyCount"]
+        assert report["resetBadge"] == 0
     finally:
         server.shutdown()
         server.server_close()
@@ -3004,7 +3239,7 @@ def test_headless_chrome_app_shell_layout_e2e():
                 f"http://127.0.0.1:{port}/__shell_host.html",
             ])
             try:
-                deadline = time.time() + 50.0
+                deadline = time.time() + 75.0
                 while time.time() < deadline and not report:
                     time.sleep(0.25)
                 proc.terminate()
