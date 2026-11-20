@@ -1,0 +1,1344 @@
+/* ==========================================================================
+   Bookmarks Feature & Ribbon Icon Controls
+   ========================================================================== */
+
+.btn-bookmark-icon {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.btn-bookmark-icon:hover {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-bookmark-icon.is-bookmarked {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.18);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+}
+
+.btn-bookmark-icon svg {
+  display: block;
+}
+
+.bookmark-ribbon-icon {
+  display: block;
+  flex-shrink: 0;
+  font-size: 20px;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+}
+
+.bookmark-ribbon-icon.is-bookmarked,
+.btn-bookmark-action.is-bookmarked .bookmark-ribbon-icon {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+}
+
+/* Card Pinned Top-Right Bookmark Button */
+.card-bookmark-btn {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 5;
+}
+
+/* Transcript action button bookmark */
+.btn-bookmark-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.btn-bookmark-action.is-bookmarked {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.15);
+}
+
+.bookmark-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Player Bar Bookmark Button */
+.btn-player-bookmark {
+  margin-left: 0;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+
+/* Bookmarks View */
+.bookmarks-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.bookmarks-status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 1.15rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.bookmarks-reorder-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+#bookmarks-list,
+.bookmarks-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-width: 960px;
+}
+
+/* Bookmark Card Layout - Compact, Horizontal Rail & Body */
+.bookmark-card {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0.85rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.95rem;
+  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color var(--transition-normal), background var(--transition-normal), box-shadow var(--transition-normal);
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.bookmark-card:hover {
+  border-color: var(--border-medium);
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-card);
+}
+
+.bookmark-card:active {
+  cursor: grabbing;
+}
+
+/* Card elevation when a dropdown is open */
+.bookmark-card:has(.download-dropdown-wrapper.open),
+.bookmark-card.dropdown-active {
+  z-index: 150 !important;
+}
+
+/* ==========================================================================
+   Generic Card Physics & Fluid Reordering Engine Styles
+   ========================================================================== */
+
+/* In-flow ghost card left in place while dragging */
+.card-is-ghost,
+.bookmark-card.is-ghost {
+  opacity: 0.28 !important;
+  border: 2px dashed rgba(245, 158, 11, 0.75) !important;
+  background: rgba(245, 158, 11, 0.04) !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+}
+
+/* Floating Solid Drag Card following cursor/finger (full opacity) */
+.card-floating-drag,
+.bookmark-floating-drag-card,
+.bookmark-drag-floating-preview {
+  position: fixed !important;
+  z-index: 99999 !important;
+  pointer-events: none !important;
+  opacity: 1 !important;
+  background: var(--bg-card, #131926) !important;
+  border: 2px solid #f59e0b !important;
+  border-radius: var(--radius-md, 8px) !important;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.95), 0 0 26px rgba(245, 158, 11, 0.5) !important;
+  transform: scale(1.02) rotate(0.4deg);
+  cursor: grabbing !important;
+  will-change: left, top, transform;
+}
+
+/* Glowing placement indicator line between cards */
+.card-drop-indicator,
+.bookmark-drop-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0) 0%, #f59e0b 15%, #fbbf24 50%, #f59e0b 85%, rgba(245, 158, 11, 0) 100%);
+  box-shadow: 0 0 12px #f59e0b, 0 0 24px rgba(245, 158, 11, 0.85);
+  border-radius: 2px;
+  z-index: 40;
+  pointer-events: none;
+  display: none;
+  transition: top 0.08s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.card-drop-indicator::before,
+.card-drop-indicator::after,
+.bookmark-drop-indicator::before,
+.bookmark-drop-indicator::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59e0b;
+  transform: translateY(-50%);
+  box-shadow: 0 0 8px #f59e0b;
+}
+
+.card-drop-indicator::before,
+.bookmark-drop-indicator::before {
+  left: -4px;
+}
+
+.card-drop-indicator::after,
+.bookmark-drop-indicator::after {
+  right: -4px;
+}
+
+/* Card Reorder Exchange Glide Animation */
+.card-is-exchanging-active,
+.bookmark-card.is-exchanging-active {
+  z-index: 25 !important;
+  opacity: 1 !important;
+  border-color: #f59e0b !important;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.9), 0 0 22px rgba(245, 158, 11, 0.45) !important;
+  will-change: transform;
+  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 280ms ease !important;
+}
+
+.card-is-exchanging-target,
+.bookmark-card.is-exchanging-target {
+  z-index: 10 !important;
+  opacity: 0.95 !important;
+  border-color: rgba(245, 158, 11, 0.35) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+  will-change: transform;
+  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 280ms ease !important;
+}
+
+@keyframes cardExchangePulse {
+  0% {
+    border-color: #f59e0b;
+    box-shadow: 0 0 18px rgba(245, 158, 11, 0.5);
+  }
+  100% {
+    border-color: var(--border-subtle);
+    box-shadow: none;
+  }
+}
+
+.card-just-exchanged,
+.bookmark-card.just-exchanged {
+  animation: cardExchangePulse 0.6s ease-out;
+}
+
+/* ==========================================================================
+   Bookmark Card Component Elements (Rail, Badges, Body, Meta, Actions)
+   ========================================================================== */
+
+/* Left Reorder Rail */
+.bookmark-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: 46px;
+  flex-shrink: 0;
+}
+
+/* Bright Top-Left Bookmark Order Badge (also serves as primary drag grip) */
+.bookmark-order-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 1.75rem;
+  padding: 0 0.25rem;
+  background: #f59e0b; /* Bright golden amber */
+  color: #0b0f19;      /* Ultra high-contrast dark text */
+  font-weight: 800;
+  font-size: 0.85rem;
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.4), 0 0 8px rgba(245, 158, 11, 0.2);
+  letter-spacing: 0.02em;
+  user-select: none;
+  line-height: 1;
+  flex-shrink: 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.bookmark-order-badge:active {
+  cursor: grabbing;
+}
+
+/* Compact Reorder Control Group in Rail with large finger touch targets */
+.bookmark-reorder-group {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 6px);
+  width: 100%;
+  user-select: none;
+  overflow: hidden;
+}
+
+/* Generic Drag Handle (for generic CardPhysics instances) */
+.card-drag-handle {
+  font-size: 1.1rem;
+  color: #f59e0b;
+  cursor: grab;
+  padding: 0.1rem 0;
+  line-height: 1;
+  opacity: 0.85;
+  touch-action: none;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.card-drag-handle:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+/* Finger-Tappable Up/Down Reorder Buttons (large touch target >= 36px) */
+.btn-reorder {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 700;
+  width: 100%;
+  height: 36px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+
+.btn-reorder-up {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.btn-reorder:hover:not(:disabled) {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.btn-reorder:active:not(:disabled) {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.32);
+  transform: scale(0.94);
+}
+
+.btn-reorder:disabled {
+  opacity: 0.18;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Main Content Body */
+.bookmark-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+/* Top Meta Line: Pills + Remove Action */
+.bookmark-meta-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.bookmark-meta-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.bookmark-meta-item {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* Bookmark Title */
+.bookmark-title {
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Actions Bar */
+.bookmark-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-top: 0.15rem;
+}
+
+.bookmark-actions-bar .btn-sm {
+  padding: 0.32rem 0.65rem !important;
+  font-size: 0.78rem !important;
+  line-height: 1.2 !important;
+  border-radius: var(--radius-sm, 6px) !important;
+}
+
+.bookmark-podbean-link {
+  font-size: 0.78rem;
+  padding: 0.32rem 0.5rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: var(--radius-sm, 6px);
+  transition: color var(--transition-fast);
+  margin-left: auto;
+}
+
+.bookmark-podbean-link:hover {
+  color: var(--text-primary);
+}
+
+/* Top-Right Remove Bookmark Button */
+.btn-remove-bookmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.btn-remove-bookmark .bookmark-ribbon-icon {
+  font-size: 16px;
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+  color: #f59e0b;
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.btn-remove-bookmark:hover {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.12);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+}
+
+.btn-remove-bookmark:hover .bookmark-ribbon-icon {
+  color: #ef4444;
+  transform: scale(1.08);
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .bookmark-card {
+    gap: 0.65rem;
+    padding: 0.65rem 0.75rem;
+  }
+  .bookmark-rail {
+    width: 38px;
+  }
+  .bookmark-order-badge {
+    height: 1.5rem;
+    font-size: 0.75rem;
+  }
+  .btn-remove-bookmark .remove-label {
+    display: none;
+  }
+  .btn-remove-bookmark {
+    padding: 0.25rem 0.35rem;
+  }
+  .bookmark-podbean-link {
+    margin-left: 0;
+  }
+}
+
+/* ==========================================================================
+   About View Styles
+   ========================================================================== */
+
+.about-container {
+  max-width: 960px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+.about-hero {
+  text-align: center;
+  padding: 2.75rem 2rem;
+  background: radial-gradient(circle at 50% 25%, rgba(245, 158, 11, 0.08) 0%, rgba(15, 22, 38, 0.95) 75%);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.about-hero-badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--accent-saffron-light);
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--radius-full);
+  margin-bottom: 1rem;
+}
+
+.about-hero-title {
+  font-family: var(--font-serif);
+  font-size: 2.4rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  background: linear-gradient(135deg, #ffffff 40%, var(--accent-saffron-light) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 0.75rem;
+  line-height: 1.2;
+}
+
+.about-hero-lead {
+  font-size: 1.05rem;
+  color: var(--text-secondary);
+  max-width: 720px;
+  margin: 0 auto 1.5rem auto;
+  line-height: 1.6;
+}
+
+.about-hero-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.about-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-full);
+}
+
+.about-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.about-section-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.about-section-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+  padding-top: 0.15rem;
+}
+
+.about-section-title {
+  font-family: var(--font-serif);
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.about-section-subtitle {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+.about-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.about-prose-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-size: 0.96rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.about-prose-card strong {
+  color: var(--text-primary);
+}
+
+.about-features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1.25rem;
+}
+
+.about-feature-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  transition: transform var(--transition-fast), border-color var(--transition-fast);
+}
+
+.about-feature-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.feature-card-icon {
+  font-size: 1.8rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.feature-card-title {
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.feature-card-text {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  flex: 1;
+}
+
+.feature-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.feature-card-meta .meta-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent-saffron-light);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.about-arch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1.25rem;
+}
+
+.arch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.arch-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.arch-badge {
+  align-self: flex-start;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--accent-sage);
+  background: var(--accent-sage-soft);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.arch-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.arch-desc {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.arch-checklist {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  margin-top: auto;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.arch-checklist li {
+  color: var(--text-secondary);
+}
+
+.about-teachers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 1.25rem;
+}
+
+.about-teacher-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  display: flex;
+  gap: 1.15rem;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.teacher-avatar {
+  font-size: 2rem;
+  width: 3.25rem;
+  height: 3.25rem;
+  flex-shrink: 0;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.teacher-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.teacher-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.teacher-role {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-saffron-light);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.teacher-bio {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-top: 0.35rem;
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 1rem;
+}
+
+.shortcut-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md);
+}
+
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.shortcut-keys kbd {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-medium);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.shortcut-desc {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.about-dana-card {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.05) 0%, rgba(15, 22, 38, 0.95) 100%);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.dana-symbol {
+  font-size: 3rem;
+  color: var(--accent-saffron);
+  text-shadow: 0 0 20px var(--accent-saffron-glow);
+  flex-shrink: 0;
+  padding-top: 0.25rem;
+}
+
+.dana-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  min-width: 0;
+}
+
+.dana-title {
+  font-family: var(--font-serif);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.dana-lead {
+  font-style: italic;
+  color: var(--accent-saffron-light);
+  font-size: 1.02rem;
+}
+
+.dana-links-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 0.85rem;
+  margin: 0.5rem 0;
+}
+
+.dana-link-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: var(--text-primary);
+  transition: all var(--transition-fast);
+}
+
+.dana-link-card:hover {
+  border-color: var(--accent-saffron);
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dana-link-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+  padding-top: 0.15rem;
+}
+
+.dana-link-card strong {
+  display: block;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  margin-bottom: 0.15rem;
+}
+
+.dana-link-card span {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.dana-support-banner {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1.15rem 1.35rem;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-md);
+  margin: 0.5rem 0;
+}
+
+.support-banner-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.support-banner-content {
+  flex: 1;
+}
+
+.support-banner-content strong {
+  display: block;
+  font-size: 0.96rem;
+  color: var(--accent-saffron-light);
+  margin-bottom: 0.25rem;
+}
+
+.support-banner-content p {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.btn-donate-support {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.15rem;
+  background: var(--accent-saffron);
+  color: #090d16;
+  font-weight: 700;
+  font-size: 0.88rem;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn-donate-support:hover {
+  background: var(--accent-saffron-light);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35);
+}
+
+.dana-buttons-group {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.dana-bswa-card,
+.dana-sc-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.dana-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.dana-bswa-card .btn-donate-bswa,
+.dana-sc-card .btn-donate-sc {
+  align-self: flex-start;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.95rem;
+}
+
+.btn-donate-bswa,
+.btn-donate-sc {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+}
+
+.btn-donate-bswa:hover,
+.btn-donate-sc:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--accent-saffron);
+  color: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.dana-closing {
+  font-size: 0.88rem;
+  color: var(--accent-sage);
+  font-weight: 500;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.75rem;
+}
+
+.about-diagnostics-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.diagnostics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.diagnostics-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.diagnostics-sub {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 1rem;
+}
+
+.diag-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.diag-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.diag-val {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: monospace;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 600px) {
+  .about-container {
+    gap: 1.75rem;
+    min-width: 0;
+  }
+  .about-hero {
+    padding: 1.5rem 1rem;
+  }
+  .about-hero-title {
+    font-size: 1.8rem;
+  }
+  .about-hero-lead {
+    font-size: 0.95rem;
+  }
+  .about-chip {
+    font-size: 0.76rem;
+    padding: 0.3rem 0.6rem;
+    max-width: 100%;
+  }
+  .about-section,
+  .about-card,
+  .arch-card {
+    min-width: 0;
+  }
+  .about-section-header {
+    gap: 0.65rem;
+  }
+  .about-section-title {
+    font-size: 1.2rem;
+  }
+  .about-dana-card {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .dana-symbol {
+    font-size: 2.2rem;
+  }
+  .about-card {
+    padding: 1.15rem 1rem;
+  }
+  .dana-support-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .dana-buttons-group {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dana-buttons-group .btn-donate-support {
+    justify-content: center;
+    width: 100%;
+  }
+  .dana-bswa-card .btn-donate-bswa,
+  .dana-sc-card .btn-donate-sc {
+    align-self: stretch;
+    justify-content: center;
+    width: 100%;
+  }
+}
+
+/* ==========================================================================
+   Archive Notes View (#notes-view)
+   ========================================================================== */
+
+.notes-inline-link-row {
+  margin-top: 0.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.notes-diagram-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  overflow-x: hidden;
+  margin: 0.25rem 0;
+}
+
+.notes-diagram-svg {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+}
+
+.notes-diagram-svg--mobile {
+  display: none;
+}
+
+.notes-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.notes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.notes-table th {
+  text-align: left;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border-medium);
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+}
+
+.notes-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  vertical-align: top;
+}
+
+.notes-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.notes-table td code {
+  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  color: var(--accent-saffron-light);
+}
+
+.notes-count-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  color: var(--text-primary) !important;
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  .notes-diagram-svg--desktop {
+    display: none;
+  }
+  .notes-diagram-svg--mobile {
+    display: block;
+  }
+}
+
+@media (max-width: 600px) {
+  .notes-diagram-card {
+    padding: 0.65rem 0.5rem;
+  }
+  .notes-table-wrap {
+    overflow-x: visible;
+  }
+  .notes-table thead {
+    display: none;
+  }
+  .notes-table,
+  .notes-table tbody {
+    display: block;
+    width: 100%;
+  }
+  .notes-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.35rem 0.75rem;
+    padding: 0.85rem 0.9rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .notes-table tbody tr:last-child {
+    border-bottom: none;
+  }
+  .notes-table td {
+    padding: 0;
+    border-bottom: none;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .notes-table td:nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+  }
+  .notes-table td:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+    align-self: center;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    border-radius: var(--radius-full);
+    padding: 0.12rem 0.55rem;
+    font-size: 0.8rem;
+  }
+  .notes-table td:nth-child(3) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 380px) {
+  #notes-view .about-card {
+    padding: 0.95rem 0.75rem;
+  }
+  .notes-diagram-card {
+    padding: 0.45rem 0.35rem;
+  }
+  .notes-table tr {
+    padding: 0.75rem 0.7rem;
+  }
+}

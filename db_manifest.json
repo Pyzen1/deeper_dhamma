@@ -1,0 +1,103 @@
+{
+  "format": "sharded_v1",
+  "version": 1795208111,
+  "core": {
+    "id": "core",
+    "file": "core.db.gz",
+    "raw_file": "core.db",
+    "raw_bytes": 18448384,
+    "gz_bytes": 3361846,
+    "sha256": "a032055e6e9b9233f44b6e97cb1f733ac52258a561d0b4874b6dd0e97ee91ef1"
+  },
+  "talks": [
+    {
+      "id": "talks_1",
+      "shard": 1,
+      "file": "talks_1.db.gz",
+      "raw_file": "talks_1.db",
+      "raw_bytes": 70074368,
+      "gz_bytes": 27320823,
+      "sha256": "7438187ab75397bffc23aa91e28b78f2ea46b55b78aaca19abacf94f6b31c9a3",
+      "episodes": 743
+    },
+    {
+      "id": "talks_2",
+      "shard": 2,
+      "file": "talks_2.db.gz",
+      "raw_file": "talks_2.db",
+      "raw_bytes": 69775360,
+      "gz_bytes": 27149289,
+      "sha256": "fcc0f0846a3b9f9a26dfacff1fa33a2c24c38c2d3023eeac9d93310e47d4a870",
+      "episodes": 743
+    },
+    {
+      "id": "talks_3",
+      "shard": 3,
+      "file": "talks_3.db.gz",
+      "raw_file": "talks_3.db",
+      "raw_bytes": 69865472,
+      "gz_bytes": 27155889,
+      "sha256": "7eab9a4da2ba2a1cc972755e701abccd3a89d3a911886d0300b072dcff0fd8c6",
+      "episodes": 743
+    },
+    {
+      "id": "talks_4",
+      "shard": 4,
+      "file": "talks_4.db.gz",
+      "raw_file": "talks_4.db",
+      "raw_bytes": 69926912,
+      "gz_bytes": 27300628,
+      "sha256": "6868fb180df0e8f36df275478cb611829153015b2d8c6716c8bd303a57f3d28d",
+      "episodes": 742
+    }
+  ],
+  "words": [
+    {
+      "id": "words_1",
+      "shard": 1,
+      "file": "words_1.db.gz",
+      "raw_file": "words_1.db",
+      "raw_bytes": 42606592,
+      "gz_bytes": 26837951,
+      "sha256": "e0b1bde3343798f687f1450304feb1d8ccccade95bedf9418e063b01b51df665",
+      "episodes": 743
+    },
+    {
+      "id": "words_2",
+      "shard": 2,
+      "file": "words_2.db.gz",
+      "raw_file": "words_2.db",
+      "raw_bytes": 42590208,
+      "gz_bytes": 26849191,
+      "sha256": "bab5dd9ad93c233707fa82814c06b980406be826838ee269ae03772bda560044",
+      "episodes": 743
+    },
+    {
+      "id": "words_3",
+      "shard": 3,
+      "file": "words_3.db.gz",
+      "raw_file": "words_3.db",
+      "raw_bytes": 42614784,
+      "gz_bytes": 26801406,
+      "sha256": "891d23878d308acdc65d2729a768cee1559b190a753916e446abb95ddfa1086d",
+      "episodes": 743
+    },
+    {
+      "id": "words_4",
+      "shard": 4,
+      "file": "words_4.db.gz",
+      "raw_file": "words_4.db",
+      "raw_bytes": 42610688,
+      "gz_bytes": 26840932,
+      "sha256": "4ea0c0aafbeeda708ede76ab5b76def3a500d9c4941e04a2d011ded56d1f508e",
+      "episodes": 742
+    }
+  ],
+  "episodes": 3249,
+  "transcribed_episodes": 2971,
+  "segments": 177279,
+  "terms": 2482,
+  "words_count": 2971,
+  "total_raw_bytes": 468512768,
+  "total_gz_bytes": 219617955
+}

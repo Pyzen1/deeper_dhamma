@@ -1,0 +1,325 @@
+/**
+ * Deeper Dhamma — Self-Referential Offline Service Worker
+ * 
+ * Provides 100% offline resilience across page refreshes (F5 / reload) even when
+ * the local server process is shut down.
+ * 
+ * Architecture:
+ * - Pre-caches core application shell (index.html, styles, scripts, SQLite WASM, icons).
+ * - Cache-First for navigation and static assets with ignoreSearch: true and
+ *   pathname normalization (/static/ and relative links).
+ * - Live server exception ONLY for version probes (Range: bytes=0-99, /api/) so that
+ *   updates reflect live server state while failing gracefully to IndexedDB when offline.
+ * - Bypasses cross-origin media streaming (Podbean CDN audio).
+ */
+
+'use strict';
+
+const CACHE_NAME = 'deeper_dhamma_shell_1795208111';
+
+const CORE_ASSETS = [
+  './',
+  './index.html',
+  './404.html',
+  './manifest.json',
+  './style.css',
+  './style_browse.css',
+  './style_lexicon.css',
+  './style_player.css',
+  './style_transcript.css',
+  './style_bookmarks_about.css',
+  './speaker_palette.js',
+  './bookmarks_view.js',
+  './browse_view.js',
+  './archive_export.js',
+  './search_view.js',
+  './lexicon_views.js',
+  './audio_player.js',
+  './app.js',
+  './card_physics.js',
+  './word_sync.js',
+  './db_client.js',
+  './db_worker.js',
+  './sqlite3.js',
+  './sqlite3.wasm',
+  './icons/app_icon.svg',
+  './icons/pwa_icon_192.png',
+  './icons/pwa_icon_512.png',
+  './icons/ios_apple_touch_icon.png',
+  './icons/lotus_pink.svg',
+  './icons/view_home.svg',
+  './icons/view_search.svg',
+  './icons/view_archive.svg',
+  './icons/view_bookmarks.svg',
+  './icons/view_lexicon.svg',
+  './icons/view_documents.svg',
+  './icons/view_about.svg',
+  './icons/view_notes.svg',
+  './fonts/material_symbols_outlined.woff2'
+];
+
+// ============================================================================
+// Installation: Pre-cache Application Shell under normalized keys
+// ============================================================================
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(async (cache) => {
+      for (const asset of CORE_ASSETS) {
+        try {
+          // Force network fetch to bypass browser HTTP cache during precaching
+          const res = await fetch(asset, { cache: 'reload' });
+          if (res && res.status === 200) {
+            await cache.put(asset, res.clone());
+            const clean = asset.replace(/^\.\//, '/');
+            await cache.put(clean, res.clone());
+            if (!clean.startsWith('/static/')) {
+              await cache.put('/static' + clean, res.clone());
+            }
+          }
+        } catch (err) {
+          console.warn('[ServiceWorker] Precache failed for:', asset, err.message);
+        }
+      }
+    }).then(() => self.skipWaiting())
+  );
+});
+
+// ============================================================================
+// Activation: Prune Stale Caches and Claim Clients
+// ============================================================================
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => {
+      return Promise.all(
+        keys.map((key) => {
+          if (key !== CACHE_NAME) {
+            console.log('[ServiceWorker] Removing stale cache:', key);
+            return caches.delete(key);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
+});
+
+// ============================================================================
+// Helper: Cache Match with ignoreSearch and path normalization
+// ============================================================================
+
+async function matchInCache(req) {
+  // 1. Exact match with query params if present
+  let match = await caches.match(req);
+  if (match) return match;
+
+  // 2. Exact match with ignoreSearch (handles ?v=... query parameters)
+  match = await caches.match(req, { ignoreSearch: true });
+  if (match) return match;
+
+  const url = new URL(req.url);
+  const pathname = url.pathname;
+
+  // 2. Direct pathname match
+  match = await caches.match(pathname, { ignoreSearch: true });
+  if (match) return match;
+
+  // 3. Match relative ./pathname
+  match = await caches.match('.' + pathname, { ignoreSearch: true });
+  if (match) return match;
+
+  // 4. Handle /static/ prefix stripping or adding
+  if (pathname.startsWith('/static/')) {
+    const stripped = pathname.slice(7); // strip '/static'
+    match = (await caches.match(stripped, { ignoreSearch: true })) ||
+            (await caches.match('.' + stripped, { ignoreSearch: true }));
+    if (match) return match;
+  } else {
+    match = await caches.match('/static' + pathname, { ignoreSearch: true });
+    if (match) return match;
+  }
+
+  // 5. Match by basename (e.g. "style.css", "app.js", "db_worker.js", "sqlite3.wasm")
+  const basename = pathname.split('/').pop();
+  if (basename) {
+    match = (await caches.match('./' + basename, { ignoreSearch: true })) ||
+            (await caches.match('/' + basename, { ignoreSearch: true })) ||
+            (await caches.match(basename, { ignoreSearch: true })) ||
+            (await caches.match('/static/' + basename, { ignoreSearch: true }));
+    if (match) return match;
+  }
+
+  return null;
+}
+
+// ============================================================================
+// Fetch Interception: Self-Referential Cache-First Routing
+// ============================================================================
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+
+  const url = new URL(req.url);
+
+  // 1. Cross-Origin Requests (e.g. Podbean CDN audio streams, Google Fonts)
+  // Let the browser handle these directly without service worker interference.
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  // 2. Server Version Checks & Database/Manifest Fetches (EXCEPTIONS to cache)
+  // Range probes (bytes=0-99), manifest checks (db_manifest.json), DB shards (.db / .db.gz), and API stats check live server status.
+  const isRangeProbe = req.headers.get('Range') === 'bytes=0-99';
+  const isManifestFetch = url.pathname.endsWith('db_manifest.json');
+  const isDbFetch =
+    url.pathname.endsWith('.db') ||
+    url.pathname.endsWith('.db.gz') ||
+    isManifestFetch ||
+    url.pathname.includes('dhamma_web.db');
+  const isServerProbe = isRangeProbe || isDbFetch || url.pathname.startsWith('/api/');
+
+  if (isServerProbe) {
+    const isFullDb = isDbFetch && !isRangeProbe && !isManifestFetch;
+    // Manifest & header probes fail fast offline; compressed DB shard transfers must never abort at 15s on slow links.
+    const timeoutMs = isFullDb ? 300000 : (isManifestFetch ? 2500 : 400);
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    event.respondWith(
+      fetch(req, { signal: controller ? controller.signal : undefined })
+        .then((res) => {
+          if (timeoutId) clearTimeout(timeoutId);
+          return res;
+        })
+        .catch(async () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          if (isFullDb) {
+            const cached = await matchInCache(req);
+            if (cached) return cached;
+          }
+          // Return 503 when server is down so caller (e.g. db_worker.js)
+          // gracefully activates its IndexedDB offline fallback.
+          return new Response('Server offline', {
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: { 'Content-Type': 'text/plain' }
+          });
+        })
+    );
+    return;
+  }
+
+  // 3. Navigation Requests (User clicks browser Refresh / F5 / deep-link navigation)
+  // When online, fetch fresh application shell so page updates immediately on refresh.
+  // Fall back to Cache-First offline so the PWA works seamlessly without internet.
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      (async () => {
+        if (navigator.onLine) {
+          try {
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeoutId = controller ? setTimeout(() => controller.abort(), 1200) : null;
+            const fresh = await fetch(req, { signal: controller ? controller.signal : undefined });
+            if (timeoutId) clearTimeout(timeoutId);
+            if (fresh && fresh.status === 200) {
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put('./index.html', fresh.clone());
+              await cache.put('/', fresh.clone());
+              return fresh;
+            }
+          } catch (_) {}
+        }
+
+        const cached =
+          (await caches.match('./index.html', { ignoreSearch: true })) ||
+          (await caches.match('/index.html', { ignoreSearch: true })) ||
+          (await caches.match('/', { ignoreSearch: true })) ||
+          (await caches.match('./', { ignoreSearch: true })) ||
+          (await caches.match('index.html', { ignoreSearch: true }));
+
+        if (cached) {
+          return cached;
+        }
+
+        // Cache miss: attempt network fetch and cache result
+        try {
+          const fresh = await fetch(req);
+          if (fresh && fresh.status === 200) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put('./index.html', fresh.clone());
+            await cache.put('/', fresh.clone());
+          }
+          return fresh;
+        } catch (err) {
+          return new Response('Offline: Deeper Dhamma cache initializing.', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain' }
+          });
+        }
+      })()
+    );
+    return;
+  }
+
+  // 4. Static Application Shell Assets (.js, .css, .wasm, .svg, .json, .bin)
+  // When online, check for updated version query parameters (?v=...) to prevent stale script/markup skew.
+  event.respondWith(
+    (async () => {
+      const hasVersionQuery = url.search.includes('v=');
+      if (hasVersionQuery && navigator.onLine) {
+        const exact = await caches.match(req);
+        if (!exact) {
+          try {
+            const fresh = await fetch(req);
+            if (fresh && fresh.status === 200) {
+              const cache = await caches.open(CACHE_NAME);
+              await cache.put(req, fresh.clone());
+              return fresh;
+            }
+          } catch (_) {}
+        }
+      }
+
+      const cached = await matchInCache(req);
+      if (cached) {
+        // Revalidate in background if online
+        if (navigator.onLine) {
+          fetch(req)
+            .then(async (fresh) => {
+              if (fresh && fresh.status === 200) {
+                const cache = await caches.open(CACHE_NAME);
+                await cache.put(req, fresh);
+              }
+            })
+            .catch(() => {});
+        }
+        return cached;
+      }
+
+      // Not yet in cache: fetch from network and dynamically cache
+      try {
+        const fresh = await fetch(req);
+        if (fresh && fresh.status === 200) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(req, fresh.clone());
+        }
+        return fresh;
+      } catch (err) {
+        console.warn('[ServiceWorker] Asset unavailable offline:', req.url);
+        // Fallback: check basename one last time
+        const basename = url.pathname.split('/').pop();
+        if (basename) {
+          const fallback =
+            (await caches.match('./' + basename, { ignoreSearch: true })) ||
+            (await caches.match('/' + basename, { ignoreSearch: true })) ||
+            (await caches.match(basename, { ignoreSearch: true }));
+          if (fallback) return fallback;
+        }
+        return new Response('Asset unavailable offline', {
+          status: 404,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+    })()
+  );
+});

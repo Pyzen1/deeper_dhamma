@@ -1,0 +1,1027 @@
+/* ==========================================================================
+   Date Range & Advanced Filter Controls
+   ========================================================================== */
+
+.date-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.date-mode-toggle {
+  display: inline-flex;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.date-mode-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 0.35rem 0.65rem;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.date-mode-btn:hover {
+  color: var(--text-primary);
+}
+
+.date-mode-btn.active {
+  background: var(--accent-saffron);
+  color: #090d16;
+  font-weight: 600;
+}
+
+.date-range-inputs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.date-range-inputs input[type="date"] {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.date-range-inputs input[type="date"]:focus {
+  border-color: var(--accent-saffron);
+}
+
+.date-sep {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.btn-reset-filters {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.65rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.btn-reset-filters:hover {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Results Header & Actions Bar */
+.query-meta-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.search-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* Card elevation when a dropdown is open so it renders above all sibling cards */
+.episode-card:has(.download-dropdown-wrapper.open),
+.result-card:has(.download-dropdown-wrapper.open),
+.episode-card.dropdown-active,
+.result-card.dropdown-active {
+  z-index: 150 !important;
+}
+
+.download-dropdown-wrapper {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.download-dropdown-wrapper.open {
+  z-index: 200 !important;
+}
+
+.download-dropdown-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: inherit;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.download-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: min(290px, calc(100vw - 2.25rem));
+  max-width: calc(100vw - 2.25rem);
+  background: #0f1626;
+  background: rgba(15, 22, 38, 0.98);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85), 0 0 20px rgba(245, 158, 11, 0.15);
+  z-index: 210 !important;
+  display: none;
+  flex-direction: column;
+  padding: 0.4rem;
+  overflow: hidden;
+}
+
+/* Dropdown on cards should align left or stay inside container */
+.episode-footer .download-dropdown-menu,
+.result-actions .download-dropdown-menu,
+.bookmark-actions-bar .download-dropdown-menu {
+  left: 0;
+  right: auto;
+}
+
+.download-dropdown-wrapper.open .download-dropdown-menu {
+  display: flex;
+  animation: dropdownPop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dropdownPop {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.dropdown-menu-header {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-saffron-light);
+  padding: 0.5rem 0.75rem 0.35rem 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 0.25rem;
+}
+
+.download-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+}
+
+.download-option:hover {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--accent-saffron-light);
+}
+
+.download-opt-icon {
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+.download-opt-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.download-opt-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.download-option:hover .download-opt-title {
+  color: var(--accent-saffron-light);
+}
+
+.download-opt-desc {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.download-opt-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Archive Compilation Progress Modal
+   ========================================================================== */
+
+.archive-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(5, 8, 14, 0.82);
+  backdrop-filter: blur(12px);
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.archive-modal-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8), 0 0 40px rgba(245, 158, 11, 0.15);
+  width: 100%;
+  max-width: 480px;
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  animation: modalIn 0.22s ease-out;
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.archive-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.archive-modal-icon {
+  font-size: 2.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  background: rgba(245, 158, 11, 0.12);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  flex-shrink: 0;
+}
+
+.archive-modal-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.2rem;
+}
+
+.archive-modal-subtitle {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.archive-progress-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.archive-progress-track {
+  width: 100%;
+  height: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.archive-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent-saffron), var(--accent-saffron-light));
+  border-radius: var(--radius-full);
+  transition: width 0.15s ease, background 0.3s ease;
+}
+
+.archive-progress-bar.complete {
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.archive-progress-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.archive-modal-current-item {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.archive-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ==========================================================================
+   Word-Level Audio Synchronization & Auto-Scroll (Modular Feature)
+   ========================================================================== */
+
+.transcript-word {
+  display: inline;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background-color 0.08s ease, color 0.08s ease;
+}
+
+.transcript-word:hover {
+  text-decoration: underline;
+  text-decoration-color: rgba(245, 158, 11, 0.45);
+}
+
+.transcript-word.active-word {
+  background-color: rgba(245, 158, 11, 0.35);
+  color: #ffffff;
+  border-radius: 2px;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.25);
+}
+
+.transcript-turn.active-turn {
+  background: rgba(22, 33, 52, 0.88);
+  border-color: rgba(255, 255, 255, 0.16);
+  border-left-width: 4px;
+}
+
+.word-mode-group {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  padding: 2px;
+  gap: 2px;
+}
+
+.btn-mode-opt {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-mode-opt:hover {
+  color: var(--text-primary);
+}
+
+.btn-mode-opt.active {
+  background: rgba(245, 158, 11, 0.18);
+  color: var(--accent-saffron-light);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+/* ==========================================================================
+   Transcript Layout & Pali Lexicon Companion
+   ========================================================================== */
+
+.transcript-layout-container {
+  grid-column: 1;
+  grid-row: 3;
+  width: 100%;
+  max-width: 1364px;
+  margin: 0 auto;
+  padding: 0 2rem 3rem 2rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.transcript-reader-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  min-width: 0;
+}
+
+/* Pali Term In-Text Highlighting (Subtle) */
+.pali-term {
+  border-bottom: 1.5px dotted rgba(245, 158, 11, 0.55);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.pali-term:hover {
+  background: rgba(245, 158, 11, 0.14);
+  border-bottom-color: rgba(245, 158, 11, 0.95);
+  color: var(--accent-saffron-light, #fbbf24);
+}
+
+.transcript-word.active-word.pali-term {
+  border-bottom-color: #ffffff;
+}
+
+/* Pali Lexicon Companion Sidebar (Desktop) */
+.transcript-lexicon-companion {
+  position: sticky;
+  top: calc(var(--toolbar-height, 50px) + 0.75rem);
+  max-height: calc(var(--main-height, 640px) - var(--toolbar-height, 50px) - 2rem);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  z-index: 20;
+}
+
+.lex-mobile-ticker {
+  display: none;
+}
+
+.lex-companion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.75rem 0.85rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.lex-companion-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.lex-companion-icon {
+  font-size: 1.05rem;
+  flex-shrink: 0;
+}
+
+.lex-companion-title {
+  font-family: 'Cinzel', serif;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: 0.03em;
+}
+
+.lex-stack-badge {
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 0.12rem 0.42rem;
+  border-radius: var(--radius-full);
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--accent-saffron);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  white-space: nowrap;
+}
+
+.lex-companion-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.btn-clear-lex-stack {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 0.18rem 0.4rem;
+  border-radius: 4px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.btn-clear-lex-stack:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.btn-close-lex-sheet {
+  display: none;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+
+.btn-close-lex-sheet:hover {
+  color: var(--text-primary);
+}
+
+/* Stack Container (Rolling 5-Term Viewport Window) */
+.lexicon-stack-container {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  scroll-behavior: smooth;
+}
+
+.lex-stack-empty {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lex-stack-empty .empty-icon {
+  font-size: 2rem;
+  opacity: 0.8;
+  margin-bottom: 0.25rem;
+}
+
+.lex-stack-empty h4 {
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.lex-stack-empty p {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.lex-stack-empty .empty-hint {
+  font-size: 0.76rem;
+  color: var(--accent-saffron-light);
+  opacity: 0.85;
+  margin-top: 0.5rem;
+}
+
+/* Stack Card (Rolling Window Item) */
+.lex-stack-card {
+  background: rgba(16, 24, 40, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 3.5px solid rgba(245, 158, 11, 0.55);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  flex-shrink: 0;
+  cursor: pointer;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+}
+
+.lex-stack-card:hover {
+  background: rgba(24, 34, 56, 0.98);
+  border-color: rgba(245, 158, 11, 0.5);
+}
+
+/* Current Spoken Term Highlight (High Contrast) */
+.lex-stack-card.current-companion-term {
+  background: rgba(245, 158, 11, 0.22) !important;
+  border-color: rgba(245, 158, 11, 0.75) !important;
+  border-left: 4.5px solid var(--accent-saffron) !important;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.25);
+}
+
+.lex-stack-card.current-companion-term:hover {
+  background: rgba(245, 158, 11, 0.28) !important;
+}
+
+.lex-stack-card.current-companion-term .lex-card-pali {
+  color: #fef08a !important;
+  text-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.lexicon-stack-container::-webkit-scrollbar {
+  width: 6px;
+}
+.lexicon-stack-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+.lexicon-stack-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+}
+.lexicon-stack-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 158, 11, 0.5);
+}
+
+.lex-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.lex-card-term-group {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.lex-card-pali {
+  font-family: 'Cinzel', serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent-saffron);
+  margin: 0;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+
+.lex-card-meta-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.lex-card-link-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #cbd5e1;
+  padding: 0.12rem 0.45rem;
+  border-radius: var(--radius-full);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.lex-card-link-btn:hover {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+
+.current-companion-term .lex-card-link-btn {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+
+.current-companion-term .lex-card-link-btn:hover {
+  background: #f59e0b;
+  color: #0f172a;
+  border-color: #f59e0b;
+}
+
+.lex-card-def-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  line-height: 1.42;
+  color: #f8fafc;
+}
+
+/* Subtle attribution note at the bottom of the card (default text color, italic) */
+.lex-card-source-tag {
+  color: inherit;
+  font-size: 0.74rem;
+  font-style: italic;
+  font-weight: 400;
+  opacity: 0.75;
+  text-align: right;
+}
+
+.lex-card-def-text {
+  color: #f8fafc;
+  font-weight: 400;
+}
+
+.current-companion-term .lex-card-def-text {
+  color: #ffffff !important;
+  font-weight: 500;
+}
+
+.lex-card-brahm-gloss,
+.lex-card-canon,
+.lex-card-desc {
+  display: none; /* Replaced by unified single-sentence definition row */
+}
+
+/* Responsive: Mobile & Medium Screen Styling (keeps companion at bottom until main text > companion) */
+@media (max-width: 1100px) {
+  .transcript-sticky-toolbar {
+    padding: 0.5rem 1.25rem;
+  }
+
+  .transcript-view-header {
+    width: auto;
+    max-width: none;
+    margin: 1.25rem 1.25rem 1.5rem 1.25rem;
+  }
+
+  .transcript-layout-container {
+    display: contents;
+  }
+
+  .transcript-reader-container {
+    grid-column: 1;
+    grid-row: 3;
+    padding: 0 1.25rem 4.5rem 1.25rem;
+  }
+
+  .transcript-lexicon-companion {
+    grid-column: 1;
+    grid-row: 2 / 4;
+    align-self: end;
+    position: sticky;
+    bottom: 0;
+    top: auto !important;
+    width: 100%;
+    z-index: 40;
+    margin-top: 0;
+    background: rgba(12, 18, 30, 0.98);
+    backdrop-filter: blur(16px);
+    border-top: 1px solid var(--border-medium);
+    border-radius: 0;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5);
+    transition: max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s ease;
+    max-height: 52px;
+    height: auto;
+  }
+
+  .transcript-lexicon-companion.is-expanded {
+    max-height: min(60vh, calc(var(--main-height, 520px) - var(--toolbar-height, 48px) - 4px));
+    max-height: min(60dvh, calc(var(--main-height, 520px) - var(--toolbar-height, 48px) - 4px));
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.65);
+  }
+
+  .lex-mobile-ticker {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 52px;
+    min-height: 52px;
+    flex-shrink: 0;
+    padding: 0 1rem;
+    cursor: pointer;
+    user-select: none;
+    gap: 0.75rem;
+  }
+
+  .lex-ticker-info {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .lex-ticker-icon {
+    font-size: 1.15rem;
+    flex-shrink: 0;
+  }
+
+  .lex-ticker-text-group {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 0.1rem;
+  }
+
+  .lex-ticker-headline {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .lex-ticker-tag {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #cbd5e1;
+    font-weight: 700;
+  }
+
+  .lex-ticker-term {
+    font-family: 'Cinzel', serif;
+    font-size: 0.98rem;
+    color: #fbbf24;
+    font-weight: 700;
+  }
+
+  .lex-ticker-def {
+    font-size: 0.78rem;
+    color: #f1f5f9;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .btn-toggle-lex-sheet {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: var(--accent-saffron);
+    padding: 0.3rem 0.6rem;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    font-size: 0.76rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    transition: background var(--transition-fast), transform var(--transition-fast);
+  }
+
+  .btn-toggle-lex-sheet:hover {
+    background: rgba(245, 158, 11, 0.25);
+  }
+
+  .sheet-count-pill {
+    font-size: 0.7rem;
+  }
+
+  .sheet-arrow-icon {
+    font-size: 0.7rem;
+    transition: transform 0.25s ease;
+  }
+
+  .transcript-lexicon-companion.is-expanded .sheet-arrow-icon {
+    transform: rotate(180deg);
+  }
+
+  .transcript-lexicon-companion:not(.is-expanded) .lex-companion-header,
+  .transcript-lexicon-companion:not(.is-expanded) .lexicon-stack-container {
+    display: none;
+  }
+
+  .transcript-lexicon-companion.is-expanded .lex-companion-header {
+    display: none; /* Keep mobile header clean; ticker serves as top bar */
+  }
+
+  .transcript-lexicon-companion.is-expanded .lexicon-stack-container {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .transcript-sticky-toolbar {
+    padding: 0.45rem 0.75rem;
+  }
+
+  .transcript-view-header {
+    padding: 1rem;
+    margin: 0.9rem 0.75rem 1.25rem 0.75rem;
+  }
+
+  .transcript-reader-container {
+    padding: 0 0.75rem 4.5rem 0.75rem;
+  }
+}
+
+/* ==========================================================================
+   Turn Actions, Share Moment Buttons & Toast Notifications
+   ========================================================================== */
+
+.turn-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.turn-share-btn {
+  background: color-mix(in srgb, var(--turn-color, var(--primary)) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--turn-color, var(--primary)) 20%, transparent);
+  color: var(--text-muted);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all var(--transition-fast);
+  padding: 0;
+}
+
+.turn-share-btn:hover {
+  background: var(--surface-hover);
+  color: var(--turn-color, var(--primary));
+  border-color: var(--turn-color, var(--primary));
+  transform: scale(1.1);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--turn-color, var(--primary)) 30%, transparent);
+}
+
+.app-toast {
+  position: fixed;
+  bottom: 5.5rem;
+  right: 1.5rem;
+  background: var(--surface-card, #131b2e);
+  color: #fff;
+  border: 1px solid var(--primary, #f59e0b);
+  border-radius: var(--radius-md, 8px);
+  padding: 0.65rem 1.25rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+.app-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.app-toast .toast-icon {
+  color: var(--primary, #f59e0b);
+  font-weight: 800;
+}

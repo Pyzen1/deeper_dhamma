@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 96">
+  <defs>
+    <radialGradient id="wlotus-glow" cx="50%" cy="48%" r="48%">
+      <stop offset="0%" stop-color="#f8fafc" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#090d16" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wlotus-outer" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#64748b"/>
+    </linearGradient>
+    <linearGradient id="wlotus-mid" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#94a3b8"/>
+    </linearGradient>
+    <linearGradient id="wlotus-core" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+  </defs>
+
+  <ellipse cx="60" cy="46" rx="52" ry="40" fill="url(#wlotus-glow)"/>
+
+  <!-- Minimal Water Ripples -->
+  <path d="M22 77 Q60 84 98 77" fill="none" stroke="#93c5fd" stroke-opacity="0.32" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M34 83 Q60 88 86 83" fill="none" stroke="#5eead4" stroke-opacity="0.22" stroke-width="1.2" stroke-linecap="round"/>
+
+  <!-- Subtle Base Leaves -->
+  <path d="M58 72 C42 73, 27 68, 21 59 C33 58, 47 63, 58 72 Z" fill="#10b981" fill-opacity="0.28" stroke="#34d399" stroke-opacity="0.55" stroke-width="1.2"/>
+  <path d="M62 72 C78 73, 93 68, 99 59 C87 58, 73 63, 62 72 Z" fill="#10b981" fill-opacity="0.28" stroke="#34d399" stroke-opacity="0.55" stroke-width="1.2"/>
+
+  <!-- Outer Petals -->
+  <path d="M59 71 C38 66, 22 49, 21 33 C37 36, 51 51, 59 71 Z" fill="url(#wlotus-outer)" fill-opacity="0.92" stroke="#f8fafc" stroke-opacity="0.6" stroke-width="1"/>
+  <path d="M61 71 C82 66, 98 49, 99 33 C83 36, 69 51, 61 71 Z" fill="url(#wlotus-outer)" fill-opacity="0.92" stroke="#f8fafc" stroke-opacity="0.6" stroke-width="1"/>
+
+  <!-- Inner Cupped Petals -->
+  <path d="M60 72 C43 61, 38 38, 43 21 C53 31, 58 50, 60 72 Z" fill="url(#wlotus-mid)" stroke="#ffffff" stroke-opacity="0.8" stroke-width="1.1"/>
+  <path d="M60 72 C77 61, 82 38, 77 21 C67 31, 62 50, 60 72 Z" fill="url(#wlotus-mid)" stroke="#ffffff" stroke-opacity="0.8" stroke-width="1.1"/>
+
+  <!-- Center Crown Petal -->
+  <path d="M60 73 C47 59, 48 33, 60 17 C72 33, 73 59, 60 73 Z" fill="url(#wlotus-core)" stroke="#ffffff" stroke-opacity="0.95" stroke-width="1.2"/>
+</svg>
