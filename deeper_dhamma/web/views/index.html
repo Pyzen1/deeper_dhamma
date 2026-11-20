@@ -43,6 +43,10 @@
 
       <!-- Navigation Menu -->
       <nav class="sidebar-nav" id="main-nav-tabs" aria-label="View navigation">
+        <button type="button" class="tab-btn sidebar-nav-item" id="tab-home-btn" data-tab="home-view">
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">home</span>
+          <span class="nav-label">Home</span>
+        </button>
         <button type="button" class="tab-btn sidebar-nav-item active" id="tab-search-btn" data-tab="search-view">
           <span class="nav-icon material-symbols-outlined" aria-hidden="true">search</span>
           <span class="nav-label">Search</span>
@@ -73,7 +77,7 @@
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-notes-btn" data-tab="notes-view">
           <span class="nav-icon material-symbols-outlined" aria-hidden="true">assignment</span>
-          <span class="nav-label">Archive Notes</span>
+          <span class="nav-label">Notes</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-transcript-btn" data-tab="transcript-view" style="display: none;">
           <span class="nav-icon material-symbols-outlined" aria-hidden="true">article</span>
@@ -103,8 +107,58 @@
   <main class="app-main" id="main-content">
     <!-- Content Sections -->
     <section class="views-wrapper" id="views-container">
+      <!-- 0. Home View -->
+      <div class="view-panel" id="home-view">
+        <div class="home-header">
+          <div class="view-title-with-art">
+            <div class="view-title-row">
+              <div class="view-title-art" aria-hidden="true">
+                <img src="/static/icons/view_home.svg?v={{db_version}}" alt="">
+              </div>
+              <h2>Home</h2>
+            </div>
+            <p class="section-desc">Explore 30+ years of BSWA Deeper Dhamma podcast talks with word-synced transcripts and canonical Pali references.</p>
+          </div>
+        </div>
+
+        <div class="home-quick-grid">
+          <button type="button" class="home-quick-card" data-home-nav="search-view">
+            <span class="home-quick-icon material-symbols-outlined" aria-hidden="true">search</span>
+            <span class="home-quick-title">Search</span>
+            <span class="home-quick-desc">Full-text search across teachings, suttas, and transcripts.</span>
+          </button>
+          <button type="button" class="home-quick-card" data-home-nav="browse-view">
+            <span class="home-quick-icon material-symbols-outlined" aria-hidden="true">library_music</span>
+            <span class="home-quick-title">Archive</span>
+            <span class="home-quick-desc">Browse talks by year, retreat series, and monastic teacher.</span>
+          </button>
+          <button type="button" class="home-quick-card" data-home-nav="bookmarks-view">
+            <span class="home-quick-icon material-symbols-outlined" aria-hidden="true">bookmark</span>
+            <span class="home-quick-title">Bookmarks</span>
+            <span class="home-quick-desc">Return to your saved talks and custom study order.</span>
+          </button>
+          <button type="button" class="home-quick-card" data-home-nav="lexicon-view">
+            <span class="home-quick-icon material-symbols-outlined" aria-hidden="true">menu_book</span>
+            <span class="home-quick-title">Pali Lexicon</span>
+            <span class="home-quick-desc">Look up canonical Pali terms, definitions, and pronunciation.</span>
+          </button>
+        </div>
+      </div>
+
       <!-- 1. Search Results View -->
       <div class="view-panel active" id="search-view">
+        <div class="search-header">
+          <div class="view-title-with-art">
+            <div class="view-title-row">
+              <div class="view-title-art" aria-hidden="true">
+                <img src="/static/icons/view_search.svg?v={{db_version}}" alt="">
+              </div>
+              <h2>Search</h2>
+            </div>
+            <p class="section-desc">Search teachings, suttas, and transcripts across the BSWA Deeper Dhamma podcast archive.</p>
+          </div>
+        </div>
+
         <div class="search-box-wrapper">
           <div class="search-bar" id="search-bar-container">
             <span class="search-icon material-symbols-outlined" aria-hidden="true">search</span>
@@ -509,13 +563,13 @@
         <div class="browse-header">
           <div class="browse-header-info">
             <div class="view-title-with-art">
-              <div class="view-title-art" aria-hidden="true">
-                <img src="/static/icons/view_browse.svg?v={{db_version}}" alt="">
+              <div class="view-title-row">
+                <div class="view-title-art" aria-hidden="true">
+                  <img src="/static/icons/view_archive.svg?v={{db_version}}" alt="">
+                </div>
+                <h2>Archive</h2>
               </div>
-              <div class="view-title-text">
-                <h2>Archive Catalog</h2>
-                <p class="section-desc">Browse all transcribed talks and retreats with word-synced transcripts and direct Podbean CDN audio streaming.</p>
-              </div>
+              <p class="section-desc">Browse all transcribed talks and retreats with word-synced transcripts and direct Podbean CDN audio streaming.</p>
             </div>
           </div>
           <div class="browse-header-actions">
@@ -797,13 +851,13 @@
         <div class="bookmarks-header">
           <div class="bookmarks-header-info">
             <div class="view-title-with-art">
-              <div class="view-title-art" aria-hidden="true">
-                <img src="/static/icons/view_bookmarks.svg?v={{db_version}}" alt="">
+              <div class="view-title-row">
+                <div class="view-title-art" aria-hidden="true">
+                  <img src="/static/icons/view_bookmarks.svg?v={{db_version}}" alt="">
+                </div>
+                <h2>Bookmarks</h2>
               </div>
-              <div class="view-title-text">
-                <h2>Bookmarked Talks</h2>
-                <p class="section-desc">Quickly access, organize, and reorder your saved talks for fast offline recall.</p>
-              </div>
+              <p class="section-desc">Quickly access, organize, and reorder your saved talks for fast offline recall.</p>
             </div>
           </div>
           <div class="bookmarks-actions-bar">
@@ -831,13 +885,13 @@
       <div class="view-panel" id="lexicon-view">
         <div class="lexicon-header">
           <div class="view-title-with-art">
-            <div class="view-title-art" aria-hidden="true">
-              <img src="/static/icons/view_lexicon.svg?v={{db_version}}" alt="">
+            <div class="view-title-row">
+              <div class="view-title-art" aria-hidden="true">
+                <img src="/static/icons/view_lexicon.svg?v={{db_version}}" alt="">
+              </div>
+              <h2>Pali Lexicon</h2>
             </div>
-            <div class="view-title-text">
-              <h2>Buddhism Doctrinal Reference Lexicon</h2>
-              <p class="section-desc">Canonical Pali terminology and pronunciation definitions curated from SuttaCentral and BSWA retreat teachers.</p>
-            </div>
+            <p class="section-desc">Canonical Pali terminology and pronunciation definitions curated from SuttaCentral and BSWA retreat teachers.</p>
           </div>
           <div class="lexicon-search-bar">
             <input type="search" id="lexicon-search-input" placeholder="Look up Pali or English term (e.g. samadhi, kamma, nibbidā)..." autocomplete="off">
@@ -934,13 +988,13 @@
         <div class="documents-header">
           <div class="documents-header-info">
             <div class="view-title-with-art">
-              <div class="view-title-art" aria-hidden="true">
-                <img src="/static/icons/view_documents.svg?v={{db_version}}" alt="">
+              <div class="view-title-row">
+                <div class="view-title-art" aria-hidden="true">
+                  <img src="/static/icons/view_documents.svg?v={{db_version}}" alt="">
+                </div>
+                <h2>Documents</h2>
               </div>
-              <div class="view-title-text">
-                <h2>Canonical Authority Source Documents</h2>
-                <p class="section-desc">Offline, bitstream-verified reference texts, glossaries, and Vinaya treatises stored directly in SQLite.</p>
-              </div>
+              <p class="section-desc">Canonical authority source texts, glossaries, and Vinaya treatises stored offline and bitstream-verified directly in SQLite.</p>
             </div>
           </div>
 
@@ -1019,13 +1073,18 @@
       <!-- About Deeper Dhamma View -->
       <div class="view-panel" id="about-view">
         <div class="about-container">
-          <!-- Hero Header -->
-          <div class="about-hero">
-            <div class="about-hero-badge">☸ Theravada Buddhist Audio Archive &amp; Study Platform</div>
-            <h2 class="about-hero-title">Deeper Dhamma</h2>
-            <p class="about-hero-lead">
-              An open, interactive research portal and study companion bridging 30+ years of oral Buddhist teachings with sub-second word-level audio synchronization, 6-tier FTS5 search, and canonical Pali lexicon references.
-            </p>
+          <div class="about-header">
+            <div class="view-title-with-art">
+              <div class="view-title-row">
+                <div class="view-title-art" aria-hidden="true">
+                  <img src="/static/icons/view_about.svg?v={{db_version}}" alt="">
+                </div>
+                <h2>About</h2>
+              </div>
+              <p class="section-desc">
+                An open, interactive research portal and study companion bridging 30+ years of oral Buddhist teachings with sub-second word-level audio synchronization, 6-tier FTS5 search, and canonical Pali lexicon references.
+              </p>
+            </div>
             <div class="about-hero-chips">
               <span class="about-chip" id="about-talks-chip"><span class="chip-icon">🪷</span> 2,971 English Monastic Talks</span>
               <span class="about-chip"><span class="chip-icon">⏱️</span> 1994 – Present Audio Heritage</span>
@@ -1436,16 +1495,21 @@
         </div>
       </div>
 
-      <!-- Archive Notes View -->
+      <!-- Notes View -->
       <div class="view-panel" id="notes-view">
         <div class="about-container">
-          <!-- Hero Header -->
-          <div class="about-hero">
-            <div class="about-hero-badge">📋 How the Archive Is Built</div>
-            <h2 class="about-hero-title">Archive Notes</h2>
-            <p class="about-hero-lead">
-              A plain-language guide to how the BSWA Deeper Dhamma audio collection is organized, deduplicated, transcribed, and prepared for study.
-            </p>
+          <div class="notes-header">
+            <div class="view-title-with-art">
+              <div class="view-title-row">
+                <div class="view-title-art" aria-hidden="true">
+                  <img src="/static/icons/view_notes.svg?v={{db_version}}" alt="">
+                </div>
+                <h2>Notes</h2>
+              </div>
+              <p class="section-desc">
+                A plain-language guide to how the BSWA Deeper Dhamma audio collection is organized, deduplicated, transcribed, and prepared for study.
+              </p>
+            </div>
             <div class="about-hero-chips">
               <span class="about-chip"><span class="chip-icon">📡</span> 3,323 Podcast Feed Entries</span>
               <span class="about-chip" id="notes-chip-transcribed"><span class="chip-icon">✓</span> 2,971 Unique Transcribed Talks</span>

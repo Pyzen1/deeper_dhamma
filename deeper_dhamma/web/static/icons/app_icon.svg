@@ -1,8 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-  <!-- Dark Slate Rounded Backdrop -->
-  <rect x="2" y="2" width="76" height="76" rx="16" fill="#0b1120" stroke="#fbbf24" stroke-opacity="0.28" stroke-width="1.5"/>
   <!-- Modern 8-Spoke Dhammacakka Wheel -->
-  <circle cx="40" cy="40" r="23.5" fill="#f59e0b" fill-opacity="0.12" stroke="#fbbf24" stroke-width="2.4"/>
+  <circle cx="40" cy="40" r="23.5" fill="#f59e0b" fill-opacity="0.16" stroke="#fbbf24" stroke-width="2.4"/>
   <g stroke="#fbbf24" stroke-width="2.2" stroke-linecap="round">
     <line x1="40" y1="7" x2="40" y2="16.5"/>
     <line x1="40" y1="63.5" x2="40" y2="73"/>
@@ -14,7 +12,9 @@
     <line x1="23.4" y1="56.6" x2="16.7" y2="63.3"/>
   </g>
   <!-- Larger Centered Mini Pink Lotus -->
-  <path d="M40 49.5 C30 49.5, 25.5 44.5, 26 38 C30.5 37.5, 36.5 41.5, 40 49.5 Z" fill="#ec4899" fill-opacity="0.88"/>
-  <path d="M40 49.5 C50 49.5, 54.5 44.5, 54 38 C49.5 37.5, 43.5 41.5, 40 49.5 Z" fill="#ec4899" fill-opacity="0.88"/>
-  <path d="M40 50.5 C34 45, 34 35, 40 29.5 C46 35, 46 45, 40 50.5 Z" fill="#fbcfe8" stroke="#f472b6" stroke-width="0.95"/>
+  <g>
+    <path d="M40 49.5 C30 49.5, 25.5 44.5, 26 38 C30.5 37.5, 36.5 41.5, 40 49.5 Z" fill="#ec4899" fill-opacity="0.88"/>
+    <path d="M40 49.5 C50 49.5, 54.5 44.5, 54 38 C49.5 37.5, 43.5 41.5, 40 49.5 Z" fill="#ec4899" fill-opacity="0.88"/>
+    <path d="M40 50.5 C34 45, 34 35, 40 29.5 C46 35, 46 45, 40 50.5 Z" fill="#fbcfe8" stroke="#f472b6" stroke-width="0.95"/>
+  </g>
 </svg>

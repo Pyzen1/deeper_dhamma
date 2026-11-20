@@ -47,10 +47,14 @@ const CORE_ASSETS = [
   './icons/pwa_icon_512.png',
   './icons/ios_apple_touch_icon.png',
   './icons/lotus_pink.svg',
-  './icons/view_browse.svg',
+  './icons/view_home.svg',
+  './icons/view_search.svg',
+  './icons/view_archive.svg',
   './icons/view_bookmarks.svg',
   './icons/view_lexicon.svg',
   './icons/view_documents.svg',
+  './icons/view_about.svg',
+  './icons/view_notes.svg',
   './fonts/material_symbols_outlined.woff2'
 ];
 

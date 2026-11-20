@@ -171,8 +171,8 @@ body::before {
 }
 
 .brand-symbol {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: clamp(2.25rem, 5vw, 4.5rem);
+  height: clamp(2.25rem, 5vw, 4.5rem);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -375,6 +375,59 @@ body::before {
 
 .search-hero {
   margin-bottom: 2rem;
+}
+
+.home-header {
+  margin-bottom: 1.5rem;
+}
+
+.home-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.9rem;
+}
+
+.home-quick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 1.1rem 1.15rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-normal), background var(--transition-normal), transform var(--transition-normal);
+}
+
+.home-quick-card:hover {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.06);
+  transform: translateY(-1px);
+}
+
+.home-quick-icon {
+  color: var(--accent-saffron-light);
+  font-size: 1.4rem;
+  margin-bottom: 0.15rem;
+}
+
+.home-quick-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.home-quick-desc {
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.search-header {
+  margin-bottom: 1.25rem;
 }
 
 .search-box-wrapper {
@@ -635,6 +688,14 @@ select:hover, select:focus {
 /* View Title Vector Art (Browse, Bookmarks, Lexicon, Documents) */
 .view-title-with-art {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.view-title-row {
+  display: flex;
   align-items: center;
   gap: clamp(0.75rem, 2vw, 1rem);
   min-width: 0;
@@ -650,7 +711,6 @@ select:hover, select:focus {
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-subtle);
-  padding: 5px;
   transition: transform var(--transition-normal), border-color var(--transition-normal), background var(--transition-normal);
 }
 
@@ -667,19 +727,15 @@ select:hover, select:focus {
   display: block;
 }
 
-.view-title-text {
-  min-width: 0;
-  flex: 1;
-}
-
-.view-title-text h2 {
+.view-title-row h2 {
   font-size: 1.4rem;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 0.25rem;
+  margin: 0;
+  min-width: 0;
 }
 
-.view-title-text .section-desc {
+.view-title-with-art .section-desc {
   color: var(--text-secondary);
   font-size: 0.92rem;
   line-height: 1.48;

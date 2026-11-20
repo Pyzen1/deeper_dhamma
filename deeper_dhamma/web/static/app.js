@@ -185,6 +185,7 @@
     
     // Stats & Tabs
     statEpisodes: document.getElementById('stat-episodes'),
+    tabHomeBtn: document.getElementById('tab-home-btn'),
     tabSearchBtn: document.getElementById('tab-search-btn'),
     tabBrowseBtn: document.getElementById('tab-browse-btn'),
     tabBookmarksBtn: document.getElementById('tab-bookmarks-btn'),
@@ -195,6 +196,7 @@
     bookmarksCountBadge: document.getElementById('bookmarks-count-badge'),
 
     // Views
+    homeView: document.getElementById('home-view'),
     searchView: document.getElementById('search-view'),
     browseView: document.getElementById('browse-view'),
     bookmarksView: document.getElementById('bookmarks-view'),
@@ -457,7 +459,7 @@
         if (cleanPath.startsWith('talk/')) {
           route = 'talk';
           id = cleanPath.replace('talk/', '').trim();
-        } else if (['browse', 'lexicon', 'documents', 'search', 'bookmarks', 'about', 'notes'].includes(cleanPath)) {
+        } else if (['home', 'browse', 'lexicon', 'documents', 'search', 'bookmarks', 'about', 'notes'].includes(cleanPath)) {
           route = cleanPath;
         } else if (cleanPath) {
           route = cleanPath;
@@ -489,6 +491,10 @@
       const { route, id, params } = this.parseLocation();
 
       switch (route) {
+        case 'home':
+          switchTab('home-view', { skipHistory: true });
+          break;
+
         case 'talk':
           if (id) {
             const targetOpts = (params.time !== undefined && !isNaN(params.time)) ? {
@@ -891,6 +897,14 @@
     }
 
     // Tabs
+    if (els.tabHomeBtn) {
+      els.tabHomeBtn.addEventListener('click', () => switchTab('home-view'));
+    }
+    document.querySelectorAll('[data-home-nav]').forEach(card => {
+      card.addEventListener('click', () => {
+        if (card.dataset.homeNav) switchTab(card.dataset.homeNav);
+      });
+    });
     els.tabSearchBtn.addEventListener('click', () => switchTab('search-view'));
     els.tabBrowseBtn.addEventListener('click', () => switchTab('browse-view'));
     if (els.tabBookmarksBtn) {
@@ -1522,6 +1536,7 @@
         ? DD.buildSearchRouteHash(state.currentQuery).replace(/^#/, '')
         : (state.currentQuery ? `search?q=${encodeURIComponent(state.currentQuery)}` : 'search');
       const tabToRouteMap = {
+        'home-view': 'home',
         'search-view': searchRoute,
         'browse-view': buildBrowseRouteHash().replace(/^#/, ''),
         'bookmarks-view': 'bookmarks',

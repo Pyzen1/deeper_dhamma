@@ -574,8 +574,9 @@
 .about-hero-chips {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0.65rem;
+  margin-top: 1rem;
 }
 
 .about-chip {

@@ -1,69 +1,8 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg
-   viewBox="0 0 80 80"
-   version="1.1"
-   id="svg4"
-   sodipodi:docname="view_bookmarks.svg"
-   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs4" />
-  <sodipodi:namedview
-     id="namedview4"
-     pagecolor="#ffffff"
-     bordercolor="#000000"
-     borderopacity="0.25"
-     inkscape:showpageshadow="2"
-     inkscape:pageopacity="0.0"
-     inkscape:pagecheckerboard="0"
-     inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="10.1"
-     inkscape:cx="39.950495"
-     inkscape:cy="40"
-     inkscape:window-width="1920"
-     inkscape:window-height="1010"
-     inkscape:window-x="-6"
-     inkscape:window-y="-6"
-     inkscape:window-maximized="1"
-     inkscape:current-layer="svg4" />
-  <path
-     d="M19 13 L61 13 L61 64 L40 52 L19 64 Z"
-     fill="#f59e0b"
-     fill-opacity="0.18"
-     stroke="#fbbf24"
-     stroke-width="2"
-     stroke-linejoin="round"
-     id="path1" />
-  <!-- Wider Lotus Emblem -->
-  <g
-     id="g4">
-    <path
-       d="M40 43.5 C30 43.5, 25.5 38.5, 26 32 C30.5 31.5, 36.5 35.5, 40 43.5 Z"
-       fill="#ec4899"
-       fill-opacity="0.88"
-       id="path2" />
-    <path
-       d="M40 43.5 C50 43.5, 54.5 38.5, 54 32 C49.5 31.5, 43.5 35.5, 40 43.5 Z"
-       fill="#ec4899"
-       fill-opacity="0.88"
-       id="path3" />
-    <path
-       d="M40 44.5 C34 39, 34 29, 40 23.5 C46 29, 46 39, 40 44.5 Z"
-       fill="#fbcfe8"
-       stroke="#f472b6"
-       stroke-width="0.95"
-       id="path4" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
+  <path d="M19 13 L61 13 L61 64 L40 52 L19 64 Z" fill="#f59e0b" fill-opacity="0.16" stroke="#fbbf24" stroke-width="2" stroke-linejoin="round" />
+  <g>
+    <path d="M40 43.5 C30 43.5, 25.5 38.5, 26 32 C30.5 31.5, 36.5 35.5, 40 43.5 Z" fill="#ec4899" fill-opacity="0.88" />
+    <path d="M40 43.5 C50 43.5, 54.5 38.5, 54 32 C49.5 31.5, 43.5 35.5, 40 43.5 Z" fill="#ec4899" fill-opacity="0.88" />
+    <path d="M40 44.5 C34 39, 34 29, 40 23.5 C46 29, 46 39, 40 44.5 Z" fill="#fbcfe8" stroke="#f472b6" stroke-width="0.95" />
   </g>
-  <line
-     x1="40"
-     y1="59"
-     x2="40"
-     y2="68"
-     stroke="#fbbf24"
-     stroke-width="1.8"
-     stroke-linecap="round"
-     id="line4" />
 </svg>
