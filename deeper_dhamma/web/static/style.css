@@ -171,17 +171,19 @@ body::before {
 }
 
 .brand-symbol {
-  font-size: 2rem;
-  color: var(--accent-saffron);
-  text-shadow: 0 0 16px var(--accent-saffron-glow);
-  display: inline-block;
-  animation: slowSpin 120s linear infinite;
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 0 10px var(--accent-saffron-glow));
   flex-shrink: 0;
 }
 
-@keyframes slowSpin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+.brand-symbol img {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .brand-title {
@@ -325,6 +327,24 @@ body::before {
   color: var(--text-secondary);
   font-family: inherit;
   font-size: 0.7rem;
+}
+
+.sidebar-copyright {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border-subtle);
+  line-height: 1.4;
+}
+
+.about-copyright-footer {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border-subtle);
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
 /* ==========================================================================
@@ -586,6 +606,84 @@ select:hover, select:focus {
 .empty-icon {
   font-size: 3rem;
   margin-bottom: 1rem;
+}
+
+.empty-icon-art {
+  width: clamp(92px, 24vw, 112px);
+  height: clamp(78px, 20vw, 94px);
+  margin: 0 auto 1rem auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 8px 24px rgba(244, 114, 182, 0.28));
+}
+
+.empty-icon-art img,
+.empty-icon-art svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.empty-icon-art--compact {
+  width: 68px;
+  height: 58px;
+  margin: 0 auto 0.35rem auto;
+  filter: drop-shadow(0 4px 14px rgba(244, 114, 182, 0.24));
+}
+
+/* View Title Vector Art (Browse, Bookmarks, Lexicon, Documents) */
+.view-title-with-art {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.75rem, 2vw, 1rem);
+  min-width: 0;
+}
+
+.view-title-art {
+  flex-shrink: 0;
+  width: clamp(48px, 10vw, 60px);
+  height: clamp(48px, 10vw, 60px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  padding: 5px;
+  transition: transform var(--transition-normal), border-color var(--transition-normal), background var(--transition-normal);
+}
+
+.view-title-with-art:hover .view-title-art {
+  transform: translateY(-1px);
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.view-title-art img,
+.view-title-art svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.view-title-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.view-title-text h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.view-title-text .section-desc {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.48;
+  margin: 0;
 }
 
 .empty-state h2 {

@@ -42,9 +42,15 @@ const CORE_ASSETS = [
   './db_worker.js',
   './sqlite3.js',
   './sqlite3.wasm',
-  './icons/icon_192.png',
-  './icons/icon_512.png',
-  './icons/apple_touch_icon.png',
+  './icons/app_icon.svg',
+  './icons/pwa_icon_192.png',
+  './icons/pwa_icon_512.png',
+  './icons/ios_apple_touch_icon.png',
+  './icons/lotus_pink.svg',
+  './icons/view_browse.svg',
+  './icons/view_bookmarks.svg',
+  './icons/view_lexicon.svg',
+  './icons/view_documents.svg',
   './fonts/material_symbols_outlined.woff2'
 ];
 

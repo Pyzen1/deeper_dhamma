@@ -764,9 +764,53 @@ def _resolve_repo_path(path_or_str: Path | str) -> Path:
     return p.resolve()
 
 
-def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = True) -> Path:
+def _load_existing_bundle_manifest(out_path: Path) -> dict:
+    """Loads and validates an existing db_manifest.json and its DB shards for static-only builds."""
+    manifest_path = out_path / "db_manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"Cannot run static-only build in '{out_path}': missing '{manifest_path.name}'. "
+            "Run 'python main.py web --build' first."
+        )
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Cannot run static-only build in '{out_path}': invalid '{manifest_path.name}': {exc}"
+        ) from exc
+
+    core_file = (manifest.get("core") or {}).get("file")
+    required_db_files = [f for f in [core_file] if f]
+    for shard_group in ("talks", "words"):
+        for shard_meta in manifest.get(shard_group, []):
+            if shard_meta.get("file"):
+                required_db_files.append(shard_meta["file"])
+
+    if not core_file:
+        raise RuntimeError(
+            f"Cannot run static-only build in '{out_path}': '{manifest_path.name}' is missing core database metadata. "
+            "Run 'python main.py web --build' first."
+        )
+
+    missing_files = [name for name in required_db_files if not (out_path / name).exists()]
+    if missing_files:
+        raise FileNotFoundError(
+            f"Cannot run static-only build in '{out_path}': missing database shard(s): {', '.join(missing_files)}. "
+            "Run 'python main.py web --build' first."
+        )
+
+    return manifest
+
+
+def export_static_site(
+    output_dir: Path | str = DIST_DIR,
+    show_progress: bool = True,
+    static_only: bool = False,
+) -> Path:
     """
-    Builds the complete self-contained static site and SQLite WASM bundle.
+    Builds the self-contained static site and SQLite WASM bundle.
+    When static_only=True, skips SQLite database compilation and reuses the existing db_manifest.json and shards.
     """
     out_path = _resolve_repo_path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -776,29 +820,47 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
     date_str = today.strftime("%Y-%m-%d")
 
     print("\n" + "=" * 80)
-    print("BSWA Deeper Dhamma: Static Web & SQLite WASM Compiler")
+    if static_only:
+        print("BSWA Deeper Dhamma: Static Assets Only Compiler")
+    else:
+        print("BSWA Deeper Dhamma: Static Web & SQLite WASM Compiler")
     print("=" * 80)
     print(f"[*] Target Directory:    {out_path}")
-    print(f"[*] Database Version:    {version_int} (stamped in SQLite header)")
+    if static_only:
+        print(f"[*] Asset Version:       {version_int} (preserving existing DB bundle)")
+    else:
+        print(f"[*] Database Version:    {version_int} (stamped in SQLite header)")
     print(f"[*] Build Date:          {date_str}")
     print("-" * 80)
 
-    # 1. Compile sharded & gzipped SQLite PWA bundle (core + talks_1..4 + words_1..4)
-    metrics = compile_sharded_static_databases(out_path, version_int=version_int, show_progress=show_progress)
-    manifest = metrics["manifest"]
-    print(
-        f"[✓] Compiled sharded PWA bundle: {metrics['size_bytes'] / (1024 * 1024):.2f} MB gzipped "
-        f"({metrics['raw_size_bytes'] / (1024 * 1024):.2f} MB raw)"
-    )
-    print(f"    - core.db.gz:            {manifest['core']['gz_bytes'] / (1024 * 1024):.2f} MB gz ({manifest['core']['raw_bytes'] / (1024 * 1024):.2f} MB raw)")
-    for s in manifest["talks"]:
-        print(f"    - {s['file']:22s} {s['gz_bytes'] / (1024 * 1024):.2f} MB gz ({s['raw_bytes'] / (1024 * 1024):.2f} MB raw, {s['episodes']:,} talks)")
-    for s in manifest["words"]:
-        print(f"    - {s['file']:22s} {s['gz_bytes'] / (1024 * 1024):.2f} MB gz ({s['raw_bytes'] / (1024 * 1024):.2f} MB raw, {s['episodes']:,} talks)")
-    print(f"    - Episodes indexed:      {metrics['episodes']:,} ({metrics['transcribed_episodes']:,} transcribed)")
-    print(f"    - Speech segments:       {metrics['segments']:,}")
-    print(f"    - Buddhist Pali terms:   {metrics['terms']:,}")
-    print(f"    - Word-synced talks:     {metrics.get('words', 0):,}")
+    if static_only:
+        manifest = _load_existing_bundle_manifest(out_path)
+        episodes_count = int(manifest.get("episodes", 0))
+        metrics = {
+            "episodes": episodes_count,
+            "manifest": manifest,
+        }
+        print(
+            f"[i] Skipping SQLite DB compilation; reusing existing bundle "
+            f"(DB v{manifest.get('version', 'unknown')}, {episodes_count:,} episodes)"
+        )
+    else:
+        # 1. Compile sharded & gzipped SQLite PWA bundle (core + talks_1..4 + words_1..4)
+        metrics = compile_sharded_static_databases(out_path, version_int=version_int, show_progress=show_progress)
+        manifest = metrics["manifest"]
+        print(
+            f"[✓] Compiled sharded PWA bundle: {metrics['size_bytes'] / (1024 * 1024):.2f} MB gzipped "
+            f"({metrics['raw_size_bytes'] / (1024 * 1024):.2f} MB raw)"
+        )
+        print(f"    - core.db.gz:            {manifest['core']['gz_bytes'] / (1024 * 1024):.2f} MB gz ({manifest['core']['raw_bytes'] / (1024 * 1024):.2f} MB raw)")
+        for s in manifest["talks"]:
+            print(f"    - {s['file']:22s} {s['gz_bytes'] / (1024 * 1024):.2f} MB gz ({s['raw_bytes'] / (1024 * 1024):.2f} MB raw, {s['episodes']:,} talks)")
+        for s in manifest["words"]:
+            print(f"    - {s['file']:22s} {s['gz_bytes'] / (1024 * 1024):.2f} MB gz ({s['raw_bytes'] / (1024 * 1024):.2f} MB raw, {s['episodes']:,} talks)")
+        print(f"    - Episodes indexed:      {metrics['episodes']:,} ({metrics['transcribed_episodes']:,} transcribed)")
+        print(f"    - Speech segments:       {metrics['segments']:,}")
+        print(f"    - Buddhist Pali terms:   {metrics['terms']:,}")
+        print(f"    - Word-synced talks:     {metrics.get('words', 0):,}")
 
     # 2. Ensure SQLite WASM engine assets exist
     ensure_wasm_assets(STATIC_SRC_DIR)
@@ -921,32 +983,40 @@ def export_static_site(output_dir: Path | str = DIST_DIR, show_progress: bool = 
 
 
 def _is_dist_stale(dist_path: Path) -> bool:
-    """Checks whether any source asset or database is newer than the built dist/index.html."""
+    """Checks whether any source asset or database is newer than its corresponding dist/ output."""
     index_out = dist_path / "index.html"
     manifest_out = dist_path / "db_manifest.json"
     if not index_out.exists() or not manifest_out.exists():
         return True
-    dist_mtime = min(index_out.stat().st_mtime, manifest_out.stat().st_mtime)
-    candidates = [
-        VIEWS_SRC_DIR / "index.html",
-        STATIC_SRC_DIR / "adapters" / "wasm_client.js",
+    index_mtime = index_out.stat().st_mtime
+    manifest_mtime = manifest_out.stat().st_mtime
+
+    db_candidates = [
         TRANSCRIPTS_DB_PATH,
         BUDDHISM_LEXICON_DB_PATH,
+    ]
+    for db_src in db_candidates:
+        if db_src.exists() and db_src.stat().st_mtime > manifest_mtime:
+            return True
+
+    static_candidates = [
+        VIEWS_SRC_DIR / "index.html",
+        STATIC_SRC_DIR / "adapters" / "wasm_client.js",
     ]
     if STATIC_SRC_DIR.exists():
         for src_p in STATIC_SRC_DIR.iterdir():
             # db_client.js is overwritten from adapters/wasm_client.js mid-build after db_manifest.json
             if src_p.is_file() and src_p.name != "db_client.js":
-                candidates.append(src_p)
+                static_candidates.append(src_p)
         for subdir_name in ("icons", "fonts"):
             sub_dir = STATIC_SRC_DIR / subdir_name
             if sub_dir.exists():
-                candidates.extend(p for p in sub_dir.iterdir() if p.is_file())
+                static_candidates.extend(p for p in sub_dir.iterdir() if p.is_file())
     sources_dir = PROJECT_ROOT / "databases" / "sources"
     if sources_dir.exists():
-        candidates.extend(p for p in sources_dir.iterdir() if p.is_file())
-    for src in candidates:
-        if src.exists() and src.stat().st_mtime > dist_mtime:
+        static_candidates.extend(p for p in sources_dir.iterdir() if p.is_file())
+    for src in static_candidates:
+        if src.exists() and src.stat().st_mtime > index_mtime:
             return True
     return False
 
@@ -1048,13 +1118,18 @@ class StaticPreviewHandler(http.server.SimpleHTTPRequestHandler):
         sys.stderr.write("%s - - [%s] %s\n" % (self.address_string(), self.log_date_time_string(), format % args))
 
 
-def run_web_preview(host: str = DEFAULT_WEB_HOST, port: str | int = DEFAULT_WEB_PORT, dist_dir: Path | str = DIST_DIR) -> None:
+def run_web_preview(
+    host: str = DEFAULT_WEB_HOST,
+    port: str | int = DEFAULT_WEB_PORT,
+    dist_dir: Path | str = DIST_DIR,
+    check_stale: bool = True,
+) -> None:
     """
     Serves the static distribution folder using pure Python standard library HTTP server
     with native HTTP Range request support for SQLite WASM.
     """
     dist_path = _resolve_repo_path(dist_dir)
-    if _is_dist_stale(dist_path):
+    if check_stale and _is_dist_stale(dist_path):
         print(f"[*] Rebuilding static bundle in '{dist_path}' to ensure latest assets...")
         export_static_site(dist_path)
 

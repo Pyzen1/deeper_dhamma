@@ -1122,8 +1122,34 @@
 }
 
 @media (max-width: 600px) {
+  .about-container {
+    gap: 1.75rem;
+    min-width: 0;
+  }
+  .about-hero {
+    padding: 1.5rem 1rem;
+  }
   .about-hero-title {
     font-size: 1.8rem;
+  }
+  .about-hero-lead {
+    font-size: 0.95rem;
+  }
+  .about-chip {
+    font-size: 0.76rem;
+    padding: 0.3rem 0.6rem;
+    max-width: 100%;
+  }
+  .about-section,
+  .about-card,
+  .arch-card {
+    min-width: 0;
+  }
+  .about-section-header {
+    gap: 0.65rem;
+  }
+  .about-section-title {
+    font-size: 1.2rem;
   }
   .about-dana-card {
     flex-direction: column;
@@ -1172,15 +1198,19 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 1rem;
-  overflow-x: auto;
+  overflow-x: hidden;
   margin: 0.25rem 0;
 }
 
 .notes-diagram-svg {
   display: block;
   width: 100%;
-  min-width: 620px;
+  min-width: 0;
   height: auto;
+}
+
+.notes-diagram-svg--mobile {
+  display: none;
 }
 
 .notes-table-wrap {
@@ -1234,4 +1264,80 @@
   font-weight: 700;
   color: var(--text-primary) !important;
   white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  .notes-diagram-svg--desktop {
+    display: none;
+  }
+  .notes-diagram-svg--mobile {
+    display: block;
+  }
+}
+
+@media (max-width: 600px) {
+  .notes-diagram-card {
+    padding: 0.65rem 0.5rem;
+  }
+  .notes-table-wrap {
+    overflow-x: visible;
+  }
+  .notes-table thead {
+    display: none;
+  }
+  .notes-table,
+  .notes-table tbody {
+    display: block;
+    width: 100%;
+  }
+  .notes-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.35rem 0.75rem;
+    padding: 0.85rem 0.9rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .notes-table tbody tr:last-child {
+    border-bottom: none;
+  }
+  .notes-table td {
+    padding: 0;
+    border-bottom: none;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .notes-table td:nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+  }
+  .notes-table td:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+    align-self: center;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    border-radius: var(--radius-full);
+    padding: 0.12rem 0.55rem;
+    font-size: 0.8rem;
+  }
+  .notes-table td:nth-child(3) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 380px) {
+  #notes-view .about-card {
+    padding: 0.95rem 0.75rem;
+  }
+  .notes-diagram-card {
+    padding: 0.45rem 0.35rem;
+  }
+  .notes-table tr {
+    padding: 0.75rem 0.7rem;
+  }
 }

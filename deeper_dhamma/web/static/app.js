@@ -723,8 +723,13 @@
       if (els.notesTblTranscribed && transcribedCount > 0) {
         els.notesTblTranscribed.textContent = transcribedFormatted;
       }
-      if (els.notesSvgTranscribed && transcribedCount > 0) {
-        els.notesSvgTranscribed.textContent = transcribedFormatted;
+      if (transcribedCount > 0) {
+        if (els.notesSvgTranscribed) {
+          els.notesSvgTranscribed.textContent = transcribedFormatted;
+        }
+        document.querySelectorAll('.notes-svg-transcribed-val').forEach((el) => {
+          el.textContent = transcribedFormatted;
+        });
       }
 
       // Populate multi-faceted Browse & Search filter UI

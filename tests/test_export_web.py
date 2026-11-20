@@ -800,9 +800,10 @@ def test_compile_sharded_static_databases_and_pwa_assets(tmp_path: Path, capsys)
     pwa_manifest = json.loads((static_dir / "manifest.json").read_text(encoding="utf-8"))
     sizes = {icon.get("sizes"): icon.get("src") for icon in pwa_manifest.get("icons", [])}
     assert "192x192" in sizes and "512x512" in sizes
-    assert (static_dir / "icons" / "icon_192.png").exists()
-    assert (static_dir / "icons" / "icon_512.png").exists()
-    assert (static_dir / "icons" / "apple_touch_icon.png").exists()
+    assert (static_dir / "icons" / "app_icon.svg").exists()
+    assert (static_dir / "icons" / "pwa_icon_192.png").exists()
+    assert (static_dir / "icons" / "pwa_icon_512.png").exists()
+    assert (static_dir / "icons" / "ios_apple_touch_icon.png").exists()
     sw_text = (static_dir / "svc_worker.js").read_text(encoding="utf-8")
     assert "timeoutMs = isFullDb ? 300000" in sw_text
 
@@ -1420,7 +1421,8 @@ def test_archive_notes_view_and_transcribed_only_ui_cleanup():
     notes_html = index_html.split('id="notes-view"')[1].split('id="transcript-view"')[0]
     assert "```mermaid" not in notes_html.lower()
     assert "notes-ascii-diagram" not in notes_html
-    assert 'class="notes-diagram-svg"' in notes_html
+    assert "notes-diagram-svg--desktop" in notes_html
+    assert "notes-diagram-svg--mobile" in notes_html
     assert "<svg" in notes_html
     for forbidden in (
         "pipeline_state.db",
@@ -2387,7 +2389,7 @@ def test_headless_chrome_small_screen_no_overflow():
                         if (cs.display === 'none' || cs.visibility === 'hidden') continue;
                         const rect = el.getBoundingClientRect();
                         if (rect.width === 0 || rect.height === 0) continue;
-                        if (el.closest('.notes-diagram-card, .notes-table-wrap, .doc-table-container')) continue;
+                        if (el.closest('.doc-table-container')) continue;
                         if (rect.right > docW + 1 || rect.left < -1) {
                           overflowEls.push({
                             tag: el.tagName.toLowerCase(),
@@ -2416,6 +2418,20 @@ def test_headless_chrome_small_screen_no_overflow():
                         extra.rangeBtnHeight = rangeBtn ? Math.round(rangeBtn.getBoundingClientRect().height) : 0;
                         extra.sortInsideWrapper = Boolean(wrap && sortSel && sortSel.getBoundingClientRect().right <= wrap.getBoundingClientRect().right + 1);
                         extra.resetInsideWrapper = Boolean(wrap && resetBtn && resetBtn.getBoundingClientRect().right <= wrap.getBoundingClientRect().right + 1);
+                      }
+                      if (label === 'notes_view') {
+                        const deskSvg = doc.querySelector('.notes-diagram-svg--desktop');
+                        const mobSvg = doc.querySelector('.notes-diagram-svg--mobile');
+                        const theadEl = doc.querySelector('#notes-view .notes-table thead');
+                        const deskDisp = deskSvg ? win.getComputedStyle(deskSvg).display : 'none';
+                        const mobDisp = mobSvg ? win.getComputedStyle(mobSvg).display : 'none';
+                        const theadDisp = theadEl ? win.getComputedStyle(theadEl).display : '';
+                        extra.diagramResponsiveOk = vw <= 680
+                          ? (deskDisp === 'none' && mobDisp !== 'none')
+                          : (deskDisp !== 'none' && mobDisp === 'none');
+                        extra.tableResponsiveOk = vw <= 600
+                          ? (theadDisp === 'none')
+                          : (theadDisp !== 'none');
                       }
                       if (label === 'transcript_view') {
                         const comp = doc.getElementById('transcript-lexicon-companion');
@@ -2733,6 +2749,9 @@ def test_headless_chrome_small_screen_no_overflow():
                     assert st["extra"]["rangeBtnHeight"] <= 36, f"Date Range button wrapped onto multiple lines at {vw}px: {st['extra']}"
                     assert st["extra"]["sortInsideWrapper"] is True, f"Sort select escaped wrapper at {vw}px"
                     assert st["extra"]["resetInsideWrapper"] is True, f"Reset button escaped wrapper at {vw}px"
+                if st["label"] == "notes_view":
+                    assert st["extra"]["diagramResponsiveOk"] is True, f"Archive Notes diagram did not switch for {vw}px: {st['extra']}"
+                    assert st["extra"]["tableResponsiveOk"] is True, f"Archive Notes table did not adapt for {vw}px: {st['extra']}"
                 if st["label"] == "transcript_view":
                     assert st["extra"]["toolbarIsAsideTopDocked"] is True, f"Toolbar aside not top-docked cleanly at {vw}px: {st['extra']}"
                     assert st["extra"]["toolbarClearedHeader"] is True, f"Fixed top toolbar covered transcript header at {vw}px: {st['extra']}"
@@ -3407,4 +3426,67 @@ def test_deploy_to_github_pages_excludes_staging_raw_db_and_crlf_warnings(tmp_pa
             branch="gh-pages",
             repo_root=repo_dir,
         )
+
+
+def test_export_static_site_static_only_preserves_db_and_updates_assets(tmp_path, monkeypatch):
+    """Verifies static_only=True skips DB compilation, preserves existing shards, and updates static assets."""
+    import json
+    from deeper_dhamma.export_web import _is_dist_stale, export_static_site
+
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+
+    manifest = {
+        "format": "sharded_v1",
+        "version": 1700000000,
+        "core": {"id": "core", "file": "core.db.gz"},
+        "talks": [{"id": 1, "file": "talks_1.db.gz"}],
+        "words": [{"id": 1, "file": "words_1.db.gz"}],
+        "episodes": 4242,
+    }
+    manifest_bytes = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+    (dist_dir / "db_manifest.json").write_bytes(manifest_bytes)
+    (dist_dir / "core.db.gz").write_bytes(b"core-shard-bytes")
+    (dist_dir / "talks_1.db.gz").write_bytes(b"talks-shard-bytes")
+    (dist_dir / "words_1.db.gz").write_bytes(b"words-shard-bytes")
+    (dist_dir / "stale_old_asset.txt").write_text("remove me", encoding="utf-8")
+
+    def fail_compile(*_args, **_kwargs):
+        raise AssertionError("compile_sharded_static_databases must not be called when static_only=True")
+
+    monkeypatch.setattr("deeper_dhamma.export_web.compile_sharded_static_databases", fail_compile)
+    monkeypatch.setattr("deeper_dhamma.export_web.ensure_wasm_assets", lambda _p: None)
+
+    result_path = export_static_site(output_dir=dist_dir, static_only=True)
+    assert result_path == dist_dir.resolve()
+
+    # Existing DB bundle is untouched
+    assert (dist_dir / "db_manifest.json").read_bytes() == manifest_bytes
+    assert (dist_dir / "core.db.gz").read_bytes() == b"core-shard-bytes"
+    assert (dist_dir / "talks_1.db.gz").read_bytes() == b"talks-shard-bytes"
+    assert (dist_dir / "words_1.db.gz").read_bytes() == b"words-shard-bytes"
+
+    # Obsolete non-bundle file is pruned, static assets and rendered HTML/SW are updated
+    assert not (dist_dir / "stale_old_asset.txt").exists()
+    index_html = (dist_dir / "index.html").read_text(encoding="utf-8")
+    assert "{{db_version}}" not in index_html
+    assert "{{total_episodes}}" not in index_html
+    assert "__DEEPER_DHAMMA_VERSION__" in index_html
+    assert (dist_dir / "404.html").read_text(encoding="utf-8") == index_html
+    sw_js = (dist_dir / "svc_worker.js").read_text(encoding="utf-8")
+    assert "{{db_version}}" not in sw_js
+    assert (dist_dir / "icons").is_dir()
+
+    # With up-to-date DBs, _is_dist_stale should be False after static_only build
+    monkeypatch.setattr("deeper_dhamma.export_web.TRANSCRIPTS_DB_PATH", tmp_path / "missing_t.db")
+    monkeypatch.setattr("deeper_dhamma.export_web.BUDDHISM_LEXICON_DB_PATH", tmp_path / "missing_l.db")
+    assert _is_dist_stale(dist_dir) is False
+
+
+def test_export_static_site_static_only_requires_existing_bundle(tmp_path):
+    """Verifies static_only=True fails clearly when db_manifest.json or shards are missing."""
+    from deeper_dhamma.export_web import export_static_site
+
+    with pytest.raises(FileNotFoundError, match="web --build"):
+        export_static_site(output_dir=tmp_path, static_only=True)
 

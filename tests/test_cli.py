@@ -465,3 +465,34 @@ def test_cmd_transcribe_skips_excluded_and_reports_newly_excluded(tmp_path):
     assert "new_chant.mp3" in str(mock_pipeline.process_file.call_args.kwargs["audio_path"])
     assert "0 successful, 1 excluded, 0 failed" in mock_out.getvalue()
     mock_export.assert_called_once()
+
+
+def test_cli_web_build_static_routing_and_execution(tmp_path):
+    """Verifies --build-static routes to static_only=True and skips stale check on --run."""
+    with patch("deeper_dhamma.cli.cmd_web") as mock_web:
+        main(["web", "--build-static", "--output-dir", str(tmp_path)])
+        mock_web.assert_called_once()
+        args = mock_web.call_args[0][0]
+        assert args.build_static is True
+        assert args.build is False
+
+    with patch("deeper_dhamma.export_web.export_static_site") as mock_export, \
+         patch("deeper_dhamma.export_web.run_web_preview") as mock_preview:
+        main(["web", "--build-static", "--output-dir", str(tmp_path)])
+        mock_export.assert_called_once_with(output_dir=str(tmp_path), static_only=True)
+        mock_preview.assert_not_called()
+
+    with patch("deeper_dhamma.export_web.export_static_site") as mock_export, \
+         patch("deeper_dhamma.export_web.run_web_preview") as mock_preview:
+        main(["web", "--build-static", "--run", "--output-dir", str(tmp_path), "--port", "8123"])
+        mock_export.assert_called_once_with(output_dir=str(tmp_path), static_only=True)
+        mock_preview.assert_called_once_with(
+            host="127.0.0.1",
+            port=8123,
+            dist_dir=str(tmp_path),
+            check_stale=False,
+        )
+
+    with patch("deeper_dhamma.export_web.export_static_site") as mock_export:
+        main(["web", "--build", "--build-static", "--output-dir", str(tmp_path)])
+        mock_export.assert_called_once_with(output_dir=str(tmp_path))

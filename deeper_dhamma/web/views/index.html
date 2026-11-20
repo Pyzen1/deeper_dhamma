@@ -15,8 +15,8 @@
   <link rel="canonical" href="https://deeperdhamma.com/">
   <meta name="theme-color" content="#0b1120">
   <link rel="manifest" href="/static/manifest.json">
-  <link rel="apple-touch-icon" href="/static/icons/apple_touch_icon.png">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1120'/%3E%3Ctext x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-size='40' fill='%23f59e0b'%3E%E2%98%B8%3C/text%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="/static/icons/ios_apple_touch_icon.png">
+  <link rel="icon" type="image/svg+xml" href="/static/icons/app_icon.svg?v={{db_version}}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
@@ -34,7 +34,7 @@
   <aside class="app-sidebar" id="app-sidebar">
     <div class="sidebar-top">
       <div class="sidebar-brand">
-        <div class="brand-symbol" aria-hidden="true">☸</div>
+        <div class="brand-symbol" aria-hidden="true"><img src="/static/icons/app_icon.svg?v={{db_version}}" alt=""></div>
         <div class="brand-text">
           <h1 class="brand-title" id="site-title">Deeper Dhamma</h1>
           <span class="brand-subtitle">BSWA Audio Archive</span>
@@ -50,7 +50,7 @@
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-browse-btn" data-tab="browse-view">
           <span class="nav-icon material-symbols-outlined" aria-hidden="true">library_music</span>
-          <span class="nav-label">Browse Talks</span>
+          <span class="nav-label">Archive</span>
           <span class="badge" id="browse-count-badge">0</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-bookmarks-btn" data-tab="bookmarks-view">
@@ -76,7 +76,7 @@
           <span class="nav-label">Archive Notes</span>
         </button>
         <button type="button" class="tab-btn sidebar-nav-item" id="tab-transcript-btn" data-tab="transcript-view" style="display: none;">
-          <span class="nav-icon material-symbols-outlined" aria-hidden="true">subtitles</span>
+          <span class="nav-icon material-symbols-outlined" aria-hidden="true">article</span>
           <span class="nav-label">Transcript</span>
         </button>
       </nav>
@@ -92,6 +92,9 @@
         <span><kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd> Search</span>
         <span><kbd>Space</kbd> Play / Pause</span>
         <span><kbd>J</kbd> / <kbd>L</kbd> &plusmn;15s</span>
+      </div>
+      <div class="sidebar-copyright">
+        &copy; 2026 Deeper Dhamma &bull; Audio &copy; BSWA
       </div>
     </div>
   </aside>
@@ -471,7 +474,9 @@
 
         <!-- Initial Placeholder State -->
         <div class="empty-state" id="search-empty-state">
-          <div class="empty-icon material-symbols-outlined" aria-hidden="true">spa</div>
+          <div class="empty-icon empty-icon-art" aria-hidden="true">
+            <img src="/static/icons/lotus_pink.svg?v={{db_version}}" alt="">
+          </div>
           <h2 id="search-empty-heading">Search 2,971 English Theravada Teachings</h2>
           <p>Instant zero-copy search across high-accuracy Whisper transcripts. Click any speech segment to stream directly from Podbean at that precise second.</p>
           <div class="example-chips" id="example-queries">
@@ -503,8 +508,15 @@
       <div class="view-panel" id="browse-view">
         <div class="browse-header">
           <div class="browse-header-info">
-            <h2>Archive Catalog</h2>
-            <p class="section-desc">Browse all transcribed talks and retreats with word-synced transcripts and direct Podbean CDN audio streaming.</p>
+            <div class="view-title-with-art">
+              <div class="view-title-art" aria-hidden="true">
+                <img src="/static/icons/view_browse.svg?v={{db_version}}" alt="">
+              </div>
+              <div class="view-title-text">
+                <h2>Archive Catalog</h2>
+                <p class="section-desc">Browse all transcribed talks and retreats with word-synced transcripts and direct Podbean CDN audio streaming.</p>
+              </div>
+            </div>
           </div>
           <div class="browse-header-actions">
             <div class="download-dropdown-wrapper" id="browse-filtered-archive-dropdown-wrapper">
@@ -784,8 +796,15 @@
       <div class="view-panel" id="bookmarks-view">
         <div class="bookmarks-header">
           <div class="bookmarks-header-info">
-            <h2>Bookmarked Talks</h2>
-            <p class="section-desc">Quickly access, organize, and reorder your saved talks for fast offline recall.</p>
+            <div class="view-title-with-art">
+              <div class="view-title-art" aria-hidden="true">
+                <img src="/static/icons/view_bookmarks.svg?v={{db_version}}" alt="">
+              </div>
+              <div class="view-title-text">
+                <h2>Bookmarked Talks</h2>
+                <p class="section-desc">Quickly access, organize, and reorder your saved talks for fast offline recall.</p>
+              </div>
+            </div>
           </div>
           <div class="bookmarks-actions-bar">
             <button type="button" class="btn-secondary" id="btn-clear-bookmarks" style="display: none;" title="Remove all saved bookmarks">
@@ -811,8 +830,15 @@
       <!-- 3. Pali Lexicon View -->
       <div class="view-panel" id="lexicon-view">
         <div class="lexicon-header">
-          <h2>Buddhism Doctrinal Reference Lexicon</h2>
-          <p class="section-desc">Canonical Pali terminology and pronunciation definitions curated from SuttaCentral and BSWA retreat teachers.</p>
+          <div class="view-title-with-art">
+            <div class="view-title-art" aria-hidden="true">
+              <img src="/static/icons/view_lexicon.svg?v={{db_version}}" alt="">
+            </div>
+            <div class="view-title-text">
+              <h2>Buddhism Doctrinal Reference Lexicon</h2>
+              <p class="section-desc">Canonical Pali terminology and pronunciation definitions curated from SuttaCentral and BSWA retreat teachers.</p>
+            </div>
+          </div>
           <div class="lexicon-search-bar">
             <input type="search" id="lexicon-search-input" placeholder="Look up Pali or English term (e.g. samadhi, kamma, nibbidā)..." autocomplete="off">
           </div>
@@ -907,8 +933,15 @@
       <div class="view-panel" id="documents-view">
         <div class="documents-header">
           <div class="documents-header-info">
-            <h2>Canonical Authority Source Documents</h2>
-            <p class="section-desc">Offline, bitstream-verified reference texts, glossaries, and Vinaya treatises stored directly in SQLite.</p>
+            <div class="view-title-with-art">
+              <div class="view-title-art" aria-hidden="true">
+                <img src="/static/icons/view_documents.svg?v={{db_version}}" alt="">
+              </div>
+              <div class="view-title-text">
+                <h2>Canonical Authority Source Documents</h2>
+                <p class="section-desc">Offline, bitstream-verified reference texts, glossaries, and Vinaya treatises stored directly in SQLite.</p>
+              </div>
+            </div>
           </div>
 
           <!-- Document Selection Tabs Bar -->
@@ -1396,6 +1429,10 @@
               </div>
             </div>
           </section>
+
+          <footer class="about-copyright-footer">
+            <p>&copy; 2026 Deeper Dhamma. All rights reserved. Audio teachings &copy; Buddhist Society of Western Australia (BSWA). Offered freely for non-commercial Dhamma study.</p>
+          </footer>
         </div>
       </div>
 
@@ -1432,7 +1469,7 @@
                 Every transcribable English talk preserved in the local audio archive (<strong>2,971 out of 2,971 talks</strong>, spanning 1994–2026) has been transcribed. The difference between the <strong>3,323</strong> total entries on the BSWA Podbean podcast feed and the <strong>2,971</strong> searchable talks comes from non-English retreats, one unavailable recording, duplicate podcast posts, and untranscribable chanting tracks:
               </p>
               <div class="notes-diagram-card">
-                <svg class="notes-diagram-svg" viewBox="0 0 900 560" role="img" aria-label="Catalog reconciliation diagram from 3,323 Podbean feed entries to 2,971 transcribed talks" xmlns="http://www.w3.org/2000/svg">
+                <svg class="notes-diagram-svg notes-diagram-svg--desktop" viewBox="0 0 900 560" role="img" aria-label="Catalog reconciliation diagram from 3,323 Podbean feed entries to 2,971 transcribed talks" xmlns="http://www.w3.org/2000/svg">
                   <defs>
                     <linearGradient id="notesStageGrad" x1="0" y1="0" x2="1" y2="1">
                       <stop offset="0%" stop-color="#172238" />
@@ -1513,11 +1550,103 @@
                   <text x="40" y="463" fill="#f8fafc" font-size="15" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">Complete Transcribed Library</text>
                   <text x="40" y="484" fill="#cbd5e1" font-size="12" font-family="Plus Jakarta Sans, system-ui, sans-serif">100% of transcribable talks indexed (1994–2026)</text>
                   <rect x="374" y="451" width="82" height="34" rx="17" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1.3" />
-                  <text id="notes-svg-transcribed" x="415" y="468" text-anchor="middle" dominant-baseline="central" fill="#34d399" font-size="15" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">2,971</text>
+                  <text id="notes-svg-transcribed" class="notes-svg-transcribed-val" x="415" y="468" text-anchor="middle" dominant-baseline="central" fill="#34d399" font-size="15" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">2,971</text>
 
                   <!-- Summary Strip inside Stage 4 -->
                   <rect x="40" y="499" width="416" height="29" rx="8" fill="rgba(16,185,129,0.1)" stroke="rgba(16,185,129,0.3)" stroke-width="1" />
                   <text x="248" y="513.5" text-anchor="middle" dominant-baseline="central" fill="#34d399" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">177,279 Spoken Turns · Word-Synced Playback · 3,352.6 hrs</text>
+                </svg>
+
+                <svg class="notes-diagram-svg notes-diagram-svg--mobile" viewBox="0 0 360 796" role="img" aria-label="Catalog reconciliation diagram from 3,323 Podbean feed entries to 2,971 transcribed talks" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="notesStageGradMobile" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stop-color="#172238" />
+                      <stop offset="100%" stop-color="#11192b" />
+                    </linearGradient>
+                    <linearGradient id="notesFinalGradMobile" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stop-color="#112826" />
+                      <stop offset="100%" stop-color="#0f1c29" />
+                    </linearGradient>
+                    <linearGradient id="notesBranchGradMobile" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stop-color="#161f33" />
+                      <stop offset="100%" stop-color="#111827" />
+                    </linearGradient>
+                  </defs>
+
+                  <!-- Stage 1: Raw Catalog -->
+                  <rect x="8" y="12" width="344" height="68" rx="12" fill="url(#notesStageGradMobile)" stroke="rgba(148,163,184,0.28)" stroke-width="1.2" />
+                  <text x="22" y="37" fill="#f8fafc" font-size="14" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">BSWA Podbean Podcast Feed</text>
+                  <text x="22" y="58" fill="#94a3b8" font-size="11.5" font-family="Plus Jakarta Sans, system-ui, sans-serif">All published episodes on the feed</text>
+                  <rect x="268" y="29" width="72" height="30" rx="15" fill="rgba(245,158,11,0.14)" stroke="rgba(245,158,11,0.45)" stroke-width="1.2" />
+                  <text x="304" y="44" text-anchor="middle" dominant-baseline="central" fill="#fbbf24" font-size="14" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">3,323</text>
+
+                  <!-- Connector 1 -> Exclusion 1 (-72) -->
+                  <line x1="180" y1="80" x2="180" y2="99" stroke="#f59e0b" stroke-width="2" />
+                  <polygon points="175,97 185,97 180,105" fill="#f59e0b" />
+                  <rect x="20" y="106" width="320" height="58" rx="10" fill="url(#notesBranchGradMobile)" stroke="rgba(244,63,94,0.34)" stroke-width="1.1" />
+                  <rect x="32" y="122" width="42" height="24" rx="6" fill="rgba(244,63,94,0.15)" stroke="rgba(244,63,94,0.4)" stroke-width="1" />
+                  <text x="53" y="134" text-anchor="middle" dominant-baseline="central" fill="#fda4af" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">-72</text>
+                  <text x="84" y="129" fill="#f8fafc" font-size="12.5" font-weight="600" font-family="Plus Jakarta Sans, system-ui, sans-serif">Non-English Talks Excluded</text>
+                  <text x="84" y="148" fill="#94a3b8" font-size="11" font-family="Plus Jakarta Sans, system-ui, sans-serif">13 Thai retreats · 59 Sinhalese</text>
+
+                  <!-- Connector 1b -> Stage 2 -->
+                  <line x1="180" y1="164" x2="180" y2="183" stroke="#f59e0b" stroke-width="2" />
+                  <polygon points="175,181 185,181 180,189" fill="#f59e0b" />
+
+                  <!-- Stage 2: English In-Scope -->
+                  <rect x="8" y="190" width="344" height="68" rx="12" fill="url(#notesStageGradMobile)" stroke="rgba(148,163,184,0.28)" stroke-width="1.2" />
+                  <text x="22" y="215" fill="#f8fafc" font-size="14" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">English Talks in Scope</text>
+                  <text x="22" y="236" fill="#94a3b8" font-size="11.5" font-family="Plus Jakarta Sans, system-ui, sans-serif">Focused on English-language teachings</text>
+                  <rect x="268" y="207" width="72" height="30" rx="15" fill="rgba(245,158,11,0.14)" stroke="rgba(245,158,11,0.45)" stroke-width="1.2" />
+                  <text x="304" y="222" text-anchor="middle" dominant-baseline="central" fill="#fbbf24" font-size="14" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">3,251</text>
+
+                  <!-- Connector 2 -> Exclusion 2 (-1) -->
+                  <line x1="180" y1="258" x2="180" y2="277" stroke="#f59e0b" stroke-width="2" />
+                  <polygon points="175,275 185,275 180,283" fill="#f59e0b" />
+                  <rect x="20" y="284" width="320" height="58" rx="10" fill="url(#notesBranchGradMobile)" stroke="rgba(244,63,94,0.34)" stroke-width="1.1" />
+                  <rect x="32" y="300" width="42" height="24" rx="6" fill="rgba(244,63,94,0.15)" stroke="rgba(244,63,94,0.4)" stroke-width="1" />
+                  <text x="53" y="312" text-anchor="middle" dominant-baseline="central" fill="#fda4af" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">-1</text>
+                  <text x="84" y="307" fill="#f8fafc" font-size="12.5" font-weight="600" font-family="Plus Jakarta Sans, system-ui, sans-serif">Removed from Podcast Host</text>
+                  <text x="84" y="326" fill="#94a3b8" font-size="11" font-family="Plus Jakarta Sans, system-ui, sans-serif">2016 Mar Weekend Retreat (unavailable)</text>
+
+                  <!-- Connector 2b -> Stage 3 -->
+                  <line x1="180" y1="342" x2="180" y2="361" stroke="#f59e0b" stroke-width="2" />
+                  <polygon points="175,359 185,359 180,367" fill="#f59e0b" />
+
+                  <!-- Stage 3: Indexed Episodes -->
+                  <rect x="8" y="368" width="344" height="68" rx="12" fill="url(#notesStageGradMobile)" stroke="rgba(148,163,184,0.28)" stroke-width="1.2" />
+                  <text x="22" y="393" fill="#f8fafc" font-size="14" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">Active English Feed Entries</text>
+                  <text x="22" y="414" fill="#94a3b8" font-size="11.5" font-family="Plus Jakarta Sans, system-ui, sans-serif">Playable listings on the podcast catalog</text>
+                  <rect x="268" y="385" width="72" height="30" rx="15" fill="rgba(245,158,11,0.14)" stroke="rgba(245,158,11,0.45)" stroke-width="1.2" />
+                  <text x="304" y="400" text-anchor="middle" dominant-baseline="central" fill="#fbbf24" font-size="14" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">3,250</text>
+
+                  <!-- Connector 3 -> Exclusion 3 (-279) -->
+                  <line x1="180" y1="436" x2="180" y2="455" stroke="#f59e0b" stroke-width="2" />
+                  <polygon points="175,453 185,453 180,461" fill="#f59e0b" />
+                  <rect x="20" y="462" width="320" height="144" rx="10" fill="url(#notesBranchGradMobile)" stroke="rgba(245,158,11,0.34)" stroke-width="1.1" />
+                  <rect x="32" y="474" width="46" height="24" rx="6" fill="rgba(245,158,11,0.16)" stroke="rgba(245,158,11,0.42)" stroke-width="1" />
+                  <text x="55" y="486" text-anchor="middle" dominant-baseline="central" fill="#fbbf24" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">-279</text>
+                  <text x="88" y="486" dominant-baseline="central" fill="#f8fafc" font-size="12.5" font-weight="600" font-family="Plus Jakarta Sans, system-ui, sans-serif">Duplicates &amp; Excluded Chanting</text>
+                  <text x="32" y="518" fill="#cbd5e1" font-size="11.2" font-family="Plus Jakarta Sans, system-ui, sans-serif">• 272 duplicate links to the same audio</text>
+                  <text x="32" y="538" fill="#cbd5e1" font-size="11.2" font-family="Plus Jakarta Sans, system-ui, sans-serif">• 4 re-uploaded copies of talks</text>
+                  <text x="32" y="558" fill="#cbd5e1" font-size="11.2" font-family="Plus Jakarta Sans, system-ui, sans-serif">• 2 chanting tracks not in archive</text>
+                  <text x="32" y="578" fill="#cbd5e1" font-size="11.2" font-family="Plus Jakarta Sans, system-ui, sans-serif">• 1 group chanting (no spoken speech)</text>
+
+                  <!-- Connector 3b -> Stage 4 -->
+                  <line x1="180" y1="606" x2="180" y2="626" stroke="#f59e0b" stroke-width="2" />
+                  <polygon points="175,624 185,624 180,632" fill="#f59e0b" />
+
+                  <!-- Stage 4: Canonical Transcribed Library -->
+                  <rect x="8" y="634" width="344" height="148" rx="14" fill="url(#notesFinalGradMobile)" stroke="#10b981" stroke-width="1.6" />
+                  <text x="22" y="661" fill="#f8fafc" font-size="14.5" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">Complete Transcribed Library</text>
+                  <text x="22" y="682" fill="#cbd5e1" font-size="11.5" font-family="Plus Jakarta Sans, system-ui, sans-serif">100% of transcribable talks (1994–2026)</text>
+                  <rect x="268" y="648" width="72" height="30" rx="15" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1.3" />
+                  <text class="notes-svg-transcribed-val" x="304" y="663" text-anchor="middle" dominant-baseline="central" fill="#34d399" font-size="14.5" font-weight="800" font-family="Plus Jakarta Sans, system-ui, sans-serif" style="font-variant-numeric: tabular-nums;">2,971</text>
+
+                  <!-- Summary Strip inside Stage 4 -->
+                  <rect x="20" y="700" width="320" height="66" rx="8" fill="rgba(16,185,129,0.1)" stroke="rgba(16,185,129,0.3)" stroke-width="1" />
+                  <text x="180" y="722" text-anchor="middle" dominant-baseline="central" fill="#34d399" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">177,279 Spoken Turns</text>
+                  <text x="180" y="746" text-anchor="middle" dominant-baseline="central" fill="#34d399" font-size="12" font-weight="700" font-family="Plus Jakarta Sans, system-ui, sans-serif">Word-Synced Playback · 3,352.6 hrs</text>
                 </svg>
               </div>
 
@@ -1835,7 +1964,9 @@
             <!-- Scrollable List of Definitions (Chronological Rolling 5-Term Window) -->
             <div class="lexicon-stack-container" id="transcript-lexicon-stack">
               <div class="lex-stack-empty" id="lex-stack-empty">
-                <div class="empty-icon material-symbols-outlined" aria-hidden="true">spa</div>
+                <div class="empty-icon empty-icon-art empty-icon-art--compact" aria-hidden="true">
+                  <img src="/static/icons/lotus_pink.svg?v={{db_version}}" alt="">
+                </div>
                 <h4>Lexicon Companion</h4>
                 <p>Pali and Buddhist doctrinal terms spoken in this talk appear chronologically here.</p>
                 <p class="empty-hint">Click any term in this list to seek audio to that word, or tap highlighted terms in the transcript.</p>

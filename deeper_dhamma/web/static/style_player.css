@@ -592,7 +592,7 @@
 
 .time-label {
   font-size: 0.72rem;
-  color: var(--text-muted);
+  color: #cbd5e1;
   min-width: 34px;
   font-variant-numeric: tabular-nums;
 }
